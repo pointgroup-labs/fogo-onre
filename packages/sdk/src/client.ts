@@ -483,13 +483,21 @@ export class RelayerClient {
       { pubkey: params.ntt.custody, isSigner: false, isWritable: true },
     ]
 
+    // Each NTT CPI's account_infos slice must contain the NTT program's
+    // own AccountInfo so the Solana runtime can resolve the invoke target
+    // on strict-mode validators (litesvm is permissive without it; mainnet
+    // Agave is not). Append NTT_PROGRAM_ID to BOTH the redeem slice and
+    // the release slice so each `invoke_signed` call sees it after the
+    // handler's `split_at(redeemAccountsLen)`.
+    const nttProgramMeta = { pubkey: NTT_PROGRAM_ID, isSigner: false, isWritable: false }
     return {
       remainingAccounts: [
         ...redeem,
+        nttProgramMeta,
         ...release,
-        { pubkey: NTT_PROGRAM_ID, isSigner: false, isWritable: false },
+        nttProgramMeta,
       ],
-      redeemAccountsLen: redeem.length,
+      redeemAccountsLen: redeem.length + 1,
     }
   }
 
