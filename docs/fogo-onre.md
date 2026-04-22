@@ -1,8 +1,8 @@
-# RWA Vault on FOGO
+# OnRe Vault on FOGO
 
 ## Overview
 
-The RWA Vault lets users on FOGO deposit USDC.s and earn yield from OnRe's tokenized reinsurance product (ONyc) on Solana.
+The OnRe Vault lets users on FOGO deposit USDC.s and earn yield from OnRe's tokenized reinsurance product (ONyc) on Solana.
 Users receive a share token (wONyc) representing their proportional claim on the vault's total assets. They never interact with Solana, bridges, or OnRe directly.
 
 ### Tokens
@@ -21,7 +21,7 @@ wONyc (share token) and bONyc (bridged ONyc backing) are separate mints. The vau
 
 Two custom programs:
 
-- **RWA Vault Program** (FOGO) — user-facing vault that holds USDC.s reserve and bONyc backing, mints/burns wONyc share tokens
+- **OnRe Vault Program** (FOGO) — user-facing vault that holds USDC.s reserve and bONyc backing, mints/burns wONyc share tokens
 - **Relayer Program** (Solana) — immutable, PDA-custody program that relays tokens between Wormhole Gateway, OnRe, and Wormhole NTT
 
 Three existing Wormhole products:
@@ -36,7 +36,7 @@ Three existing Wormhole products:
 FOGO                                    Solana
 +--------------------------+           +------------------------+
 |                          |           |                        |
-|  RWA Vault Program       |           |  Relayer Program       |
+|  OnRe Vault Program      |           |  Relayer Program       |
 |                          |           |  (immutable, no admin) |
 |  PDA accounts:           | Gateway   |                        |
 |  +- USDC.s reserve       |<==(USDC)==>  PDA accounts:         |
@@ -63,7 +63,7 @@ FOGO                                    Solana
 
 | Component           | Chain           | Role                                                                                          |
 | ------------------- | --------------- | --------------------------------------------------------------------------------------------- |
-| RWA Vault Program   | FOGO            | User-facing vault: deposit/withdraw USDC.s, mint/burn wONyc, hold reserve + bONyc backing     |
+| OnRe Vault Program  | FOGO            | User-facing vault: deposit/withdraw USDC.s, mint/burn wONyc, hold reserve + bONyc backing     |
 | Relayer Program     | Solana          | CPI relayer: Gateway -> OnRe -> NTT. Immutable, no admin, PDA custody, hardcoded destinations |
 | Wormhole Gateway    | FOGO <-> Solana | Bridges USDC.s to USDC and back                                                               |
 | Wormhole NTT        | FOGO <-> Solana | Bridges ONyc (locked on Solana) to bONyc (minted on FOGO) and back                            |
@@ -292,7 +292,7 @@ The system **degrades gracefully**. Each external failure reduces functionality 
 
 ### State Accounts
 
-**Vault (PDA, seeds: `["rwa_vault", authority, share_mint]`)**
+**Vault (PDA, seeds: `["onre_vault", authority, share_mint]`)**
 
 ```
 authority: Pubkey           // governance multisig

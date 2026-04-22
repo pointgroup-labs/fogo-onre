@@ -4,7 +4,7 @@
     "name": "relayer",
     "version": "0.1.0",
     "spec": "0.1.0",
-    "description": "Fogo RWA relayer — stateless PDA-custody relay between Wormhole Gateway, OnRe, and Wormhole NTT on Solana"
+    "description": "Fogo OnRe relayer — stateless PDA-custody relay between Wormhole Gateway, OnRe, and Wormhole NTT on Solana"
   },
   "docs": [
     "Stateless cross-chain relayer between FOGO and Solana (Phase 1 — no",

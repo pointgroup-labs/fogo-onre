@@ -1,7 +1,7 @@
 [package]
 name = "fogo-relayer"
 version = "0.1.0"
-description = "Fogo RWA relayer — stateless PDA-custody relay between Wormhole Gateway, OnRe, and Wormhole NTT on Solana"
+description = "Fogo OnRe relayer — stateless PDA-custody relay between Wormhole Gateway, OnRe, and Wormhole NTT on Solana"
 edition = { workspace = true }
 
 [lib]
