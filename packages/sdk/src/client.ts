@@ -138,22 +138,6 @@ export class RelayerClient {
       } as any)
   }
 
-  /** Cancel a stuck flow PDA. Authority-only. */
-  cancelFlow(params: {
-    authority: PublicKey
-    flow: PublicKey
-    rentDestination: PublicKey
-  }) {
-    return (this.program.methods as any)
-      .cancelFlow()
-      .accounts({
-        authority: params.authority,
-        relayerConfig: this.configPda,
-        flow: params.flow,
-        rentDestination: params.rentDestination,
-      } as any)
-  }
-
   // -------------------------------------------------------------------------
   // Deposit flow (USDC → ONyc → bONyc back to FOGO)
   // -------------------------------------------------------------------------

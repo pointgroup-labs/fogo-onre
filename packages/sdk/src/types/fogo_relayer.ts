@@ -487,52 +487,6 @@ export type Relayer = {
       args: []
     },
     {
-      name: 'cancel_flow'
-      docs: [
-        'Authority-only escape hatch to close a stuck flow PDA and return',
-        'rent to the original payer.',
-      ]
-      discriminator: [
-        79,
-        181,
-        192,
-        35,
-        231,
-        182,
-        150,
-        225,
-      ]
-      accounts: [
-        {
-          name: 'authority'
-          docs: [
-            'Must be the config authority.',
-          ]
-          signer: true
-        },
-        {
-          name: 'relayer_config'
-        },
-        {
-          name: 'flow'
-          docs: [
-            'The stuck flow PDA to close. Can be either inbound or outbound \u2014',
-            'the caller must pass the correct PDA address (Anchor validates the',
-            'account discriminator).',
-          ]
-          writable: true
-        },
-        {
-          name: 'rent_destination'
-          docs: [
-            'The original payer who created this flow PDA. Receives the rent refund.',
-          ]
-          writable: true
-        },
-      ]
-      args: []
-    },
-    {
       name: 'update_fees'
       docs: [
         'Update the flat fee amounts for deposit and withdrawal flows.',

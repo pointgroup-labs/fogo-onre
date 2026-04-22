@@ -82,12 +82,6 @@ pub mod relayer {
 
     // ── Admin ───────────────────────────────────────────────────────────
 
-    /// Authority-only escape hatch to close a stuck flow PDA and return
-    /// rent to the original payer.
-    pub fn cancel_flow(ctx: Context<CancelFlow>) -> Result<()> {
-        instructions::cancel_flow::handler(ctx)
-    }
-
     /// Update the deposit and withdrawal fee basis points. Authority-only.
     pub fn update_fees(ctx: Context<UpdateFees>, deposit_fee_bps: u16, withdraw_fee_bps: u16) -> Result<()> {
         instructions::update_fees::handler(ctx, deposit_fee_bps, withdraw_fee_bps)

@@ -1,4 +1,3 @@
-pub mod cancel_flow;
 pub mod claim_usdc;
 pub mod initialize;
 pub mod lock_onyc;
@@ -11,8 +10,6 @@ pub mod withdraw_fees;
 
 // Re-export Accounts structs and their auto-generated sibling modules
 // so the `#[program]` macro can find them at `crate::`.
-#[allow(ambiguous_glob_reexports)]
-pub use cancel_flow::*;
 #[allow(ambiguous_glob_reexports)]
 pub use claim_usdc::*;
 #[allow(ambiguous_glob_reexports)]
