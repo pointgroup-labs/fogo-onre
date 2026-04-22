@@ -1,60 +1,45 @@
 //! Raw CPI helper.
 //!
-//! The relayer calls three external programs (Wormhole Gateway, OnRe, Wormhole
-//! NTT) whose Rust client crates are either unstable or unpublished. To avoid
-//! pulling in volatile upstream dependencies — and to keep the "stolen key =
-//! zero theft" property absolute — every external CPI goes through a single
-//! helper that enforces two invariants:
+//! Every external CPI goes through one helper that pins two compile-time
+//! invariants:
 //!
-//! 1. The destination program ID is a compile-time constant (see `constants.rs`).
-//! 2. The instruction discriminator is a compile-time constant.
+//! 1. Destination program ID (see `constants.rs`).
+//! 2. Instruction discriminator.
 //!
-//! A compromised operator key therefore cannot:
-//!   - Redirect a CPI to an attacker-controlled program (program ID is pinned).
-//!   - Call a different method on the real program (discriminator is pinned).
-//!
-//! The only thing a operator controls is the *arguments* serialized into the
-//! pinned method and the *accounts* forwarded (via `remaining_accounts`).
-//! Since both program and method are fixed, the worst case is "operator
-//! triggers a legitimate operation at a suboptimal time" — not theft.
+//! A compromised operator key therefore cannot redirect a CPI to an
+//! attacker-controlled program or call a different method on the real one.
+//! Operator-controllable surface is reduced to the *arguments* serialized
+//! into the pinned method and the *accounts* forwarded as `remaining_accounts`.
 //!
 //! ## Account forwarding contract
 //!
-//! Upstream Anchor programs (OnRe, NTT) declare fixed `#[derive(Accounts)]`
-//! layouts where each account has a specific *index*. We therefore cannot
-//! synthesize writable/signer flags on the relayer side or append accounts
-//! at the tail — the upstream program would read the wrong slot.
+//! Upstream Anchor programs declare fixed `#[derive(Accounts)]` layouts
+//! indexed by position, so we cannot reorder, append, or synthesize
+//! writable/signer flags. The caller must:
 //!
-//! The contract is:
-//!   - The caller passes the **complete, correctly-ordered** upstream account
-//!     list via `remaining_accounts`, including the relayer authority PDA at
-//!     whichever index the upstream program expects it.
-//!   - Writability / read-only flags are copied verbatim from the caller's
-//!     `AccountInfo` — the caller is responsible for flagging mutability
-//!     correctly when building the outer transaction.
-//!   - This helper locates the authority PDA by pubkey in the forwarded list
-//!     and forces its `is_signer = true` flag so the upstream program sees
-//!     a valid PDA signature. If the authority is not present, we error.
+//! - Pass the complete, correctly-ordered upstream account list, including
+//!   the relayer authority PDA at the slot the upstream program expects.
+//! - Set writability flags correctly when building the outer transaction
+//!   (this helper copies them verbatim).
+//!
+//! This helper locates the authority PDA by pubkey and forces its
+//! `is_signer = true`. If absent, we error.
 
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::instruction::{AccountMeta, Instruction};
 use anchor_lang::solana_program::program::invoke_signed;
 
-use crate::constants::{REDEEMER_SEED, RELAYER_SEED};
+use crate::constants::{REDEEMER_SEED, RELAYER_SEED, SENDER_SEED};
 use crate::error::RelayerError;
 
-/// Invoke an external program, signed by the relayer authority PDA.
+/// Invoke an external program signed by the relayer authority PDA.
 ///
-/// `discriminator` is copied verbatim to the front of the instruction data;
-/// use an 8-byte Anchor sighash for Anchor programs and a 1-byte variant
-/// tag for native-Solana-style programs (Wormhole Gateway).
+/// `discriminator` is copied verbatim to the front of the instruction data:
+/// 8-byte Anchor sighash for Anchor programs, 1-byte variant tag for
+/// native-Solana-style programs (Wormhole Gateway).
 ///
-/// Instruction data = `discriminator` ++ `Borsh(args)`.
-///
-/// Use this for OnRe, NTT, and outbound Gateway CPIs — anywhere a single
-/// PDA (the relayer authority) is the only signer. For the Wormhole
-/// Gateway `CompleteWrappedWithPayload` path, use
-/// `invoke_relayer_signed_with_redeemer` instead.
+/// Use this for OnRe, NTT, and outbound Gateway CPIs. For Gateway
+/// `CompleteWrappedWithPayload` use `..._with_redeemer` instead.
 pub fn invoke_relayer_signed<'info, A: AnchorSerialize>(
     program_id: Pubkey,
     discriminator: &[u8],
@@ -78,14 +63,11 @@ pub fn invoke_relayer_signed<'info, A: AnchorSerialize>(
     Ok(())
 }
 
-/// Like `invoke_relayer_signed`, but additionally signs as the redeemer
-/// PDA (seeds = `[REDEEMER_SEED]` under this program ID).
+/// Like `invoke_relayer_signed`, but additionally signs as the redeemer PDA.
 ///
-/// Wormhole Token Bridge's `CompleteWrappedWithPayload` requires a second
-/// PDA — the "redeemer" — to co-sign, because TB uses it to prove the
-/// payload was delivered to the intended receiver program. This helper is
-/// used exclusively by `claim_usdc`; every other CPI uses the plain
-/// `invoke_relayer_signed`.
+/// Token Bridge's `CompleteWrappedWithPayload` requires the redeemer to
+/// co-sign as proof the payload reached its intended receiver. Used
+/// exclusively by `claim_usdc`.
 #[allow(clippy::too_many_arguments)]
 pub fn invoke_relayer_signed_with_redeemer<'info, A: AnchorSerialize>(
     program_id: Pubkey,
@@ -119,9 +101,48 @@ pub fn invoke_relayer_signed_with_redeemer<'info, A: AnchorSerialize>(
     Ok(())
 }
 
+/// Like `invoke_relayer_signed`, but additionally signs as the Token Bridge
+/// `sender` PDA (seeds = `["sender"]` under this program ID).
+///
+/// `TransferWrappedWithPayload` with `cpi_program_id = Some(p)` requires the
+/// caller to sign as PDA `["sender"]` under `p`; without it, TB rejects with
+/// `InvalidSigner(<sender_pda>)`. Used exclusively by `send_usdc_to_user`.
+#[allow(clippy::too_many_arguments)]
+pub fn invoke_relayer_signed_with_sender<'info, A: AnchorSerialize>(
+    program_id: Pubkey,
+    discriminator: &[u8],
+    args: &A,
+    remaining_accounts: &[AccountInfo<'info>],
+    authority: &AccountInfo<'info>,
+    authority_bump: u8,
+    sender: Pubkey,
+    sender_bump: u8,
+) -> Result<()> {
+    let (metas, data) = build_ix_metas_and_data(
+        discriminator,
+        args,
+        remaining_accounts,
+        authority.key,
+        Some(sender),
+    )?;
+
+    let auth_bump_arr = [authority_bump];
+    let auth_seeds: &[&[u8]] = &[RELAYER_SEED, &auth_bump_arr];
+    let send_bump_arr = [sender_bump];
+    let send_seeds: &[&[u8]] = &[SENDER_SEED, &send_bump_arr];
+
+    let ix = Instruction {
+        program_id,
+        accounts: metas,
+        data,
+    };
+    invoke_signed(&ix, remaining_accounts, &[auth_seeds, send_seeds])?;
+    Ok(())
+}
+
 /// Walk `remaining_accounts`, force the signer flag on the authority PDA
-/// (and redeemer PDA if supplied), and assemble the raw instruction data
-/// buffer. Fails if a required PDA is missing from the forwarded list.
+/// (and redeemer PDA if supplied), and assemble the raw instruction data.
+/// Errors if a required PDA is missing.
 fn build_ix_metas_and_data<'info, A: AnchorSerialize>(
     discriminator: &[u8],
     args: &A,

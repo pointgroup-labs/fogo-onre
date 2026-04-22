@@ -1,16 +1,26 @@
 use anchor_lang::prelude::*;
+use anchor_lang::solana_program::program::invoke_signed;
 use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};
 
 use crate::constants::{
     CONFIG_SEED, FLOW_OUTBOUND_SEED, FOGO_WORMHOLE_CHAIN_ID, GATEWAY_PROGRAM_ID,
-    GATEWAY_TRANSFER_OUT_IX, RELAYER_SEED,
+    GATEWAY_TRANSFER_OUT_IX, RELAYER_SEED, SENDER_SEED,
 };
-use crate::cpi::invoke_relayer_signed;
+use crate::cpi::invoke_relayer_signed_with_sender;
 use crate::error::RelayerError;
 use crate::events::UsdcSentToUser;
 use crate::state::{Flow, FlowStatus, RelayerConfig};
 
-/// Portal Token Bridge `TransferWrappedWithPayload` instruction data.
+/// TB `authority_signer` PDA — burn authority on `from_token_account` for
+/// outbound wrapped transfers; the caller must `Approve` it as delegate first.
+const TB_AUTHORITY_SIGNER_SEED: &[u8] = b"authority_signer";
+
+/// Layout MUST match upstream
+/// `solana/modules/token_bridge/program/src/api/transfer.rs::TransferWrappedWithPayloadData`.
+/// `cpi_program_id` was added in a later TB revision and is required even for
+/// plain transfers — Borsh fails with `Unexpected length of input` if missing.
+/// Setting it to `Some(crate::ID)` binds TB's expected `sender` PDA to
+/// `["sender"]` under crate::ID, which the relayer can sign for.
 #[derive(AnchorSerialize, AnchorDeserialize)]
 struct GatewayTransferArgs {
     nonce: u32,
@@ -18,13 +28,12 @@ struct GatewayTransferArgs {
     target_address: [u8; 32],
     target_chain: u16,
     payload: Vec<u8>,
+    cpi_program_id: Option<Pubkey>,
 }
 
-/// Send the flow's USDC amount back to the FOGO user recorded in the
-/// `Flow` PDA.
-///
-/// Permissionless. The recipient is bound to the flow PDA's `fogo_sender`.
-/// Closing the PDA returns rent to the payer and blocks replays.
+/// Send the flow's USDC to the FOGO user recorded in the `Flow` PDA.
+/// Permissionless — recipient is bound to `flow.fogo_sender`, replay is
+/// blocked by closing the PDA.
 pub fn handler<'info>(ctx: Context<'info, SendUsdcToUser<'info>>) -> Result<()> {
     let flow = &mut ctx.accounts.outflight_flow;
     require!(
@@ -37,7 +46,45 @@ pub fn handler<'info>(ctx: Context<'info, SendUsdcToUser<'info>>) -> Result<()> 
 
     let recipient = flow.fogo_sender;
 
-    invoke_relayer_signed(
+    // ["sender"] under crate::ID, NOT under Gateway — a Gateway-owned PDA
+    // isn't signable from the relayer. Binding to our program ID is asserted
+    // via `cpi_program_id` in the instruction data.
+    let (sender_pda, sender_bump) =
+        Pubkey::find_program_address(&[SENDER_SEED], &crate::ID);
+
+    // TB's burn step calls `spl_token::burn(authority = authority_signer)`,
+    // so the authority-PDA-owned ATA must first delegate `amount` of burn
+    // rights to authority_signer. TB signs as authority_signer internally.
+    let (auth_signer_pda, _) =
+        Pubkey::find_program_address(&[TB_AUTHORITY_SIGNER_SEED], &GATEWAY_PROGRAM_ID);
+    let auth_signer_info = ctx
+        .remaining_accounts
+        .iter()
+        .find(|a| a.key == &auth_signer_pda)
+        .ok_or(RelayerError::AuthorityNotInAccounts)?;
+
+    let approve_ix = anchor_spl::token::spl_token::instruction::approve(
+        &anchor_spl::token::spl_token::ID,
+        &ctx.accounts.usdc_ata.key(),
+        &auth_signer_pda,
+        &ctx.accounts.relayer_authority.key(),
+        &[],
+        amount,
+    )?;
+    let auth_bump_arr = [ctx.accounts.relayer_config.relayer_authority_bump];
+    let auth_seeds: &[&[u8]] = &[RELAYER_SEED, &auth_bump_arr];
+    invoke_signed(
+        &approve_ix,
+        &[
+            ctx.accounts.usdc_ata.to_account_info(),
+            auth_signer_info.clone(),
+            ctx.accounts.relayer_authority.to_account_info(),
+            ctx.accounts.token_program.to_account_info(),
+        ],
+        &[auth_seeds],
+    )?;
+
+    invoke_relayer_signed_with_sender(
         GATEWAY_PROGRAM_ID,
         &GATEWAY_TRANSFER_OUT_IX,
         &GatewayTransferArgs {
@@ -46,10 +93,13 @@ pub fn handler<'info>(ctx: Context<'info, SendUsdcToUser<'info>>) -> Result<()> 
             target_address: recipient,
             target_chain: FOGO_WORMHOLE_CHAIN_ID,
             payload: Vec::new(),
+            cpi_program_id: Some(crate::ID),
         },
         ctx.remaining_accounts,
         &ctx.accounts.relayer_authority.to_account_info(),
         ctx.accounts.relayer_config.relayer_authority_bump,
+        sender_pda,
+        sender_bump,
     )?;
 
     emit!(UsdcSentToUser {
@@ -92,8 +142,7 @@ pub struct SendUsdcToUser<'info> {
     /// CHECK: seed material only; validated transitively via the flow PDA.
     pub ntt_inbox_item: UncheckedAccount<'info>,
 
-    /// The one-shot receipt created by `unlock_onyc`. Closing it on
-    /// success returns rent to the original payer and blocks replays.
+    /// Closing on success returns rent to the original payer and blocks replays.
     #[account(
         mut,
         close = rent_destination,
@@ -102,8 +151,7 @@ pub struct SendUsdcToUser<'info> {
     )]
     pub outflight_flow: Account<'info, Flow>,
 
-    /// The original payer who created this flow PDA. Receives the rent refund.
-    /// CHECK: validated against the stored `payer` field in the flow PDA.
+    /// CHECK: validated against `outflight_flow.payer`.
     #[account(mut, address = outflight_flow.payer)]
     pub rent_destination: UncheckedAccount<'info>,
 

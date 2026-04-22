@@ -1,11 +1,7 @@
-//! Minimal Wormhole posted-VAA and Token Bridge transfer-with-payload parser.
-//!
-//! We parse just enough to extract the `fogo_sender` field from a Portal
-//! Token Bridge `TransferWithPayload` message embedded in a Wormhole
-//! posted-VAA account. This avoids pulling in the full `wormhole-anchor-sdk`
-//! or `bridge` crate while still reading from the on-chain account data
-//! (not from operator-supplied instruction args — which would let a
-//! compromised operator redirect outbound transfers).
+//! Extracts `fogo_sender` from a Portal TB `TransferWithPayload` message
+//! embedded in a Wormhole posted-VAA account. Reads on-chain account data
+//! rather than operator-supplied args — otherwise a compromised operator
+//! could redirect outbound transfers.
 //!
 //! ## PostedVAA account layout (Wormhole core bridge, Solitaire)
 //!
@@ -41,34 +37,23 @@ use anchor_lang::prelude::*;
 
 use crate::error::RelayerError;
 
-/// Byte offset where the Wormhole message payload starts in a PostedVAA
-/// account (after the 3-byte Solitaire tag + fixed-size header fields +
-/// 4-byte Borsh Vec length prefix).
+/// Solitaire tag (3) + fixed header + Borsh `Vec<u8>` length prefix (4).
 const POSTED_VAA_PAYLOAD_OFFSET: usize = 95;
-
-/// Token Bridge transfer-with-payload header size (before additional_payload).
+/// TB transfer-with-payload header size (before `additional_payload`).
 const TRANSFER_HEADER_SIZE: usize = 133;
-
-/// Expected payload_id for TransferWithPayload.
 const PAYLOAD_ID_TRANSFER_WITH_PAYLOAD: u8 = 3;
 
-/// Parse the trailing 32 bytes of the additional payload from a posted-VAA
-/// account containing a Token Bridge TransferWithPayload message.
-///
-/// Returns the 32-byte `fogo_sender` field (the last 32 bytes of the
-/// additional payload appended by the FOGO client).
+/// Returns `fogo_sender` — the trailing 32 bytes of `additional_payload`,
+/// which the FOGO client appends to every TB TransferWithPayload.
 pub fn parse_fogo_sender_from_posted_vaa(account_data: &[u8]) -> Result<[u8; 32]> {
-    // Validate minimum size: Solitaire tag (3) + header up to payload.
     require!(
         account_data.len() >= POSTED_VAA_PAYLOAD_OFFSET,
         RelayerError::VaaPayloadTooShort
     );
 
-    // Validate Solitaire tag.
     let tag = &account_data[..3];
     require!(tag == b"msg" || tag == b"msu", RelayerError::InvalidVaa);
 
-    // Read Borsh-encoded payload length (little-endian u32 at offset 91).
     let payload_len_bytes: [u8; 4] = account_data[91..95]
         .try_into()
         .map_err(|_| error!(RelayerError::VaaPayloadTooShort))?;
@@ -84,7 +69,6 @@ pub fn parse_fogo_sender_from_posted_vaa(account_data: &[u8]) -> Result<[u8; 32]
 
     let payload = &account_data[POSTED_VAA_PAYLOAD_OFFSET..payload_end];
 
-    // Validate this is a TransferWithPayload.
     require!(
         payload.len() >= TRANSFER_HEADER_SIZE,
         RelayerError::VaaPayloadTooShort
@@ -94,9 +78,6 @@ pub fn parse_fogo_sender_from_posted_vaa(account_data: &[u8]) -> Result<[u8; 32]
         RelayerError::InvalidVaa
     );
 
-    // The additional payload starts at offset 133 within the Token Bridge
-    // payload. The FOGO client places the user's wallet in the trailing
-    // 32 bytes.
     let additional_payload = &payload[TRANSFER_HEADER_SIZE..];
     require!(
         additional_payload.len() >= 32,

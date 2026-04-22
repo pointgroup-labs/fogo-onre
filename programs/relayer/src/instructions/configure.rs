@@ -5,25 +5,17 @@ use crate::constants::{CONFIG_SEED, RELAYER_SEED};
 use crate::error::RelayerError;
 use crate::state::RelayerConfig;
 
-/// Update admin-mutable relayer configuration. All inputs are optional:
+/// Authority-only. All inputs optional:
 ///
-/// - `deposit_fee_bps` / `withdraw_fee_bps`: pass `None` to leave unchanged.
-/// - `fee_vault` account: pass `None` to leave the stored vault unchanged
-///   (and skip the four supporting validation accounts entirely). When
-///   `Some`, the mint + antialiasing constraints re-run on the new
-///   vault and the new pubkey is written into config.
-/// - `new_authority`: two-step authority rotation. Semantics:
-///     - `None` — leave `pending_authority` unchanged
-///     - `Some(default())` — clear any in-flight proposal (cancel)
-///     - `Some(other)` — propose `other` as the next authority (writes
-///       to `pending_authority`; the current `authority` is unchanged
-///       until `accept_authority` is called by the proposed key).
-///
-///   A typo in the proposed pubkey is harmless: until acceptance, the
-///   current authority retains full control and can overwrite or
-///   cancel the proposal.
-///
-/// Authority-only.
+/// - `deposit_fee_bps` / `withdraw_fee_bps`: `None` leaves unchanged.
+/// - `fee_vault`: `None` skips the four supporting accounts and leaves
+///   the stored vault unchanged.
+/// - `new_authority` (two-step rotation):
+///     - `None` — leave `pending_authority` alone
+///     - `Some(default())` — cancel any in-flight proposal
+///     - `Some(other)` — propose `other`; current authority unchanged
+///       until `accept_authority`. A typo is harmless — the current
+///       authority can overwrite or cancel before acceptance.
 pub fn handler(
     ctx: Context<Configure>,
     deposit_fee_bps: Option<u16>,
@@ -80,9 +72,8 @@ pub struct Configure<'info> {
     )]
     pub relayer_config: Account<'info, RelayerConfig>,
 
-    /// Relayer authority PDA — owns `onyc_ata`. Re-derived here so the
-    /// associated-token derivation on `onyc_ata` resolves and the
-    /// anti-aliasing constraint can compare a fully-typed ATA pubkey.
+    /// Re-derived so the associated-token derivation on `onyc_ata` resolves
+    /// for the anti-aliasing constraint.
     /// CHECK: PDA seeds enforce identity.
     #[account(
         seeds = [RELAYER_SEED],
@@ -92,8 +83,7 @@ pub struct Configure<'info> {
 
     pub onyc_mint: InterfaceAccount<'info, Mint>,
 
-    /// The relayer's operating ONyc ATA — referenced solely to enforce
-    /// `fee_vault != onyc_ata`. Not mutated.
+    /// Referenced solely to enforce `fee_vault != onyc_ata`.
     #[account(
         associated_token::mint = onyc_mint,
         associated_token::authority = relayer_authority,
@@ -101,10 +91,8 @@ pub struct Configure<'info> {
     )]
     pub onyc_ata: InterfaceAccount<'info, TokenAccount>,
 
-    /// New fee vault destination. `None` to leave the stored vault
-    /// unchanged. When `Some`, must hold ONyc; the anti-aliasing check
-    /// (`fee_vault != onyc_ata`) runs in the handler since Anchor's
-    /// constraint-attribute expressions can't cleanly disambiguate
+    /// `None` leaves the stored vault unchanged. The anti-aliasing check
+    /// runs in the handler — Anchor constraint exprs can't disambiguate
     /// `Option::as_ref` against `InterfaceAccount`'s `AsRef` impls.
     #[account(
         token::mint = onyc_mint,

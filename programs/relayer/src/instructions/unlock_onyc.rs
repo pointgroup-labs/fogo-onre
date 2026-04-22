@@ -14,58 +14,40 @@ use crate::ntt::{
 };
 use crate::state::{Flow, FlowStatus, RelayerConfig};
 
-// ── Upstream NTT account indices ───────────────────────────────────────
+// NTT's `redeem` / `release_inbound_unlock` consume accounts *positionally*.
+// If upstream reorders its `#[derive(Accounts)]` fields, these constants
+// MUST move in lockstep — otherwise the position-pinning checks would
+// silently guard the wrong slots, re-opening the
+// decouple-sender-from-recipient attack.
 //
-// These mirror the field order of upstream NTT's `#[derive(Accounts)]`
-// structs. The `redeem` / `release_inbound_unlock` CPIs consume accounts
-// *positionally*, so if upstream ever reorders its struct fields, these
-// constants MUST be updated in lockstep — otherwise our positional
-// binding checks would silently guard the wrong slots, re-opening the
-// decouple-sender-from-recipient attack the checks exist to prevent.
-//
-// Upstream source:
-//   `example-native-token-transfers/programs/…/src/instructions/redeem.rs`
-//   `…/src/instructions/release_inbound.rs`
+// Source: example-native-token-transfers `redeem.rs`, `release_inbound.rs`.
 
-/// Expected minimum length of the `redeem` account slice.
 const REDEEM_ACCOUNTS_MIN_LEN: usize = 10;
-/// Expected minimum length of the `release_inbound_unlock` account slice.
 const RELEASE_ACCOUNTS_MIN_LEN: usize = 8;
 
-/// Index of `ValidatedTransceiverMessage` in NTT's `Redeem` accounts.
 const REDEEM_IDX_TRANSCEIVER_MESSAGE: usize = 3;
-/// Index of `InboxItem` in NTT's `Redeem` accounts.
 const REDEEM_IDX_INBOX_ITEM: usize = 6;
-/// Index of `InboxItem` in NTT's `ReleaseInboundUnlock` accounts.
 const RELEASE_IDX_INBOX_ITEM: usize = 2;
-/// Index of the recipient token account in NTT's `ReleaseInboundUnlock`.
 const RELEASE_IDX_RECIPIENT_ATA: usize = 3;
 
-/// Release ONyc from NTT custody for an incoming VAA from FOGO, and
-/// record a `Flow` receipt that binds the eventual USDC return to the
-/// FOGO user who initiated the withdrawal.
+/// Release ONyc from NTT custody for an inbound VAA from FOGO and create
+/// the outbound `Flow` receipt binding the eventual USDC return to the
+/// withdrawing FOGO user.
 ///
-/// Permissionless — anyone can crank. Safety:
+/// Permissionless. Safety:
+/// - NTT `redeem` validates guardian sigs via `ValidatedTransceiverMessage`
+///   (whose owner must equal the registered transceiver).
+/// - `fogo_sender` is `NttManagerMessage.sender` parsed from on-chain
+///   transceiver-message data; Anchor `owner = NTT_PROGRAM_ID` plus the
+///   discriminator check reject impostors.
 ///
-/// * The NTT `redeem` CPI validates guardian signatures (via the
-///   `ValidatedTransceiverMessage` account, whose owner must equal the
-///   registered transceiver address). A forged VAA fails inside the CPI.
-///
-/// * `fogo_sender` is parsed from on-chain `ValidatedTransceiverMessage`
-///   data — specifically `NttManagerMessage.sender`, which the FOGO side
-///   of the transfer sets to the user's wallet. The caller cannot supply
-///   arbitrary bytes here; Anchor's `owner = NTT_PROGRAM_ID` constraint
-///   plus the account's discriminator check reject any impostor account.
-///
-/// `remaining_accounts` holds both CPIs' account lists concatenated;
+/// `remaining_accounts` = redeem accounts ++ release accounts;
 /// `redeem_accounts_len` is the split point.
 pub fn handler<'info>(
     ctx: Context<'info, UnlockOnyc<'info>>,
     redeem_accounts_len: u8,
 ) -> Result<()> {
-    // Parse fogo_sender from the validated transceiver message. Anchor's
-    // `owner = NTT_PROGRAM_ID` constraint already pins the writer; we add
-    // a discriminator check before trusting the offset.
+    // `owner = NTT_PROGRAM_ID` pins the writer; disc check guards the offset.
     let data = ctx.accounts.ntt_transceiver_message.try_borrow_data()?;
     require!(
         data.len() >= TRANSCEIVER_MESSAGE_SENDER_OFFSET + 32,
@@ -90,8 +72,7 @@ pub fn handler<'info>(
     );
     let (redeem_accs, release_accs) = ctx.remaining_accounts.split_at(split);
 
-    // Pin named accounts to the NTT CPIs' positional slots. See the block
-    // comment at the top of this file for the attack this prevents.
+    // See top-of-file block comment for the attack the position pinning prevents.
     require!(
         redeem_accs.len() >= REDEEM_ACCOUNTS_MIN_LEN
             && release_accs.len() >= RELEASE_ACCOUNTS_MIN_LEN,
@@ -118,7 +99,6 @@ pub fn handler<'info>(
     let bump = ctx.accounts.relayer_config.relayer_authority_bump;
     let authority = ctx.accounts.relayer_authority.to_account_info();
 
-    // Snapshot pre-CPI balance so we can compute the delta.
     let pre_balance = ctx.accounts.onyc_ata.amount;
 
     invoke_relayer_signed(
@@ -141,7 +121,7 @@ pub fn handler<'info>(
         bump,
     )?;
 
-    // Delta = what this specific VAA released.
+    // Delta = what this VAA released.
     ctx.accounts.onyc_ata.reload()?;
     let amount = ctx
         .accounts
@@ -196,23 +176,18 @@ pub struct UnlockOnyc<'info> {
     )]
     pub onyc_ata: InterfaceAccount<'info, TokenAccount>,
 
-    /// NTT inbox-item PDA. Created by the NTT `redeem` CPI; we use its
-    /// pubkey as unique seed material for the flow PDA.
-    /// CHECK: validated by the NTT CPI — any forgery makes the CPI fail.
+    /// Per-VAA NTT inbox-item PDA — its pubkey seeds the flow PDA.
+    /// CHECK: validated by the NTT CPI.
     pub ntt_inbox_item: UncheckedAccount<'info>,
 
-    /// NTT `ValidatedTransceiverMessage` for this inbound transfer — same
-    /// account that the caller must pass to the `redeem` CPI in
-    /// `remaining_accounts`. We parse `fogo_sender` directly from its
-    /// already-validated bytes. The `owner` constraint pins the writer to
-    /// the NTT program (which for OnRe's deployment is also the transceiver
-    /// program), so nothing outside NTT can have crafted this data.
+    /// `fogo_sender` is parsed from this already-validated bytes. `owner`
+    /// pins the writer to NTT (== transceiver in OnRe's deployment), so
+    /// nothing outside NTT can have crafted this data.
     /// CHECK: owner + discriminator + offset checks in the handler.
     #[account(owner = NTT_PROGRAM_ID)]
     pub ntt_transceiver_message: UncheckedAccount<'info>,
 
-    /// One-shot receipt PDA for the withdrawal leg. `init` fails on
-    /// replay (same NTT inbox → same PDA → already exists).
+    /// `init` blocks replay (same NTT inbox → same PDA → already exists).
     #[account(
         init,
         payer = payer,

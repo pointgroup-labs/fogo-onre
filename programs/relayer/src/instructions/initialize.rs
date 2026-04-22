@@ -8,13 +8,10 @@ use crate::constants::{CONFIG_SEED, REDEEMER_SEED, RELAYER_SEED};
 use crate::error::RelayerError;
 use crate::state::RelayerConfig;
 
-/// Initialize the relayer program.
-///
-/// Creates the `RelayerConfig` PDA, the USDC + ONyc token accounts owned by
-/// the relayer authority PDA, and a short-lived USDC intake ATA owned by
-/// the redeemer PDA (used as the `to` account in Token Bridge
-/// `CompleteWrappedWithPayload` CPIs — see `claim_usdc`). One-shot at
-/// deployment time.
+/// One-shot deployment setup. Creates `RelayerConfig`, the long-lived
+/// USDC + ONyc ATAs owned by the relayer authority PDA, and the
+/// short-lived USDC intake ATA owned by the redeemer PDA (used as `to`
+/// in TB `CompleteWrappedWithPayload` — see `claim_usdc`).
 pub fn handler(
     ctx: Context<Initialize>,
     deposit_fee_bps: u16,
@@ -45,12 +42,9 @@ pub fn handler(
 
 #[derive(Accounts)]
 pub struct Initialize<'info> {
-    /// Deployer / authority — pays for account creation and becomes the
-    /// admin key.
     #[account(mut)]
     pub authority: Signer<'info>,
 
-    /// Relayer config PDA — stores mint references.
     #[account(
         init,
         payer = authority,
@@ -60,31 +54,27 @@ pub struct Initialize<'info> {
     )]
     pub relayer_config: Account<'info, RelayerConfig>,
 
-    /// Relayer authority PDA — owns the token accounts.
-    /// CHECK: PDA derived from RELAYER_SEED; no data, just used as ATA owner.
+    /// CHECK: PDA derived from RELAYER_SEED; owns the long-lived ATAs.
     #[account(
         seeds = [RELAYER_SEED],
         bump,
     )]
     pub relayer_authority: UncheckedAccount<'info>,
 
-    /// Redeemer PDA — serves as Token Bridge's payload-delivery signer in
-    /// `CompleteWrappedWithPayload` AND as the owner of the short-lived USDC
-    /// intake ATA (TB requires `redeemer.key == to.owner`).
-    /// CHECK: PDA derived from REDEEMER_SEED; no data stored.
+    /// Serves as TB's payload-delivery signer in `CompleteWrappedWithPayload`
+    /// AND owns the short-lived USDC intake ATA (TB requires
+    /// `redeemer.key == to.owner`).
+    /// CHECK: PDA derived from REDEEMER_SEED.
     #[account(
         seeds = [REDEEMER_SEED],
         bump,
     )]
     pub redeemer_authority: UncheckedAccount<'info>,
 
-    /// USDC token mint.
     pub usdc_mint: InterfaceAccount<'info, Mint>,
 
-    /// ONyc token mint.
     pub onyc_mint: InterfaceAccount<'info, Mint>,
 
-    /// USDC associated token account owned by the relayer authority PDA.
     #[account(
         init,
         payer = authority,
@@ -94,7 +84,6 @@ pub struct Initialize<'info> {
     )]
     pub usdc_ata: InterfaceAccount<'info, TokenAccount>,
 
-    /// ONyc associated token account owned by the relayer authority PDA.
     #[account(
         init,
         payer = authority,
@@ -104,9 +93,8 @@ pub struct Initialize<'info> {
     )]
     pub onyc_ata: InterfaceAccount<'info, TokenAccount>,
 
-    /// Redeemer-owned USDC intake ATA. `claim_usdc` deposits bridged USDC
-    /// here (TB mints into it during `CompleteWrappedWithPayload`) and
-    /// immediately sweeps it into `usdc_ata` under the redeemer's signature.
+    /// `claim_usdc` mints into this ATA via TB then immediately sweeps it
+    /// to `usdc_ata` under the redeemer's signature.
     #[account(
         init,
         payer = authority,
@@ -116,11 +104,9 @@ pub struct Initialize<'info> {
     )]
     pub redeemer_usdc_ata: InterfaceAccount<'info, TokenAccount>,
 
-    /// Single fee vault — any pre-existing ONyc token account, supplied by
-    /// the deployer at init time. The anti-aliasing constraint prevents the
-    /// caller from passing the relayer's own ONyc ATA, which would silently
-    /// no-op every fee transfer (self-transfer) and let user funds and fees
-    /// keep commingling — defeating the whole point of the vault split.
+    /// Anti-aliasing constraint: forbidding `fee_vault == onyc_ata`
+    /// prevents silent self-transfer no-ops that would commingle user
+    /// funds with fees and defeat the vault split.
     #[account(
         token::mint = onyc_mint,
         token::token_program = token_program,

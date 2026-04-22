@@ -110,18 +110,6 @@ export class RelayerClient {
    *    already have it cached.
    *
    * Authority-only. Returns a builder; chain `.rpc()` to send.
-   *
-   * @example
-   *   // Fee-only update — fully default ergonomics
-   *   await (await client.configure({ depositFeeBps: 200 })).rpc()
-   *   // Vault rotation with everything explicit
-   *   await (await client.configure({
-   *     authority, onycMint, feeVault: newVault,
-   *   })).rpc()
-   *   // Propose authority rotation (step 1 of 2)
-   *   await (await client.configure({ newAuthority: nextAuthorityPk })).rpc()
-   *   // Then later: nextAuthority signer accepts (step 2 of 2)
-   *   await (await client.acceptAuthority({ pendingAuthority })).rpc()
    */
   async configure(params: {
     authority?: PublicKey
@@ -216,7 +204,7 @@ export class RelayerClient {
   /**
    * Claim bridged USDC and create an inflight flow PDA. The SDK builds the
    * full Token Bridge `CompleteWrappedWithPayload` account list from
-   * `tokenBridge` (named-fields). @unverified — see `gateway.ts`.
+   * `tokenBridge` (named-fields). Bridge-program-verified — see `gateway.ts`.
    */
   claimUsdc(params: {
     payer: PublicKey
@@ -475,7 +463,7 @@ export class RelayerClient {
 
   /**
    * Send USDC back to the FOGO user. Consumes the flow PDA. SDK builds the
-   * Token Bridge `TransferWrappedWithPayload` account list. @unverified.
+   * Token Bridge `TransferWrappedWithPayload` account list. Bridge-program-verified — see `gateway.ts`.
    *
    * Caller must pass a fresh `message: PublicKey` (and its Keypair via
    * `.signers([...])`) — the message account is initialized inside the CPI.

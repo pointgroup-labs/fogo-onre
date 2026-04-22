@@ -1178,7 +1178,7 @@ describe('relayer', () => {
       )
     })
 
-    it('send_usdc_to_user with Swapped flow attempts Gateway CPI', async () => {
+    it('send_usdc_to_user with Swapped flow advances past relayer-side checks', async () => {
       const nttInboxItem = Keypair.generate()
       const [outflightPda, bump] = findOutflightFlowPda(nttInboxItem.publicKey, client.program.programId)
 
@@ -1195,10 +1195,12 @@ describe('relayer', () => {
       const [authorityPda] = findAuthorityPda(client.program.programId)
       mintTo(svm, authority, usdcMint.publicKey, authorityPda, 500_000)
 
-      // CPI will fail at Gateway (no Gateway state seeded), but reaching
-      // the Gateway program proves status, ATA, and rent-destination
-      // checks all passed cleanly.
-      await expectFailure(
+      // With minimal remaining_accounts the handler will fail at the
+      // pre-CPI lookup for the Token Bridge `authority_signer` PDA (the
+      // delegate the Approve step needs). Hitting that error proves the
+      // status, ATA, and rent-destination checks all passed cleanly. Full
+      // outbound CPI coverage lives in `send-usdc-to-user-e2e.test.ts`.
+      await expectError(
         () =>
           client
             .sendUsdcToUser({
@@ -1212,8 +1214,7 @@ describe('relayer', () => {
               { pubkey: client.authorityPda, isSigner: false, isWritable: false },
             ])
             .rpc(),
-        failedInProgram(GATEWAY_PROGRAM_ID),
-        'Gateway CPI should be reached and fail (no Gateway state seeded)',
+        'AuthorityNotInAccounts',
       )
     })
   })

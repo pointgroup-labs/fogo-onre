@@ -8,20 +8,14 @@ use crate::events::OnycSwapped;
 use crate::onre::execute_onre_swap;
 use crate::state::{Flow, RelayerConfig};
 
-/// Swap the flow's USDC amount into ONyc via OnRe, then take the
-/// configured deposit-leg fee from the ONyc output and route it to the
-/// shared `onyc_fee_vault`.
-///
-/// Permissionless. Uses the amount recorded in the flow PDA (not the full
-/// ATA balance), so concurrent flows are isolated.
-///
-/// `remaining_accounts` must contain OnRe's full account list for
-/// `take_offer_permissionless`.
+/// Permissionless. Swaps the flow's USDC into ONyc via OnRe, then takes the
+/// deposit-leg fee from the ONyc output and routes it to `fee_vault`.
+/// Operates on `flow.amount` (not full ATA balance) so concurrent flows
+/// stay isolated.
 pub fn handler<'info>(ctx: Context<'info, SwapUsdcToOnyc<'info>>) -> Result<()> {
     let flow_key = ctx.accounts.inflight_flow.key();
 
-    // 1. Swap USDC → ONyc. After this call, `flow.amount` = ONyc received,
-    //    `flow.status` = Swapped (post-conditions enforced by execute_onre_swap).
+    // Post-conditions: flow.amount = ONyc received, flow.status = Swapped.
     execute_onre_swap(
         &mut ctx.accounts.inflight_flow,
         &mut ctx.accounts.onyc_ata,
@@ -30,12 +24,11 @@ pub fn handler<'info>(ctx: Context<'info, SwapUsdcToOnyc<'info>>) -> Result<()> 
         ctx.remaining_accounts,
     )?;
 
-    // 2. Apply deposit fee POST-swap from the ONyc output.
+    // Deposit fee is taken POST-swap from the ONyc output.
     let gross = ctx.accounts.inflight_flow.amount;
     let (net, fee) = ctx.accounts.relayer_config.apply_deposit_fee(gross)?;
 
-    // 3. Physically segregate the fee into the ONyc fee vault. After this,
-    //    `onyc_ata` holds only in-flight user funds.
+    // Physically segregate fees so `onyc_ata` holds only in-flight user funds.
     if fee > 0 {
         let auth_bump = [ctx.accounts.relayer_config.relayer_authority_bump];
         let auth_seeds: &[&[u8]] = &[RELAYER_SEED, &auth_bump];
@@ -101,10 +94,8 @@ pub struct SwapUsdcToOnyc<'info> {
     )]
     pub onyc_ata: InterfaceAccount<'info, TokenAccount>,
 
-    /// Single fee vault — receives the post-swap deposit fee. Pinned by
-    /// `has_one = fee_vault` on `relayer_config`. Can be any pre-existing
-    /// ONyc token account (configured at `initialize` time); does not need
-    /// to be relayer-owned.
+    /// Pinned by `has_one = fee_vault`. Any pre-existing ONyc account;
+    /// need not be relayer-owned.
     #[account(
         mut,
         token::mint = onyc_mint,
@@ -112,11 +103,10 @@ pub struct SwapUsdcToOnyc<'info> {
     )]
     pub fee_vault: Box<InterfaceAccount<'info, TokenAccount>>,
 
-    /// Gateway claim PDA — seed material for the flow PDA.
     /// CHECK: validated transitively via the flow PDA seeds.
     pub gateway_claim: UncheckedAccount<'info>,
 
-    /// The flow PDA created by `claim_usdc`. Must be in `Claimed` status.
+    /// Created by `claim_usdc`; must be in `Claimed` status.
     #[account(
         mut,
         seeds = [FLOW_INBOUND_SEED, gateway_claim.key().as_ref()],

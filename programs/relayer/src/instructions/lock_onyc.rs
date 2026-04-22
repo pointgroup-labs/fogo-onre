@@ -12,20 +12,17 @@ use crate::events::OnycLocked;
 use crate::ntt::{derive_session_authority, NttTransferArgs};
 use crate::state::{Flow, FlowStatus, RelayerConfig};
 
-/// Lock the flow's ONyc amount via Wormhole NTT, sending bONyc back to
-/// the FOGO wallet recorded in the `Flow` PDA.
+/// Lock the flow's ONyc via Wormhole NTT, sending bONyc back to
+/// `flow.fogo_sender`. Permissionless; closing the PDA returns rent and
+/// blocks replay.
 ///
-/// ONyc is canonical on Solana (issued by OnRe), so the NTT manager runs
-/// in Locking mode: tokens are transferred into NTT's custody account
-/// rather than burned. The FOGO side mints/burns the wrapped bONyc.
+/// ONyc is canonical on Solana, so the NTT manager runs in **Locking**
+/// mode (transfer to NTT custody, not burn); the FOGO side mints/burns
+/// wrapped bONyc.
 ///
-/// Permissionless. The recipient is bound to the flow PDA's `fogo_sender`.
-/// Closing the PDA returns rent to the payer and blocks replays.
-///
-/// NTT's `transfer_lock` requires the caller to first approve the NTT
-/// session_authority PDA as a delegate on the source token account, so
-/// we issue an SPL `Approve` CPI (signed by the relayer authority PDA)
-/// before forwarding to NTT.
+/// `transfer_lock` requires the caller to first SPL-`Approve` the NTT
+/// session-authority PDA as delegate on `onyc_ata`, so we issue that
+/// approval (signed by the relayer authority PDA) before forwarding.
 pub fn handler<'info>(ctx: Context<'info, LockOnyc<'info>>) -> Result<()> {
     let flow = &mut ctx.accounts.inflight_flow;
     require!(
@@ -45,13 +42,11 @@ pub fn handler<'info>(ctx: Context<'info, LockOnyc<'info>>) -> Result<()> {
         should_queue: false,
     };
 
-    // NTT binds its session-authority PDA to a hash of the transfer args;
-    // recompute it locally so we can pre-approve the right delegate.
+    // NTT binds session-authority to a hash of the transfer args; recompute
+    // locally so we can pre-approve the right delegate.
     let (session_authority, _) =
         derive_session_authority(&ctx.accounts.relayer_authority.key(), &transfer_args);
 
-    // Approve the session_authority as delegate on the ONyc ATA,
-    // signed by the relayer authority PDA.
     let bump = [ctx.accounts.relayer_config.relayer_authority_bump];
     let signer_seeds: &[&[u8]] = &[RELAYER_SEED, &bump];
 
@@ -63,7 +58,7 @@ pub fn handler<'info>(ctx: Context<'info, LockOnyc<'info>>) -> Result<()> {
             AccountMeta::new_readonly(ctx.accounts.relayer_authority.key(), true),
         ],
         data: {
-            // SPL Token Approve instruction: tag(1) + amount(u64 LE)
+            // SPL Approve: tag(1) + amount(u64 LE)
             let mut d = Vec::with_capacity(9);
             d.push(SPL_TOKEN_APPROVE_IX_TAG);
             d.extend_from_slice(&amount.to_le_bytes());
@@ -71,8 +66,8 @@ pub fn handler<'info>(ctx: Context<'info, LockOnyc<'info>>) -> Result<()> {
         },
     };
 
-    // Find the session_authority account in remaining_accounts so the runtime
-    // can resolve the approve instruction's account references.
+    // Locate session_authority in remaining_accounts so the runtime can
+    // resolve the approve ix's account refs.
     let session_auth_info = ctx
         .remaining_accounts
         .iter()
@@ -135,13 +130,10 @@ pub struct LockOnyc<'info> {
     )]
     pub onyc_ata: InterfaceAccount<'info, TokenAccount>,
 
-    /// Same Gateway claim PDA used at `claim_usdc` time.
     /// CHECK: seed material only; validated transitively via the flow PDA.
     pub gateway_claim: UncheckedAccount<'info>,
 
-    /// The one-shot receipt created by `claim_usdc`. `close = rent_destination`
-    /// consumes the receipt so a second `lock_onyc` against the same flow
-    /// is impossible.
+    /// `close = rent_destination` blocks any second `lock_onyc` against this flow.
     #[account(
         mut,
         close = rent_destination,
@@ -150,8 +142,7 @@ pub struct LockOnyc<'info> {
     )]
     pub inflight_flow: Account<'info, Flow>,
 
-    /// The original payer who created this flow PDA. Receives the rent refund.
-    /// CHECK: validated against the stored `payer` field in the flow PDA.
+    /// CHECK: pinned to the flow PDA's stored `payer`; receives rent refund.
     #[account(mut, address = inflight_flow.payer)]
     pub rent_destination: UncheckedAccount<'info>,
 

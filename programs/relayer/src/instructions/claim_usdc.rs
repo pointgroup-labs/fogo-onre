@@ -13,61 +13,42 @@ use crate::events::UsdcClaimed;
 use crate::state::{Flow, FlowStatus, RelayerConfig};
 use crate::vaa::parse_fogo_sender_from_posted_vaa;
 
-// ── Upstream Token Bridge account indices ───────────────────────────────
+// TB `CompleteWrappedWithPayload` reads its VAA + creates the claim PDA
+// *positionally* from `remaining_accounts`. We MUST pin the named
+// `posted_vaa` / `gateway_claim` accounts to the same slots — otherwise
+// a caller could pass VAA_A positionally (so TB mints VAA_A's USDC) but
+// VAA_B as `posted_vaa` (so we parse Bob's wallet as `fogo_sender` and
+// `lock_onyc` later ships bONyc to Bob instead of Alice).
 //
-// These mirror the positional account layout of Wormhole Token Bridge's
-// `CompleteWrappedWithPayload` (Solitaire) instruction. Because the CPI
-// reads the VAA and creates its claim PDA *positionally* from
-// `remaining_accounts`, we MUST pin the caller-supplied `posted_vaa` and
-// `gateway_claim` named accounts to those same slots. Otherwise a caller
-// could pass VAA_A at the positional slot (so TB mints VAA_A's USDC) while
-// handing VAA_B as `posted_vaa` (so we parse Bob-the-attacker's wallet as
-// `fogo_sender` and lock_onyc later ships bONyc to Bob instead of Alice).
-//
-// Upstream source:
-//   `wormhole/solana/modules/token_bridge/program/src/api/complete_transfer.rs`
-//   `CompleteWrappedWithPayload` account struct.
+// Source: wormhole token_bridge `complete_transfer.rs`,
+// `CompleteWrappedWithPayload` accounts struct.
 
-/// Index of the posted-VAA account in TB's `CompleteWrappedWithPayload`.
 const TB_IDX_POSTED_VAA: usize = 2;
-/// Index of the claim PDA in TB's `CompleteWrappedWithPayload`.
 const TB_IDX_GATEWAY_CLAIM: usize = 3;
-/// Minimum length of TB's `CompleteWrappedWithPayload` account list,
-/// up to and including the slots we bind against. The SDK helper
-/// `buildClaimWrappedRemainingAccounts` supplies 17 entries (14 TB
-/// accounts + 2 program IDs + 1 trailing relayer-authority PDA used by
-/// our own CPI helper); we only assert on the minimum we actually read.
+/// SDK helper supplies 17 entries; we only assert on what we read.
 const TB_ACCOUNTS_MIN_LEN: usize = TB_IDX_GATEWAY_CLAIM + 1;
 
-/// Claim incoming USDC bridged from FOGO via Wormhole Gateway, and record
-/// a `Flow` receipt that binds the eventual ONyc return to the original
-/// FOGO user's wallet.
+/// Claim incoming USDC from Wormhole Gateway and create the inbound `Flow`
+/// receipt binding the eventual ONyc return to the originating FOGO wallet.
 ///
-/// Permissionless — anyone can crank this instruction. Safety comes from:
-/// - `fogo_sender` is parsed from the posted-VAA (guardian-signed, not
-///   caller-supplied)
-/// - Flow PDA is seeded by the Gateway claim account (CPI-created, unforgeable)
-/// - `init` prevents double-claims
+/// Permissionless. Safety:
+/// - `fogo_sender` is parsed from the guardian-signed posted-VAA, not a caller arg.
+/// - Flow PDA is seeded by the Gateway claim account (CPI-created, unforgeable).
+/// - `init` blocks double-claims.
 ///
 /// ## Two-stage token flow
 ///
-/// Token Bridge's `CompleteWrappedWithPayload` requires
-/// `redeemer.key == to.owner` for the destination token account. Rather than
-/// unify the relayer authority and redeemer into the same PDA (which would
-/// relocate every long-lived ATA), we use a **short-lived intake ATA owned
-/// by the redeemer PDA** as the TB `to` account. After the CPI, we
-/// immediately sweep the received USDC from the redeemer-owned intake ATA
-/// into the main authority-owned USDC ATA (signed by the redeemer PDA).
-/// From that point on, the rest of the pipeline operates on `usdc_ata` as
-/// before.
+/// TB `CompleteWrappedWithPayload` requires `redeemer.key == to.owner`. We
+/// use a short-lived intake ATA owned by the redeemer PDA as `to`, then
+/// immediately sweep into `usdc_ata` (signed by the redeemer PDA) so the
+/// rest of the pipeline operates on the long-lived ATA. The alternative —
+/// unifying redeemer with relayer authority — would relocate every
+/// long-lived ATA.
 ///
-/// `remaining_accounts` must contain the full Gateway account list in
-/// the order Gateway expects, including the redeemer PDA at whichever index
-/// TB expects it and the relayer authority PDA appended so the CPI helper
-/// can force its signer flag.
+/// `remaining_accounts` is Gateway's full account list with the relayer
+/// authority PDA appended for the CPI helper's signer flag.
 pub fn handler<'info>(ctx: Context<'info, ClaimUsdc<'info>>) -> Result<()> {
-    // Pin named accounts to TB's positional slots. See the block comment
-    // at the top of this file for the attack this prevents.
+    // See top-of-file block comment for the attack the position pinning prevents.
     require!(
         ctx.remaining_accounts.len() >= TB_ACCOUNTS_MIN_LEN,
         RelayerError::InvalidAccountSplit
@@ -85,7 +66,6 @@ pub fn handler<'info>(ctx: Context<'info, ClaimUsdc<'info>>) -> Result<()> {
     let fogo_sender = parse_fogo_sender_from_posted_vaa(&vaa_data)?;
     drop(vaa_data);
 
-    // Snapshot pre-CPI balance of the intake ATA so we can compute the delta.
     let pre_intake_balance = ctx.accounts.redeemer_usdc_ata.amount;
 
     let redeemer_key = ctx.accounts.redeemer_authority.key();
@@ -102,7 +82,6 @@ pub fn handler<'info>(ctx: Context<'info, ClaimUsdc<'info>>) -> Result<()> {
         redeemer_bump,
     )?;
 
-    // Delta = what this specific VAA minted into the redeemer intake ATA.
     ctx.accounts.redeemer_usdc_ata.reload()?;
     let amount = ctx
         .accounts
@@ -112,9 +91,7 @@ pub fn handler<'info>(ctx: Context<'info, ClaimUsdc<'info>>) -> Result<()> {
         .ok_or(RelayerError::BalanceUnderflow)?;
     require!(amount > 0, RelayerError::ZeroAmountFlow);
 
-    // Sweep the freshly-minted USDC into the main authority-owned ATA,
-    // signed by the redeemer PDA. Everything downstream reads from
-    // `usdc_ata` as before.
+    // Sweep into the long-lived ATA, signed by the redeemer PDA.
     let bump_arr = [redeemer_bump];
     let signer_seeds: &[&[&[u8]]] = &[&[REDEEMER_SEED, &bump_arr]];
     transfer_checked(
@@ -169,15 +146,13 @@ pub struct ClaimUsdc<'info> {
     #[account(seeds = [RELAYER_SEED], bump = relayer_config.relayer_authority_bump)]
     pub relayer_authority: UncheckedAccount<'info>,
 
-    /// Redeemer PDA — signs the Token Bridge CPI and the post-CPI sweep.
-    /// CHECK: PDA derived from REDEEMER_SEED; no data stored.
+    /// CHECK: PDA derived from REDEEMER_SEED; signs the TB CPI + post-CPI sweep.
     #[account(seeds = [REDEEMER_SEED], bump)]
     pub redeemer_authority: UncheckedAccount<'info>,
 
     pub usdc_mint: InterfaceAccount<'info, Mint>,
 
-    /// Long-lived USDC ATA owned by the relayer authority PDA; the final
-    /// destination of the claim. Populated by the post-CPI sweep.
+    /// Long-lived destination of the claim; populated by the post-CPI sweep.
     #[account(
         mut,
         associated_token::mint = usdc_mint,
@@ -186,9 +161,8 @@ pub struct ClaimUsdc<'info> {
     )]
     pub usdc_ata: InterfaceAccount<'info, TokenAccount>,
 
-    /// Short-lived USDC intake ATA owned by the redeemer PDA. TB mints
-    /// directly into this account during `CompleteWrappedWithPayload`;
-    /// we then sweep the balance into `usdc_ata` in the same instruction.
+    /// Short-lived intake ATA — TB mints into it during the CPI; we sweep
+    /// to `usdc_ata` in the same instruction.
     #[account(
         mut,
         associated_token::mint = usdc_mint,
@@ -197,19 +171,16 @@ pub struct ClaimUsdc<'info> {
     )]
     pub redeemer_usdc_ata: InterfaceAccount<'info, TokenAccount>,
 
-    /// Wormhole posted-VAA account. We read `fogo_sender` from its on-chain
-    /// data (guardian-signed) rather than trusting an instruction argument.
-    /// CHECK: owner validated as Wormhole core bridge program.
+    /// `fogo_sender` is read from on-chain (guardian-signed) data, not args.
+    /// CHECK: owner = Wormhole core bridge.
     #[account(owner = WORMHOLE_CORE_BRIDGE_ID)]
     pub posted_vaa: UncheckedAccount<'info>,
 
-    /// Wormhole Gateway's per-VAA claim PDA. Created by the Gateway CPI;
-    /// we use its pubkey as unique seed material for the flow PDA.
-    /// CHECK: validated by the Gateway CPI — any forgery makes the CPI fail.
+    /// Per-VAA Gateway claim PDA — its pubkey seeds the flow PDA.
+    /// CHECK: validated by the Gateway CPI.
     pub gateway_claim: UncheckedAccount<'info>,
 
-    /// One-shot flow receipt. `init` fails if a flow for this claim PDA
-    /// already exists (double-claim protection).
+    /// `init` blocks double-claims against the same gateway claim PDA.
     #[account(
         init,
         payer = payer,

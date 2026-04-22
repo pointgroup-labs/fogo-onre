@@ -5,22 +5,15 @@ use crate::error::RelayerError;
 use crate::state::RelayerConfig;
 
 /// Step two of the two-step authority rotation. The pending authority
-/// (proposed in a prior `configure` call) signs this instruction to
-/// atomically:
+/// signs to atomically promote `pending_authority` → `authority` and
+/// clear the proposal slot. Errors:
+/// `PendingAuthorityMismatch` if signer ≠ proposed key,
+/// `NoPendingAuthority` if no rotation is in flight.
 ///
-///   - Move `pending_authority` into `authority`
-///   - Clear `pending_authority` to `None`
-///
-/// The signer must equal the proposed key; otherwise
-/// `PendingAuthorityMismatch` fires. If no rotation is in flight,
-/// `NoPendingAuthority` fires. The current authority does not
-/// participate in this transaction at all — by design, so the two
-/// parties (typically two independent multisigs) can complete a
-/// rotation without atomic cross-multisig coordination.
-///
-/// Until the new authority signs `accept_authority`, the current
-/// authority retains full control: a typo or wrong-key proposal is
-/// harmless and can be overwritten or cancelled via `configure`.
+/// The current authority does not participate — by design, so two
+/// independent multisigs can rotate without atomic cross-multisig
+/// coordination. Until acceptance, the current authority retains full
+/// control (typo-resistant via `configure`).
 pub fn handler(ctx: Context<AcceptAuthority>) -> Result<()> {
     let config = &mut ctx.accounts.relayer_config;
 
@@ -47,8 +40,7 @@ pub fn handler(ctx: Context<AcceptAuthority>) -> Result<()> {
 
 #[derive(Accounts)]
 pub struct AcceptAuthority<'info> {
-    /// The proposed new authority. Must equal
-    /// `relayer_config.pending_authority`.
+    /// Must equal `relayer_config.pending_authority`.
     pub pending_authority: Signer<'info>,
 
     #[account(
