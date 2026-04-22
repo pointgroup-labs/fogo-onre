@@ -1,0 +1,31 @@
+import { defineConfig } from 'vitest/config'
+
+export default defineConfig({
+  test: {
+    globals: true,
+  },
+})
+
+//
+// import tsconfigPaths from 'vite-tsconfig-paths';
+//
+// export default defineConfig({
+//   plugins: [tsconfigPaths()],
+//   test: {
+//     environment: 'node',
+//     testTimeout: 30000,
+//     hookTimeout: 30000,
+//     // Run tests sequentially to avoid bankrun conflicts
+//     pool: 'forks',
+//     poolOptions: {
+//       forks: {
+//         singleFork: false,
+//         maxForks: 2, // Reduced for Docker/VM environments with limited memory
+//       },
+//     },
+//     // Include test files
+//     include: ['tests/**/*.spec.ts', 'tests/**/*.test.ts'],
+//     // Globals for Jest-like API (optional, but makes migration easier)
+//     globals: true,
+//   },
+// });

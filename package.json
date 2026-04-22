@@ -16,12 +16,14 @@
   },
   "devDependencies": {
     "@antfu/eslint-config": "^8.1.1",
+    "@noble/hashes": "^2.2.0",
     "@solana/spl-token": "^0.4.14",
     "@types/bn.js": "^5.2.0",
     "anchor-litesvm": "^0.2.1",
+    "bs58": "^6.0.0",
     "eslint": "^10.2.0",
     "eslint-plugin-format": "^2.0.1",
-    "litesvm": "^1.0.0",
+    "litesvm": "^0.6.0",
     "typescript": "^6.0.2",
     "vitest": "^4.1.4"
   }
