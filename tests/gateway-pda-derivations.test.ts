@@ -24,13 +24,13 @@ const BRIDGE_VERIFIED = {
   TB_AUTHORITY_SIGNER: '7oPa2PHQdZmjSPqvpZN7MQxnC7Dcf3uL4oLqknGLk2S3',
   TB_EMITTER: 'Gv1KWf8DT1jKv5pKBmGaTmVszqa56Xn8YGx2Pg7i7qAk',
   // seeds=["sender"] under the relayer program (NOT under TB).
-  TB_SENDER_RELAYER: '9fFNimsNMMcixe6hRjWfekBwasvTsrcvbbjhdqR4LE3z',
+  TB_SENDER_RELAYER: 'RKnWJ9vqsPHEqvX3j5gc5kQvVZ9SyGXmbrZLQifoRZF',
   CB_CONFIG: '2yVjuQwpsvdsrywzsJJVs9Ueh4zayyo5DYJbBNc3DDpn',
   CB_FEE_COLLECTOR: '9bFNrXNb2WTx8fMHXCheaZqkLZ3YCCaiqTftHxeintHy',
   CB_SEQUENCE_TB_EMITTER: 'GF2ghkjwsR9CHkGk1RvuZrApPZGBZynxMm817VNi51Nf',
   // seeds=["redeemer"] under the relayer program; TB enforces
   // `redeemer.key == to.owner` in CompleteWrappedWithPayload.
-  TB_REDEEMER_RELAYER: '2XtaHscG2XULsyDxUryqzGeFNq6wNS3fjkyCPK8vz7oo',
+  TB_REDEEMER_RELAYER: '8VY4EBzMzGkTeMTNohpZevNZyFGyQsasSNMJfvnTKA1r',
 } as const
 
 // `custody_signer` is only used by TB's NATIVE outbound path
@@ -51,7 +51,7 @@ describe('gateway PDA helpers — bridge-verified', () => {
     expect(pda.toBase58()).toBe(BRIDGE_VERIFIED.TB_MINT_AUTHORITY)
   })
 
-  it('token Bridge redeemer PDA (under relayer program) pins to 2XtaHscG...', () => {
+  it('token Bridge redeemer PDA (under relayer program) pins to 8VY4EBzM...', () => {
     const [pda] = findTokenBridgeRedeemerPda(RELAYER_PROGRAM_ID)
     expect(pda.toBase58()).toBe(BRIDGE_VERIFIED.TB_REDEEMER_RELAYER)
   })
@@ -66,7 +66,7 @@ describe('gateway PDA helpers — bridge-verified', () => {
     expect(pda.toBase58()).toBe(BRIDGE_VERIFIED.TB_EMITTER)
   })
 
-  it('token Bridge sender PDA (caller=relayer) pins to 9fFNimsN...', () => {
+  it('token Bridge sender PDA (caller=relayer) pins to RKnWJ9vq...', () => {
     const [pda] = findTokenBridgeSenderPda(RELAYER_PROGRAM_ID)
     expect(pda.toBase58()).toBe(BRIDGE_VERIFIED.TB_SENDER_RELAYER)
   })

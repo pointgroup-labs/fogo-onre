@@ -1,6 +1,8 @@
-shellEmulator: true
-
-trustPolicy: no-downgrade
 
 packages:
   - packages/*
+allowBuilds:
+  bigint-buffer: true
+shellEmulator: true
+
+trustPolicy: no-downgrade

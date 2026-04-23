@@ -48,7 +48,6 @@ const TB_ACCOUNTS_MIN_LEN: usize = TB_IDX_GATEWAY_CLAIM + 1;
 /// `remaining_accounts` is Gateway's full account list with the relayer
 /// authority PDA appended for the CPI helper's signer flag.
 pub fn handler<'info>(ctx: Context<'info, ClaimUsdc<'info>>) -> Result<()> {
-    // See top-of-file block comment for the attack the position pinning prevents.
     require!(
         ctx.remaining_accounts.len() >= TB_ACCOUNTS_MIN_LEN,
         RelayerError::InvalidAccountSplit

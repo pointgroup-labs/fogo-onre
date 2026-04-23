@@ -5,7 +5,7 @@
  * IDL can be found at `target/idl/relayer.json`.
  */
 export type Relayer = {
-  "address": "Re1ayRHhmeqByGjgT5uLFExZCvQ8sv6LK74xowK8pJH",
+  "address": "onrenRKgX54qtWeK3cuaTBE71xx7dWMXn82ubH61vAp",
   "metadata": {
     "name": "relayer",
     "version": "0.1.0",

@@ -1,5 +1,5 @@
 [toolchain]
-anchor_version = "1.0.0"
+anchor_version = "1.0.1"
 solana_version = "3.1.8"
 package_manager = "pnpm"
 
@@ -9,13 +9,13 @@ resolution = true
 skip-lint = false
 
 [programs.localnet]
-relayer = "Re1ayRHhmeqByGjgT5uLFExZCvQ8sv6LK74xowK8pJH"
+relayer = "onrenRKgX54qtWeK3cuaTBE71xx7dWMXn82ubH61vAp"
 
 [programs.devnet]
-relayer = "Re1ayRHhmeqByGjgT5uLFExZCvQ8sv6LK74xowK8pJH"
+relayer = "onrenRKgX54qtWeK3cuaTBE71xx7dWMXn82ubH61vAp"
 
 [programs.mainnet]
-relayer = "Re1ayRHhmeqByGjgT5uLFExZCvQ8sv6LK74xowK8pJH"
+relayer = "onrenRKgX54qtWeK3cuaTBE71xx7dWMXn82ubH61vAp"
 
 [provider]
 cluster = "localnet"

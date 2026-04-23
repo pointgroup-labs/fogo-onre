@@ -14,9 +14,9 @@ pub mod vaa;
 
 use instructions::*;
 
-declare_id!("Re1ayRHhmeqByGjgT5uLFExZCvQ8sv6LK74xowK8pJH");
+declare_id!("onrenRKgX54qtWeK3cuaTBE71xx7dWMXn82ubH61vAp");
 
-/// Stateless cross-chain relayer between FOGO and Solana (Phase 1 — no vault).
+/// Stateless cross-chain relayer between FOGO and Solana.
 ///
 /// All operational instructions are permissionless. Safety comes from the
 /// Flow PDA design: each inbound Wormhole message carries the originating

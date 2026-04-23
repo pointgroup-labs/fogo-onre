@@ -9,8 +9,8 @@ readme = "./README.md"
 edition = "2021"
 
 [workspace.dependencies]
-anchor-lang = "1.0.0"
-anchor-spl = { version = "1.0.0", features = ["token", "associated_token"] }
+anchor-lang = "1.0.1"
+anchor-spl = { version = "1.0.1", features = ["token", "associated_token"] }
 anyhow = "1"
 
 [workspace.lints.clippy]

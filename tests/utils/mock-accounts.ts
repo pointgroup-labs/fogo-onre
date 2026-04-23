@@ -67,7 +67,7 @@ export function setFlowAccount(
   svm: LiteSVM,
   address: PublicKey,
   flow: FlowData,
-  programId: PublicKey = new PublicKey('Re1ayRHhmeqByGjgT5uLFExZCvQ8sv6LK74xowK8pJH'),
+  programId: PublicKey = new PublicKey('onrenRKgX54qtWeK3cuaTBE71xx7dWMXn82ubH61vAp'),
 ): void {
   const data = serializeFlow(flow)
   svm.setAccount(address, {
