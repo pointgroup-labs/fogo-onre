@@ -101,8 +101,14 @@ at minimum:
       cannot be bypassed by passing a different bump or seed permutation.
 - [ ] Outbound recipient is bound to `flow.fogo_sender` (parsed from a
       guardian-signed VAA), NOT a caller-supplied parameter. Since the
-      flow instructions are permissionless (any wallet can crank), the
-      caller MUST be unable to redirect transfers. Confirmed.
+      flow instructions are permissionless on the **deposit** side
+      (any wallet can crank `claim_usdc` / `swap_usdc_to_onyc` /
+      `lock_onyc`), the caller MUST be unable to redirect transfers.
+      Confirmed for the deposit chain. ⚠️ The withdraw chain
+      (`unlock_onyc` / `swap_onyc_to_usdc` / `send_usdc_to_user`) is
+      currently non-functional against live OnRe — see §4 — so the
+      "permissionless caller cannot redirect" property is moot until
+      that chain is redesigned. Once it is, re-audit this row.
 - [ ] NTT session-authority delegation in `lock_onyc` — confirm the
       keccak-of-args binding prevents cross-call PDA reuse.
 
@@ -192,7 +198,11 @@ windows).
 - [ ] Run **at least 10** end-to-end deposit cycles (FOGO → claim_usdc →
       swap → lock_onyc) and **at least 10** end-to-end withdrawal cycles
       (FOGO → unlock_onyc → swap → send_usdc_to_user) over **at least
-      72 hours**. Confirm:
+      72 hours**. ⚠️ The withdrawal-cycle half of this gate is
+      **currently unrunnable** — `swap_onyc_to_usdc` has no valid
+      OnRe target on devnet either (same protocol mismatch as
+      mainnet, see §4). Cannot proceed past this item until the
+      relayer withdraw chain is redesigned. Confirm:
       - All Flow PDAs close cleanly with rent returned to the original payer
       - No orphaned Flow PDAs after replay attempts
       - NTT rate-limit accumulators behave as expected across the
@@ -209,6 +219,18 @@ windows).
 are **permissionless** — anyone with enough SOL to pay the transaction
 fee can call them, and that's by design. There is no operator / curator
 key the system depends on. (See `SECURITY_MODEL.md` §4.2.)
+
+> **⚠️ Withdraw chain caveat (Apr 2026)**: the deposit-side
+> instructions (`claim_usdc`, `swap_usdc_to_onyc`, `lock_onyc`) are
+> truly permissionless and the cranking decision below applies to
+> them as written. The withdraw-side instructions (`unlock_onyc`,
+> `swap_onyc_to_usdc`, `send_usdc_to_user`) are not currently
+> runnable end-to-end (see §4). Whichever resolution path is chosen
+> for the withdraw chain redesign will introduce a soft dependency
+> on OnRe's `redemption_admin` (or its replacement). The cranker
+> roster decision below MUST be revisited after that redesign — the
+> "no operator key the system depends on" claim does not survive a
+> `request_redemption` + admin-fulfilled `claim_redemption` design.
 
 What still needs to be decided before deploy:
 
@@ -267,9 +289,23 @@ verifications. The auto-verifiable items below are ticked because the
 property is now enforced by a test (or a one-shot grep). Human-action
 items in §1-§8 are NOT affected and still require deployer sign-off.
 
+> **⚠️ Mid-sprint architectural finding**: while attempting to close
+> the withdraw-chain test gap, the sprint discovered that the
+> relayer's `swap_onyc_to_usdc` is mis-targeted against OnRe's
+> actual API (it CPIs `take_offer_permissionless` against an `Offer`
+> PDA that doesn't exist on the withdraw direction; OnRe's withdraw
+> path uses a separate `RedemptionOffer` + admin-fulfilled
+> `fulfill_redemption_request`). This is upgraded from "missing
+> test coverage" to "missing relayer implementation against the
+> real OnRe protocol". §4 is therefore not a sign-off item but a
+> code-change-required item, and §7 (devnet soak) cannot be run
+> for the withdraw cycles until that code change lands. See §4
+> body and `docs/fogo-onre.md` top-of-file banner.
+
 ### Test-suite delta
-- **vitest**: 52 → 58 passing (1 `it.todo` for the withdraw-chain e2e
-  documented under §4).
+- **vitest**: 52 → 58 passing (1 `it.todo` for the withdraw-chain
+  e2e — **note**: the todo is not just a missing test, it documents
+  the missing relayer implementation; see §4).
 - **cargo unit tests** (`cargo test -p fogo-relayer --lib`): 1 → 12
   passing — `apply_fee_bps` now covered for fee=0, fee=1 with rounding,
   fee=10000 / ZeroAmountFlow, gross=0, gross=u64::MAX with valid bps

@@ -161,10 +161,10 @@ USDC.s owed is locked at the NAV at queue time. This is safe because ONyc price 
 
 5. Curator initiates bONyc burn on FOGO via NTT (bONyc burned, guardian message sent)
 6. On Solana: NTT releases ONyc to relayer PDA
-7. Relayer CPI: OnRe `take_offer_permissionless` (ONyc -> USDC) — **⚠️ INVALID, see callout above**
-8. Relayer CPI: Wormhole Gateway transfer (USDC -> FOGO vault)
-9. USDC.s arrives in vault reserve on FOGO
-10. Curator calls `vault.fulfill_withdrawals()` — queued users paid from reserve (FIFO)
+7. Relayer CPI: OnRe `take_offer_permissionless` (ONyc -> USDC) — **⚠️ INVALID, see callout above; chain halts here**
+8. ~~Relayer CPI: Wormhole Gateway transfer (USDC -> FOGO vault)~~ — unreachable
+9. ~~USDC.s arrives in vault reserve on FOGO~~ — unreachable
+10. ~~Curator calls `vault.fulfill_withdrawals()` — queued users paid from reserve (FIFO)~~ — unreachable; queued requests accumulate without fulfillment
 
 ### Capital Deployment (curator-operated, invisible to user)
 
