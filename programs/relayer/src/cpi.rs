@@ -28,6 +28,7 @@
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::instruction::{AccountMeta, Instruction};
 use anchor_lang::solana_program::program::invoke_signed;
+use anchor_spl::token_interface::{transfer_checked, TransferChecked};
 
 use crate::constants::{REDEEMER_SEED, RELAYER_SEED, SENDER_SEED};
 use crate::error::RelayerError;
@@ -138,6 +139,45 @@ pub fn invoke_relayer_signed_with_sender<'info, A: AnchorSerialize>(
     };
     invoke_signed(&ix, remaining_accounts, &[auth_seeds, send_seeds])?;
     Ok(())
+}
+
+/// `transfer_checked` signed by the relayer authority PDA.
+///
+/// Centralises the seed-handling for the relayer authority across the two
+/// fee-routing call sites (`request_redemption_onyc`, `swap_usdc_to_onyc`)
+/// so seed bugs (the #1 footgun in CPI code) live in exactly one place.
+/// Skips the CPI entirely when `amount == 0`, matching the prior call-site
+/// pattern of `if fee > 0 { transfer_checked(...) }`.
+#[allow(clippy::too_many_arguments)]
+pub fn relayer_signed_transfer_checked<'info>(
+    token_program: &AccountInfo<'info>,
+    from: &AccountInfo<'info>,
+    mint: &AccountInfo<'info>,
+    to: &AccountInfo<'info>,
+    authority: &AccountInfo<'info>,
+    authority_bump: u8,
+    amount: u64,
+    decimals: u8,
+) -> Result<()> {
+    if amount == 0 {
+        return Ok(());
+    }
+    let bump_arr = [authority_bump];
+    let seeds: &[&[u8]] = &[RELAYER_SEED, &bump_arr];
+    transfer_checked(
+        CpiContext::new_with_signer(
+            *token_program.key,
+            TransferChecked {
+                from: from.clone(),
+                mint: mint.clone(),
+                to: to.clone(),
+                authority: authority.clone(),
+            },
+            &[seeds],
+        ),
+        amount,
+        decimals,
+    )
 }
 
 /// Walk `remaining_accounts`, force the signer flag on the authority PDA

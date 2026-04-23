@@ -19,25 +19,18 @@
 //!      between snapshot and read.
 
 use anchor_lang::prelude::*;
-use anchor_spl::token_interface::{
-    transfer_checked, Mint, TokenAccount, TokenInterface, TransferChecked,
-};
+use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};
 
 use crate::constants::{
     CONFIG_SEED, FLOW_OUTBOUND_SEED, ONRE_CREATE_REDEMPTION_REQUEST_IX,
     ONRE_CREATE_REDEMPTION_REQUEST_REDEMPTION_REQUEST_INDEX, ONRE_PROGRAM_ID,
     REDEMPTION_TRACKER_SEED, RELAYER_SEED,
 };
-use crate::cpi::invoke_relayer_signed;
+use crate::cpi::{invoke_relayer_signed, relayer_signed_transfer_checked};
 use crate::error::RelayerError;
 use crate::events::RedemptionRequested;
+use crate::onre::OnreCreateRedemptionRequestArgs;
 use crate::state::{Flow, FlowStatus, RedemptionTracker, RelayerConfig};
-
-/// OnRe `create_redemption_request` args.
-#[derive(AnchorSerialize)]
-pub struct OnreCreateRedemptionRequestArgs {
-    pub amount: u64,
-}
 
 /// Permissionless. Pre: `flow.status == Claimed`. Post:
 /// `flow.status == RedemptionPending`, singleton tracker initialized,
@@ -57,24 +50,16 @@ pub fn handler<'info>(ctx: Context<'info, RequestRedemptionOnyc<'info>>) -> Resu
     // is what OnRe receives.
     let (net, fee) = ctx.accounts.relayer_config.apply_withdraw_fee(gross)?;
 
-    if fee > 0 {
-        let auth_bump = [ctx.accounts.relayer_config.relayer_authority_bump];
-        let auth_seeds: &[&[u8]] = &[RELAYER_SEED, &auth_bump];
-        transfer_checked(
-            CpiContext::new_with_signer(
-                ctx.accounts.token_program.key(),
-                TransferChecked {
-                    from: ctx.accounts.onyc_ata.to_account_info(),
-                    mint: ctx.accounts.onyc_mint.to_account_info(),
-                    to: ctx.accounts.fee_vault.to_account_info(),
-                    authority: ctx.accounts.relayer_authority.to_account_info(),
-                },
-                &[auth_seeds],
-            ),
-            fee,
-            ctx.accounts.onyc_mint.decimals,
-        )?;
-    }
+    relayer_signed_transfer_checked(
+        &ctx.accounts.token_program.to_account_info(),
+        &ctx.accounts.onyc_ata.to_account_info(),
+        &ctx.accounts.onyc_mint.to_account_info(),
+        &ctx.accounts.fee_vault.to_account_info(),
+        &ctx.accounts.relayer_authority.to_account_info(),
+        ctx.accounts.relayer_config.relayer_authority_bump,
+        fee,
+        ctx.accounts.onyc_mint.decimals,
+    )?;
 
     // Snapshot BEFORE the CPI. Two invariants make this delta safe:
     //   - Singleton mutex: no other in-flight withdraw redemption.

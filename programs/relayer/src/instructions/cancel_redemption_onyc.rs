@@ -40,11 +40,8 @@ use crate::constants::{
 use crate::cpi::invoke_relayer_signed;
 use crate::error::RelayerError;
 use crate::events::RedemptionCancelled;
+use crate::onre::OnreCancelRedemptionRequestArgs;
 use crate::state::{Flow, FlowStatus, RedemptionTracker, RelayerConfig};
-
-/// OnRe `cancel_redemption_request` takes no args.
-#[derive(AnchorSerialize)]
-pub struct OnreCancelRedemptionRequestArgs {}
 
 /// Authority-only. Pre: `flow.status == RedemptionPending`. Post:
 /// `flow.status == Claimed`, ONyc returned to `onyc_ata`, singleton closed.

@@ -1,24 +1,15 @@
 use anchor_lang::prelude::*;
-use anchor_spl::token_interface::{
-    transfer_checked, Mint, TokenAccount, TokenInterface, TransferChecked,
-};
+use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};
 
 use crate::constants::{
     CONFIG_SEED, FLOW_INBOUND_SEED, ONRE_PROGRAM_ID, ONRE_TAKE_OFFER_IX, REDEMPTION_TRACKER_SEED,
     RELAYER_SEED,
 };
-use crate::cpi::invoke_relayer_signed;
+use crate::cpi::{invoke_relayer_signed, relayer_signed_transfer_checked};
 use crate::error::RelayerError;
 use crate::events::OnycSwapped;
+use crate::onre::OnreTakeOfferArgs;
 use crate::state::{Flow, FlowStatus, RelayerConfig};
-
-/// OnRe `take_offer_permissionless` args. The relayer always targets
-/// permissionless offers, so `approval_message` is `None`.
-#[derive(AnchorSerialize)]
-struct OnreTakeOfferArgs {
-    amount: u64,
-    approval_message: Option<Vec<u8>>,
-}
 
 /// Permissionless. Swaps the flow's USDC into ONyc via OnRe, then takes the
 /// deposit-leg fee from the ONyc output and routes it to `fee_vault`.
@@ -78,24 +69,16 @@ pub fn handler<'info>(ctx: Context<'info, SwapUsdcToOnyc<'info>>) -> Result<()> 
     // authority-owned `onyc_ata` that just received the swap proceeds.
     let (net, fee) = ctx.accounts.relayer_config.apply_deposit_fee(gross)?;
 
-    if fee > 0 {
-        let auth_bump = [ctx.accounts.relayer_config.relayer_authority_bump];
-        let auth_seeds: &[&[u8]] = &[RELAYER_SEED, &auth_bump];
-        transfer_checked(
-            CpiContext::new_with_signer(
-                ctx.accounts.token_program.key(),
-                TransferChecked {
-                    from: ctx.accounts.onyc_ata.to_account_info(),
-                    mint: ctx.accounts.onyc_mint.to_account_info(),
-                    to: ctx.accounts.fee_vault.to_account_info(),
-                    authority: ctx.accounts.relayer_authority.to_account_info(),
-                },
-                &[auth_seeds],
-            ),
-            fee,
-            ctx.accounts.onyc_mint.decimals,
-        )?;
-    }
+    relayer_signed_transfer_checked(
+        &ctx.accounts.token_program.to_account_info(),
+        &ctx.accounts.onyc_ata.to_account_info(),
+        &ctx.accounts.onyc_mint.to_account_info(),
+        &ctx.accounts.fee_vault.to_account_info(),
+        &ctx.accounts.relayer_authority.to_account_info(),
+        ctx.accounts.relayer_config.relayer_authority_bump,
+        fee,
+        ctx.accounts.onyc_mint.decimals,
+    )?;
 
     let flow = &mut ctx.accounts.inflight_flow;
     flow.amount = net;
