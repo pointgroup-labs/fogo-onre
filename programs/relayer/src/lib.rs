@@ -8,7 +8,6 @@ pub mod error;
 pub mod events;
 pub mod instructions;
 pub mod ntt;
-pub mod onre;
 pub mod state;
 pub mod vaa;
 

@@ -391,4 +391,18 @@ mod tests {
         use crate::constants::ONRE_CREATE_REDEMPTION_REQUEST_REDEMPTION_REQUEST_INDEX;
         assert_eq!(ONRE_CREATE_REDEMPTION_REQUEST_REDEMPTION_REQUEST_INDEX, 2);
     }
+
+    /// The deposit-leg authority MUST derive to a different address than
+    /// the relayer authority, otherwise the two would share an associated
+    /// USDC ATA and the deposit-vs-redemption isolation that defends
+    /// `claim_redemption_usdc`'s delta math collapses. The seed strings
+    /// being distinct guarantees distinct PDAs since `find_program_address`
+    /// is collision-resistant; this test pins the seed strings themselves.
+    #[test]
+    fn deposit_and_relayer_seeds_are_distinct() {
+        use crate::constants::{DEPOSIT_AUTHORITY_SEED, RELAYER_SEED};
+        assert_ne!(DEPOSIT_AUTHORITY_SEED, RELAYER_SEED);
+        assert_eq!(DEPOSIT_AUTHORITY_SEED, b"deposit_authority");
+        assert_eq!(RELAYER_SEED, b"relayer");
+    }
 }

@@ -56,9 +56,14 @@ pub fn handler(ctx: Context<ClaimRedemptionUsdc>) -> Result<()> {
         RelayerError::RedemptionNotFulfilled
     );
 
-    // USDC arrived at our ATA as part of `fulfill_redemption_request`. The
-    // singleton mutex (held by `redemption_tracker`'s existence since the
-    // request) guarantees no concurrent redemption polluted this delta.
+    // USDC arrived at our ATA as part of `fulfill_redemption_request`. Two
+    // invariants make this delta exact:
+    //   - Singleton mutex (held by `redemption_tracker`'s existence since
+    //     the request) blocks any sibling withdraw redemption.
+    //   - Deposit-side migration: `claim_usdc` and `swap_usdc_to_onyc`
+    //     route via `deposit_usdc_ata` (owned by `deposit_authority`), so
+    //     deposit-chain inflows never land here. The only writer between
+    //     snapshot and read is OnRe.
     ctx.accounts.usdc_ata.reload()?;
     let delta = ctx
         .accounts

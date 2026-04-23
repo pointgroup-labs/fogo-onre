@@ -86,6 +86,16 @@ pub const SPL_TOKEN_APPROVE_IX_TAG: u8 = 4;
 /// Owner of all long-lived token accounts; signs outbound CPIs.
 pub const RELAYER_SEED: &[u8] = b"relayer";
 
+/// Owner of the deposit-leg USDC + ONyc intermediate ATAs. Introduced to
+/// isolate deposit-chain USDC inflows from the `relayer_authority` USDC ATA,
+/// which OnRe pays into during withdraw-leg `fulfill_redemption_request`
+/// (its `user_token_out_account` is `associated(USDC, redeemer = relayer_authority)`,
+/// pinned by KYC whitelist on OnRe's side and so not movable). Without
+/// isolation the deposit-chain `claim_usdc` inflows would pollute the
+/// `claim_redemption_usdc` snapshot/delta math and let withdraw-side flows
+/// over-attribute deposit USDC to themselves. See WITHDRAW_REDESIGN.md §2.5.
+pub const DEPOSIT_AUTHORITY_SEED: &[u8] = b"deposit_authority";
+
 /// TB redeemer PDA, used only by `claim_usdc`. TB enforces that the inbound
 /// token account's owner equals either `vaa.to` or the redeemer PDA, so
 /// `claim_usdc` uses a short-lived redeemer-owned USDC ATA as the TB `to`

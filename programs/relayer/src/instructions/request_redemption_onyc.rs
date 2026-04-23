@@ -8,9 +8,17 @@
 //!
 //! The singleton `RedemptionTracker` PDA serves dual purpose: state binding
 //! (which `RedemptionRequest` we're polling, what the pre-balance was) AND
-//! in-flight mutex (Anchor `init` errors if a prior tracker still exists,
-//! which is what makes the simple ATA-delta math in `claim_redemption_usdc`
-//! correct without duplicating OnRe's pricing logic on-chain).
+//! in-flight mutex (Anchor `init` errors if a prior tracker still exists).
+//! The ATA-delta math in `claim_redemption_usdc` is correct because:
+//!   1. The singleton mutex ensures no concurrent withdraw redemption
+//!      contributes to `usdc_ata` between snapshot and read.
+//!   2. The deposit chain was migrated to `deposit_usdc_ata` (owned by
+//!      `deposit_authority`), so `claim_usdc` and `swap_usdc_to_onyc` no
+//!      longer touch `usdc_ata`. The `relayer_authority`-owned `usdc_ata`
+//!      is now single-writer (only OnRe `fulfill_redemption_request`
+//!      writes), single-reader (only `send_usdc_to_user` and our snapshot
+//!      read), and single-purpose. See `DEPOSIT_AUTHORITY_SEED` rationale
+//!      in `constants.rs`.
 
 use anchor_lang::prelude::*;
 use anchor_spl::token_interface::{
@@ -70,9 +78,11 @@ pub fn handler<'info>(ctx: Context<'info, RequestRedemptionOnyc<'info>>) -> Resu
         )?;
     }
 
-    // Snapshot BEFORE the CPI. Singleton constraint guarantees no other
-    // pending redemption is contributing to this balance, so the delta in
-    // `claim_redemption_usdc` will be exclusively this flow's USDC.
+    // Snapshot BEFORE the CPI. Two invariants make this delta safe:
+    //   - Singleton mutex: no other in-flight withdraw redemption.
+    //   - Deposit-side migration: `claim_usdc` writes to `deposit_usdc_ata`
+    //     (owned by `deposit_authority`), not here. The only writer to
+    //     `usdc_ata` between snapshot and post-fulfill read is OnRe.
     ctx.accounts.usdc_ata.reload()?;
     let usdc_pre = ctx.accounts.usdc_ata.amount;
 

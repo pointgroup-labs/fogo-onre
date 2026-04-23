@@ -4,7 +4,7 @@ use anchor_spl::{
     token_interface::{Mint, TokenAccount, TokenInterface},
 };
 
-use crate::constants::{CONFIG_SEED, REDEEMER_SEED, RELAYER_SEED};
+use crate::constants::{CONFIG_SEED, DEPOSIT_AUTHORITY_SEED, REDEEMER_SEED, RELAYER_SEED};
 use crate::error::RelayerError;
 use crate::state::RelayerConfig;
 
@@ -30,10 +30,12 @@ pub fn handler(
     config.validate()?;
 
     msg!(
-        "Relayer initialized. USDC ATA: {}. ONyc ATA: {}. Redeemer USDC intake ATA: {}. Fee vault: {}.",
+        "Relayer initialized. USDC ATA: {}. ONyc ATA: {}. Redeemer USDC intake ATA: {}. Deposit USDC ATA: {}. Deposit ONyc ATA: {}. Fee vault: {}.",
         ctx.accounts.usdc_ata.key(),
         ctx.accounts.onyc_ata.key(),
         ctx.accounts.redeemer_usdc_ata.key(),
+        ctx.accounts.deposit_usdc_ata.key(),
+        ctx.accounts.deposit_onyc_ata.key(),
         ctx.accounts.fee_vault.key(),
     );
 
@@ -94,7 +96,7 @@ pub struct Initialize<'info> {
     pub onyc_ata: InterfaceAccount<'info, TokenAccount>,
 
     /// `claim_usdc` mints into this ATA via TB then immediately sweeps it
-    /// to `usdc_ata` under the redeemer's signature.
+    /// to `deposit_usdc_ata` under the redeemer's signature.
     #[account(
         init,
         payer = authority,
@@ -103,6 +105,46 @@ pub struct Initialize<'info> {
         associated_token::token_program = token_program,
     )]
     pub redeemer_usdc_ata: InterfaceAccount<'info, TokenAccount>,
+
+    /// CHECK: PDA derived from DEPOSIT_AUTHORITY_SEED; owns the deposit-leg
+    /// USDC + ONyc intermediate ATAs. Signs the OnRe `take_offer_permissionless`
+    /// CPI in `swap_usdc_to_onyc`. Created here so its bump can be looked up
+    /// at runtime via `find_program_address` in the deposit-leg instructions
+    /// (we deliberately avoid persisting the bump on `RelayerConfig` to keep
+    /// its byte layout backward-compatible across already-allocated PDAs).
+    #[account(
+        seeds = [DEPOSIT_AUTHORITY_SEED],
+        bump,
+    )]
+    pub deposit_authority: UncheckedAccount<'info>,
+
+    /// Deposit-chain USDC sink: `claim_usdc` sweeps bridged USDC here, then
+    /// `swap_usdc_to_onyc` feeds it into OnRe's `take_offer_permissionless`
+    /// as `user_token_in_account`. Isolating from `usdc_ata` is what makes
+    /// the withdraw-chain delta math safe — see `DEPOSIT_AUTHORITY_SEED`
+    /// rationale in `constants.rs`.
+    #[account(
+        init,
+        payer = authority,
+        associated_token::mint = usdc_mint,
+        associated_token::authority = deposit_authority,
+        associated_token::token_program = token_program,
+    )]
+    pub deposit_usdc_ata: InterfaceAccount<'info, TokenAccount>,
+
+    /// Transient deposit-chain ONyc sink: OnRe delivers ONyc here as the
+    /// permissionless take's `user_token_out_account` (forced by OnRe's
+    /// `associated_token::authority = user` constraint). `swap_usdc_to_onyc`
+    /// then transfers the received ONyc into `onyc_ata` so `lock_onyc` keeps
+    /// its existing read path. Normally zero between instructions.
+    #[account(
+        init,
+        payer = authority,
+        associated_token::mint = onyc_mint,
+        associated_token::authority = deposit_authority,
+        associated_token::token_program = token_program,
+    )]
+    pub deposit_onyc_ata: InterfaceAccount<'info, TokenAccount>,
 
     /// Anti-aliasing constraint: forbidding `fee_vault == onyc_ata`
     /// prevents silent self-transfer no-ops that would commingle user

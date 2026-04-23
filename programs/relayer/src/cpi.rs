@@ -29,7 +29,7 @@ use anchor_lang::prelude::*;
 use anchor_lang::solana_program::instruction::{AccountMeta, Instruction};
 use anchor_lang::solana_program::program::invoke_signed;
 
-use crate::constants::{REDEEMER_SEED, RELAYER_SEED, SENDER_SEED};
+use crate::constants::{DEPOSIT_AUTHORITY_SEED, REDEEMER_SEED, RELAYER_SEED, SENDER_SEED};
 use crate::error::RelayerError;
 
 /// Invoke an external program signed by the relayer authority PDA.
@@ -137,6 +137,41 @@ pub fn invoke_relayer_signed_with_sender<'info, A: AnchorSerialize>(
         data,
     };
     invoke_signed(&ix, remaining_accounts, &[auth_seeds, send_seeds])?;
+    Ok(())
+}
+
+/// Invoke an external program signed only by the deposit-authority PDA.
+///
+/// Used by `swap_usdc_to_onyc` for OnRe `take_offer_permissionless`. OnRe
+/// constrains both `user_token_in_account` and `user_token_out_account` to
+/// `associated_token::authority = user`, so the deposit-leg's USDC source
+/// and ONyc destination must be owned by the same PDA we sign as `user`.
+/// `relayer_authority` does not co-sign because OnRe does not require it.
+pub fn invoke_deposit_signed<'info, A: AnchorSerialize>(
+    program_id: Pubkey,
+    discriminator: &[u8],
+    args: &A,
+    remaining_accounts: &[AccountInfo<'info>],
+    deposit_authority: &AccountInfo<'info>,
+    deposit_authority_bump: u8,
+) -> Result<()> {
+    let (metas, data) = build_ix_metas_and_data(
+        discriminator,
+        args,
+        remaining_accounts,
+        deposit_authority.key,
+        None,
+    )?;
+
+    let bump_arr = [deposit_authority_bump];
+    let seeds: &[&[u8]] = &[DEPOSIT_AUTHORITY_SEED, &bump_arr];
+
+    let ix = Instruction {
+        program_id,
+        accounts: metas,
+        data,
+    };
+    invoke_signed(&ix, remaining_accounts, &[seeds])?;
     Ok(())
 }
 
