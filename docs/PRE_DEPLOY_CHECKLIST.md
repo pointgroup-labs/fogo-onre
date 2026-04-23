@@ -20,6 +20,18 @@ If you cannot truthfully tick a box, **do not deploy**.
 - [ ] Compare the program ID embedded in the binary (`anchor keys list`)
       to the canonical `onrenRKgX54qtWeK3cuaTBE71xx7dWMXn82ubH61vAp` in
       `Anchor.toml` and `programs/relayer/src/lib.rs`. They MUST match.
+- [ ] **Crate rename migration (one-time, post-`fogo-onre-relayer` rename).**
+      The Cargo `[lib].name` was renamed `fogo_relayer` → `fogo_onre_relayer`,
+      so `anchor build` now reads/writes `target/deploy/fogo_onre_relayer-keypair.json`.
+      A fresh `anchor build` on a clean tree will GENERATE A NEW ORPHAN
+      KEYPAIR at that path with a non-canonical pubkey, breaking the
+      program-ID check above. Before building, copy the canonical
+      keypair into the new filename:
+      `cp target/deploy/fogo_relayer-keypair.json target/deploy/fogo_onre_relayer-keypair.json`
+      then verify `solana-keygen pubkey target/deploy/fogo_onre_relayer-keypair.json`
+      returns `onrenRKgX54qtWeK3cuaTBE71xx7dWMXn82ubH61vAp`. If your
+      canonical keypair is held in operator-controlled storage (HSM,
+      Yubikey, sealed envelope), restore it under the new filename.
 - [ ] Run `cargo test -p fogo-onre-relayer --lib` and confirm all unit tests
       pass.
 - [ ] **Manually diff `programs/relayer/src/constants.rs`** in the deploy
@@ -323,11 +335,14 @@ items in §1-§8 are NOT affected and still require deployer sign-off.
   is neither `usdc_mint` nor `onyc_mint`.
 
 ### Auto-verified items (re-tick on every release)
-- [x] §1.2 Program ID consistency: `Anchor.toml` (all clusters),
-      `programs/relayer/src/lib.rs` `declare_id!`, and
-      `target/deploy/fogo_onre_relayer-keypair.json` pubkey all resolve
-      to `onrenRKgX54qtWeK3cuaTBE71xx7dWMXn82ubH61vAp` as of this
-      addendum date.
+- [x] §1.2 Program ID consistency: `Anchor.toml` (all clusters) and
+      `programs/relayer/src/lib.rs` `declare_id!` resolve to
+      `onrenRKgX54qtWeK3cuaTBE71xx7dWMXn82ubH61vAp` as of this addendum
+      date. **NOTE:** the `target/deploy/fogo_onre_relayer-keypair.json`
+      pubkey is no longer auto-verifiable post-rename — see §1's new
+      "Crate rename migration" item. The deployer must restore the
+      canonical keypair under the new filename before `anchor build`,
+      otherwise it generates a fresh orphan keypair.
 - [x] §1.3 `cargo test -p fogo-onre-relayer --lib` — 12/12 passing.
 - [x] §4 CPI program IDs in `programs/relayer/src/constants.rs`
       match the canonical mainnet addresses for: Wormhole Core
