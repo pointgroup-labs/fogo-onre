@@ -161,34 +161,40 @@ pub struct SwapUsdcToOnyc<'info> {
     /// Owned by `deposit_authority`; OnRe enforces
     /// `user_token_in_account.authority == user` so this is the only USDC
     /// account OnRe will accept here.
+    /// Boxed: `try_accounts` for this struct overflows the eBPF 4 KiB stack
+    /// budget when every `InterfaceAccount<TokenAccount>` materialises
+    /// inline (~165 B each + alignment). Boxing pushes them to the heap
+    /// without changing semantics.
     #[account(
         mut,
         associated_token::mint = usdc_mint,
         associated_token::authority = deposit_authority,
         associated_token::token_program = token_program,
     )]
-    pub deposit_usdc_ata: InterfaceAccount<'info, TokenAccount>,
+    pub deposit_usdc_ata: Box<InterfaceAccount<'info, TokenAccount>>,
 
     /// Transient deposit-leg ONyc sink. OnRe's
     /// `user_token_out_account.authority == user` constraint forces this
     /// to be the deposit_authority's ATA. We immediately drain it into
-    /// `onyc_ata` post-CPI.
+    /// `onyc_ata` post-CPI. Boxed for the same stack-budget reason as
+    /// `deposit_usdc_ata`.
     #[account(
         mut,
         associated_token::mint = onyc_mint,
         associated_token::authority = deposit_authority,
         associated_token::token_program = token_program,
     )]
-    pub deposit_onyc_ata: InterfaceAccount<'info, TokenAccount>,
+    pub deposit_onyc_ata: Box<InterfaceAccount<'info, TokenAccount>>,
 
     /// Long-lived ONyc account that downstream `lock_onyc` reads from.
+    /// Boxed for the same stack-budget reason as the deposit ATAs above.
     #[account(
         mut,
         associated_token::mint = onyc_mint,
         associated_token::authority = relayer_authority,
         associated_token::token_program = token_program,
     )]
-    pub onyc_ata: InterfaceAccount<'info, TokenAccount>,
+    pub onyc_ata: Box<InterfaceAccount<'info, TokenAccount>>,
 
     /// Pinned by `has_one = fee_vault`. Any pre-existing ONyc account;
     /// need not be relayer-owned.

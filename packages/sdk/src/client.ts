@@ -37,6 +37,7 @@ import {
   findInflightFlowPda,
   findOutflightFlowPda,
   findRedeemerAuthorityPda,
+  findRedemptionTrackerPda,
 } from './pda'
 
 export class RelayerClient {
@@ -417,51 +418,6 @@ export class RelayerClient {
   }
 
   /**
-   * Swap ONyc to USDC via OnRe (withdrawal leg). The SDK assembles OnRe's
-   * 22-entry `remainingAccounts` list when `onre` is supplied. Omit it for
-   * failure-path tests that exercise relayer-side validation before the CPI.
-   */
-  swapOnycToUsdc(params: {
-    usdcMint: PublicKey
-    onycMint: PublicKey
-    nttInboxItem: PublicKey
-    /**
-     * OnRe context overrides. Same semantics as `swapUsdcToOnyc.onre`.
-     */
-    onre?: OnreSwapContext
-  }) {
-    const [outflightFlow] = findOutflightFlowPda(params.nttInboxItem, this.program.programId)
-    const builder = this.program.methods
-      .swapOnycToUsdc()
-      .accounts({
-        relayerConfig: this.configPda,
-        relayerAuthority: this.authorityPda,
-        usdcMint: params.usdcMint,
-        onycMint: params.onycMint,
-        usdcAta: this.ata(params.usdcMint),
-        onycAta: this.ata(params.onycMint),
-        nttInboxItem: params.nttInboxItem,
-        outflightFlow,
-        tokenProgram: TOKEN_PROGRAM_ID,
-      } as any)
-
-    if (!params.onre) {
-      return builder
-    }
-    return builder.remainingAccounts(
-      buildOnreSwapRemainingAccounts({
-        // Withdrawal direction: ONyc in, USDC out.
-        tokenInMint: params.onycMint,
-        tokenOutMint: params.usdcMint,
-        userTokenInAccount: this.ata(params.onycMint),
-        userTokenOutAccount: this.ata(params.usdcMint),
-        user: this.authorityPda,
-        ctx: params.onre,
-      }),
-    )
-  }
-
-  /**
    * Send USDC back to the FOGO user. Consumes the flow PDA. SDK builds the
    * Token Bridge `TransferWrappedWithPayload` account list. Bridge-program-verified — see `gateway.ts`.
    *
@@ -482,6 +438,7 @@ export class RelayerClient {
     message?: PublicKey
   }) {
     const [outflightFlow] = findOutflightFlowPda(params.nttInboxItem, this.program.programId)
+    const [redemptionTracker] = findRedemptionTrackerPda(this.program.programId)
     const builder = this.program.methods
       .sendUsdcToUser()
       .accounts({
@@ -493,6 +450,7 @@ export class RelayerClient {
         nttInboxItem: params.nttInboxItem,
         outflightFlow,
         rentDestination: params.rentDestination,
+        redemptionTracker,
         tokenProgram: TOKEN_PROGRAM_ID,
       } as any)
 

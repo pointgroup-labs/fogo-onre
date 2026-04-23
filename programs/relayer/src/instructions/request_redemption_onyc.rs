@@ -167,23 +167,26 @@ pub struct RequestRedemptionOnyc<'info> {
     pub onyc_mint: InterfaceAccount<'info, Mint>,
 
     /// Pre-balance snapshot source for the `claim_redemption_usdc` delta.
+    /// Boxed: total stack budget for `try_accounts` overflows the eBPF
+    /// 4 KiB cap when every `InterfaceAccount<TokenAccount>` is inline.
     #[account(
         mut,
         associated_token::mint = usdc_mint,
         associated_token::authority = relayer_authority,
         associated_token::token_program = token_program,
     )]
-    pub usdc_ata: InterfaceAccount<'info, TokenAccount>,
+    pub usdc_ata: Box<InterfaceAccount<'info, TokenAccount>>,
 
     /// Source of the fee transfer; OnRe's CPI also pulls from here via the
-    /// `redeemer_token_account` slot in `remaining_accounts`.
+    /// `redeemer_token_account` slot in `remaining_accounts`. Boxed for
+    /// the same stack-budget reason as `usdc_ata`.
     #[account(
         mut,
         associated_token::mint = onyc_mint,
         associated_token::authority = relayer_authority,
         associated_token::token_program = token_program,
     )]
-    pub onyc_ata: InterfaceAccount<'info, TokenAccount>,
+    pub onyc_ata: Box<InterfaceAccount<'info, TokenAccount>>,
 
     #[account(
         mut,

@@ -13,27 +13,24 @@ export type Relayer = {
     "description": "Fogo OnRe relayer — stateless PDA-custody relay between Wormhole Gateway, OnRe, and Wormhole NTT on Solana"
   },
   "docs": [
-    "Stateless cross-chain relayer between FOGO and Solana (Phase 1 — no",
-    "vault).",
+    "Stateless cross-chain relayer between FOGO and Solana.",
     "",
-    "All operational instructions are permissionless — anyone can crank any",
-    "step. Safety comes from the Flow PDA design: each inbound Wormhole",
-    "message (Gateway VAA or NTT VAA) carries the originating FOGO user's",
-    "wallet in its payload. `claim_usdc` / `unlock_onyc` persist that wallet",
-    "in a one-shot `Flow` PDA keyed by the bridge's per-VAA claim account",
-    "pubkey; `lock_onyc` / `send_usdc_to_user` then consume that PDA to",
-    "choose the outbound recipient. The Flow PDA also tracks status and",
-    "amount, isolating concurrent flows and enabling resumability."
+    "All operational instructions are permissionless. Safety comes from the",
+    "Flow PDA design: each inbound Wormhole message carries the originating",
+    "FOGO user's wallet in its payload. `claim_usdc` / `unlock_onyc` persist",
+    "that wallet in a one-shot `Flow` PDA keyed by the bridge's per-VAA claim",
+    "account; `lock_onyc` / `send_usdc_to_user` consume the PDA to choose the",
+    "outbound recipient. A stolen operator key cannot redirect outbound",
+    "transfers — the claim PDA is CPI-created by the bridge program and",
+    "unforgeable."
   ],
   "instructions": [
     {
       "name": "acceptAuthority",
       "docs": [
-        "Two-step authority rotation, step two. Signer must equal",
-        "`relayer_config.pending_authority`; on success that key",
-        "atomically becomes `authority` and the pending slot clears.",
-        "The current authority does NOT participate, by design — the",
-        "two-step pattern lets two independent multisigs rotate",
+        "Two-step rotation, step two. Signer must equal",
+        "`relayer_config.pending_authority`. The current authority does NOT",
+        "participate — by design, so two independent multisigs can rotate",
         "without atomic cross-multisig coordination."
       ],
       "discriminator": [
@@ -50,8 +47,7 @@ export type Relayer = {
         {
           "name": "pendingAuthority",
           "docs": [
-            "The proposed new authority. Must equal",
-            "`relayer_config.pending_authority`."
+            "Must equal `relayer_config.pending_authority`."
           ],
           "signer": true
         },
@@ -86,11 +82,456 @@ export type Relayer = {
       "args": []
     },
     {
+      "name": "cancelRedemptionOnyc",
+      "docs": [
+        "Authority-only escape hatch. Aborts an in-flight OnRe redemption",
+        "(returns ONyc to `onyc_ata`, rolls flow back to `Claimed`, frees",
+        "the singleton). Authority-gated to prevent the",
+        "request→cancel→request fee-griefing loop a permissionless cancel",
+        "would enable. See `cancel_redemption_onyc.rs` for stuck-redemption",
+        "scenarios."
+      ],
+      "discriminator": [
+        173,
+        168,
+        252,
+        110,
+        16,
+        149,
+        112,
+        62
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "signer": true,
+          "relations": [
+            "relayerConfig"
+          ]
+        },
+        {
+          "name": "relayerConfig",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  108,
+                  97,
+                  121,
+                  101,
+                  114,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "relayerAuthority",
+          "docs": [
+            "in `invoke_relayer_signed`. Must be the redeemer recorded inside",
+            "`redemption_request` (OnRe's cancel constraint enforces this), so",
+            "the unlocked ONyc returns to its ATA (`onyc_ata`)."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  108,
+                  97,
+                  121,
+                  101,
+                  114
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "onycMint",
+          "relations": [
+            "relayerConfig"
+          ]
+        },
+        {
+          "name": "onycAta",
+          "docs": [
+            "Pinned by `has_one = onyc_mint` and ATA derivation. Receives the",
+            "unlocked ONyc back from OnRe's redemption vault. Already exists",
+            "(created in `initialize`), so OnRe's `init_if_needed` on the",
+            "equivalent slot inside the CPI is a no-op and `signer` (us) does",
+            "not actually pay rent."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "relayerAuthority"
+              },
+              {
+                "kind": "account",
+                "path": "tokenProgram"
+              },
+              {
+                "kind": "account",
+                "path": "onycMint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "nttInboxItem"
+        },
+        {
+          "name": "outflightFlow",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  111,
+                  117,
+                  116,
+                  102,
+                  108,
+                  105,
+                  103,
+                  104,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "nttInboxItem"
+              }
+            ]
+          }
+        },
+        {
+          "name": "redemptionTracker",
+          "docs": [
+            "Singleton; closes to its original payer (recorded in `tracker.payer`).",
+            "`tracker.flow == outflight_flow.key()` is verified in the handler."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  100,
+                  101,
+                  109,
+                  112,
+                  116,
+                  105,
+                  111,
+                  110,
+                  95,
+                  116,
+                  114,
+                  97,
+                  99,
+                  107,
+                  101,
+                  114
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "payerForClose",
+          "docs": [
+            "payer recorded in the tracker is who gets the rent back — same",
+            "invariant as `claim_redemption_usdc`'s close path so a cancelled-",
+            "then-reclaimed flow never has rent diverted."
+          ],
+          "writable": true
+        },
+        {
+          "name": "tokenProgram"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "claimRedemptionUsdc",
+      "docs": [
+        "Once OnRe's `redemption_admin` has fulfilled (signal: their",
+        "`RedemptionRequest` PDA is closed), book the USDC delta onto the",
+        "flow and close the singleton. Caller-permissionless."
+      ],
+      "discriminator": [
+        171,
+        90,
+        50,
+        244,
+        156,
+        19,
+        211,
+        106
+      ],
+      "accounts": [
+        {
+          "name": "cranker",
+          "docs": [
+            "Receives rent from the closed `redemption_tracker`. Need not be the",
+            "same key as `tracker.payer` — the close-target is pinned by the",
+            "`close = payer_for_close` constraint to `tracker.payer`, see below.",
+            "The cranker pays tx fees."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "relayerConfig",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  108,
+                  97,
+                  121,
+                  101,
+                  114,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "relayerAuthority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  108,
+                  97,
+                  121,
+                  101,
+                  114
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "usdcMint",
+          "relations": [
+            "relayerConfig"
+          ]
+        },
+        {
+          "name": "usdcAta",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "relayerAuthority"
+              },
+              {
+                "kind": "account",
+                "path": "tokenProgram"
+              },
+              {
+                "kind": "account",
+                "path": "usdcMint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "nttInboxItem"
+        },
+        {
+          "name": "outflightFlow",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  111,
+                  117,
+                  116,
+                  102,
+                  108,
+                  105,
+                  103,
+                  104,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "nttInboxItem"
+              }
+            ]
+          }
+        },
+        {
+          "name": "redemptionTracker",
+          "docs": [
+            "Singleton, closes to its original payer (recorded in `tracker.payer`).",
+            "`tracker.flow == outflight_flow.key()` is verified in the handler."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  100,
+                  101,
+                  109,
+                  112,
+                  116,
+                  105,
+                  111,
+                  110,
+                  95,
+                  116,
+                  114,
+                  97,
+                  99,
+                  107,
+                  101,
+                  114
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "payerForClose",
+          "docs": [
+            "payer recorded in the tracker is who gets the rent back."
+          ],
+          "writable": true
+        },
+        {
+          "name": "redemptionRequest",
+          "docs": [
+            "it has been closed by OnRe's `fulfill_redemption_request`."
+          ]
+        },
+        {
+          "name": "tokenProgram"
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "claimUsdc",
       "docs": [
-        "Claim USDC bridged from a FOGO user via Wormhole Gateway. Creates",
-        "a `Flow` receipt that binds the eventual bONyc return to that same",
-        "user's FOGO wallet."
+        "Claim bridged USDC and create an inflight `Flow` receipt binding the",
+        "eventual bONyc return to the originator's FOGO wallet."
       ],
       "discriminator": [
         43,
@@ -155,9 +596,6 @@ export type Relayer = {
         },
         {
           "name": "redeemerAuthority",
-          "docs": [
-            "Redeemer PDA — signs the Token Bridge CPI and the post-CPI sweep."
-          ],
           "pda": {
             "seeds": [
               {
@@ -183,17 +621,52 @@ export type Relayer = {
           ]
         },
         {
-          "name": "usdcAta",
+          "name": "depositAuthority",
           "docs": [
-            "Long-lived USDC ATA owned by the relayer authority PDA; the final",
-            "destination of the claim. Populated by the post-CPI sweep."
+            "`deposit_usdc_ata`. Bump runtime-derived (not persisted on",
+            "`RelayerConfig`)."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  101,
+                  112,
+                  111,
+                  115,
+                  105,
+                  116,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "depositUsdcAta",
+          "docs": [
+            "Long-lived deposit-chain USDC sink: `claim_usdc` sweeps here, then",
+            "`swap_usdc_to_onyc` feeds OnRe `take_offer_permissionless` from this",
+            "account. Owned by `deposit_authority` (NOT `relayer_authority`) so",
+            "withdraw-chain inflows on `usdc_ata` stay isolated."
           ],
           "writable": true,
           "pda": {
             "seeds": [
               {
                 "kind": "account",
-                "path": "relayerAuthority"
+                "path": "depositAuthority"
               },
               {
                 "kind": "account",
@@ -246,9 +719,8 @@ export type Relayer = {
         {
           "name": "redeemerUsdcAta",
           "docs": [
-            "Short-lived USDC intake ATA owned by the redeemer PDA. TB mints",
-            "directly into this account during `CompleteWrappedWithPayload`;",
-            "we then sweep the balance into `usdc_ata` in the same instruction."
+            "Short-lived intake ATA — TB mints into it during the CPI; we sweep",
+            "to `deposit_usdc_ata` in the same instruction."
           ],
           "writable": true,
           "pda": {
@@ -308,22 +780,19 @@ export type Relayer = {
         {
           "name": "postedVaa",
           "docs": [
-            "Wormhole posted-VAA account. We read `fogo_sender` from its on-chain",
-            "data (guardian-signed) rather than trusting an instruction argument."
+            "`fogo_sender` is read from on-chain (guardian-signed) data, not args."
           ]
         },
         {
           "name": "gatewayClaim",
           "docs": [
-            "Wormhole Gateway's per-VAA claim PDA. Created by the Gateway CPI;",
-            "we use its pubkey as unique seed material for the flow PDA."
+            "Per-VAA Gateway claim PDA — its pubkey seeds the flow PDA."
           ]
         },
         {
           "name": "inflightFlow",
           "docs": [
-            "One-shot flow receipt. `init` fails if a flow for this claim PDA",
-            "already exists (double-claim protection)."
+            "`init` blocks double-claims against the same gateway claim PDA."
           ],
           "writable": true,
           "pda": {
@@ -361,13 +830,10 @@ export type Relayer = {
     {
       "name": "configure",
       "docs": [
-        "Update admin-mutable relayer config. Pass `None` for fee args you",
-        "don't want to change; the `fee_vault` account is optional and",
-        "only validated/written when supplied. `new_authority`:",
-        "`Some(pk)` proposes `pk` as the next authority (writes",
-        "`pending_authority`; current `authority` unchanged); `None`",
-        "leaves the proposal slot alone; `Some(Pubkey::default())`",
-        "cancels any in-flight proposal. Authority-only."
+        "Authority-only. `None` args leave the corresponding field unchanged.",
+        "`new_authority`: `Some(pk)` proposes; `Some(default())` cancels;",
+        "`None` leaves the proposal slot alone. Acceptance happens in",
+        "`accept_authority`."
       ],
       "discriminator": [
         245,
@@ -417,9 +883,8 @@ export type Relayer = {
         {
           "name": "relayerAuthority",
           "docs": [
-            "Relayer authority PDA — owns `onyc_ata`. Re-derived here so the",
-            "associated-token derivation on `onyc_ata` resolves and the",
-            "anti-aliasing constraint can compare a fully-typed ATA pubkey."
+            "Re-derived so the associated-token derivation on `onyc_ata` resolves",
+            "for the anti-aliasing constraint."
           ],
           "pda": {
             "seeds": [
@@ -447,8 +912,7 @@ export type Relayer = {
         {
           "name": "onycAta",
           "docs": [
-            "The relayer's operating ONyc ATA — referenced solely to enforce",
-            "`fee_vault != onyc_ata`. Not mutated."
+            "Referenced solely to enforce `fee_vault != onyc_ata`."
           ],
           "pda": {
             "seeds": [
@@ -507,10 +971,8 @@ export type Relayer = {
         {
           "name": "feeVault",
           "docs": [
-            "New fee vault destination. `None` to leave the stored vault",
-            "unchanged. When `Some`, must hold ONyc; the anti-aliasing check",
-            "(`fee_vault != onyc_ata`) runs in the handler since Anchor's",
-            "constraint-attribute expressions can't cleanly disambiguate",
+            "`None` leaves the stored vault unchanged. The anti-aliasing check",
+            "runs in the handler — Anchor constraint exprs can't disambiguate",
             "`Option::as_ref` against `InterfaceAccount`'s `AsRef` impls."
           ],
           "optional": true
@@ -543,8 +1005,7 @@ export type Relayer = {
     {
       "name": "initialize",
       "docs": [
-        "One-time setup: create the relayer config PDA + USDC/ONyc ATAs",
-        "owned by the relayer authority PDA."
+        "One-time setup: create config PDA + relayer-authority-owned ATAs."
       ],
       "discriminator": [
         175,
@@ -559,18 +1020,11 @@ export type Relayer = {
       "accounts": [
         {
           "name": "authority",
-          "docs": [
-            "Deployer / authority — pays for account creation and becomes the",
-            "admin key."
-          ],
           "writable": true,
           "signer": true
         },
         {
           "name": "relayerConfig",
-          "docs": [
-            "Relayer config PDA — stores mint references."
-          ],
           "writable": true,
           "pda": {
             "seeds": [
@@ -598,9 +1052,6 @@ export type Relayer = {
         },
         {
           "name": "relayerAuthority",
-          "docs": [
-            "Relayer authority PDA — owns the token accounts."
-          ],
           "pda": {
             "seeds": [
               {
@@ -621,9 +1072,9 @@ export type Relayer = {
         {
           "name": "redeemerAuthority",
           "docs": [
-            "Redeemer PDA — serves as Token Bridge's payload-delivery signer in",
-            "`CompleteWrappedWithPayload` AND as the owner of the short-lived USDC",
-            "intake ATA (TB requires `redeemer.key == to.owner`)."
+            "Serves as TB's payload-delivery signer in `CompleteWrappedWithPayload`",
+            "AND owns the short-lived USDC intake ATA (TB requires",
+            "`redeemer.key == to.owner`)."
           ],
           "pda": {
             "seeds": [
@@ -644,22 +1095,13 @@ export type Relayer = {
           }
         },
         {
-          "name": "usdcMint",
-          "docs": [
-            "USDC token mint."
-          ]
+          "name": "usdcMint"
         },
         {
-          "name": "onycMint",
-          "docs": [
-            "ONyc token mint."
-          ]
+          "name": "onycMint"
         },
         {
           "name": "usdcAta",
-          "docs": [
-            "USDC associated token account owned by the relayer authority PDA."
-          ],
           "writable": true,
           "pda": {
             "seeds": [
@@ -717,9 +1159,6 @@ export type Relayer = {
         },
         {
           "name": "onycAta",
-          "docs": [
-            "ONyc associated token account owned by the relayer authority PDA."
-          ],
           "writable": true,
           "pda": {
             "seeds": [
@@ -778,9 +1217,8 @@ export type Relayer = {
         {
           "name": "redeemerUsdcAta",
           "docs": [
-            "Redeemer-owned USDC intake ATA. `claim_usdc` deposits bridged USDC",
-            "here (TB mints into it during `CompleteWrappedWithPayload`) and",
-            "immediately sweeps it into `usdc_ata` under the redeemer's signature."
+            "`claim_usdc` mints into this ATA via TB then immediately sweeps it",
+            "to `deposit_usdc_ata` under the redeemer's signature."
           ],
           "writable": true,
           "pda": {
@@ -838,13 +1276,175 @@ export type Relayer = {
           }
         },
         {
+          "name": "depositAuthority",
+          "docs": [
+            "USDC + ONyc intermediate ATAs. Signs the OnRe `take_offer_permissionless`",
+            "CPI in `swap_usdc_to_onyc`. Created here so its bump can be looked up",
+            "at runtime via `find_program_address` in the deposit-leg instructions",
+            "(we deliberately avoid persisting the bump on `RelayerConfig` to keep",
+            "its byte layout backward-compatible across already-allocated PDAs)."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  101,
+                  112,
+                  111,
+                  115,
+                  105,
+                  116,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "depositUsdcAta",
+          "docs": [
+            "Deposit-chain USDC sink: `claim_usdc` sweeps bridged USDC here, then",
+            "`swap_usdc_to_onyc` feeds it into OnRe's `take_offer_permissionless`",
+            "as `user_token_in_account`. Isolating from `usdc_ata` is what makes",
+            "the withdraw-chain delta math safe — see `DEPOSIT_AUTHORITY_SEED`",
+            "rationale in `constants.rs`."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "depositAuthority"
+              },
+              {
+                "kind": "account",
+                "path": "tokenProgram"
+              },
+              {
+                "kind": "account",
+                "path": "usdcMint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "depositOnycAta",
+          "docs": [
+            "Transient deposit-chain ONyc sink: OnRe delivers ONyc here as the",
+            "permissionless take's `user_token_out_account` (forced by OnRe's",
+            "`associated_token::authority = user` constraint). `swap_usdc_to_onyc`",
+            "then transfers the received ONyc into `onyc_ata` so `lock_onyc` keeps",
+            "its existing read path. Normally zero between instructions."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "depositAuthority"
+              },
+              {
+                "kind": "account",
+                "path": "tokenProgram"
+              },
+              {
+                "kind": "account",
+                "path": "onycMint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
           "name": "feeVault",
           "docs": [
-            "Single fee vault — any pre-existing ONyc token account, supplied by",
-            "the deployer at init time. The anti-aliasing constraint prevents the",
-            "caller from passing the relayer's own ONyc ATA, which would silently",
-            "no-op every fee transfer (self-transfer) and let user funds and fees",
-            "keep commingling — defeating the whole point of the vault split."
+            "Anti-aliasing constraint: forbidding `fee_vault == onyc_ata`",
+            "prevents silent self-transfer no-ops that would commingle user",
+            "funds with fees and defeat the vault split."
           ]
         },
         {
@@ -873,8 +1473,7 @@ export type Relayer = {
     {
       "name": "lockOnyc",
       "docs": [
-        "Lock the flow's ONyc amount via Wormhole NTT, sending bONyc back",
-        "to the FOGO wallet recorded in the `Flow` PDA. Consumes the PDA."
+        "Lock ONyc via NTT, sending bONyc to `flow.fogo_sender`. Closes the PDA."
       ],
       "discriminator": [
         4,
@@ -1001,17 +1600,12 @@ export type Relayer = {
           }
         },
         {
-          "name": "gatewayClaim",
-          "docs": [
-            "Same Gateway claim PDA used at `claim_usdc` time."
-          ]
+          "name": "gatewayClaim"
         },
         {
           "name": "inflightFlow",
           "docs": [
-            "The one-shot receipt created by `claim_usdc`. `close = rent_destination`",
-            "consumes the receipt so a second `lock_onyc` against the same flow",
-            "is impossible."
+            "`close = rent_destination` blocks any second `lock_onyc` against this flow."
           ],
           "writable": true,
           "pda": {
@@ -1038,9 +1632,6 @@ export type Relayer = {
         },
         {
           "name": "rentDestination",
-          "docs": [
-            "The original payer who created this flow PDA. Receives the rent refund."
-          ],
           "writable": true
         },
         {
@@ -1050,10 +1641,301 @@ export type Relayer = {
       "args": []
     },
     {
+      "name": "requestRedemptionOnyc",
+      "docs": [
+        "Forward flow's ONyc to OnRe via `create_redemption_request` and",
+        "init the singleton tracker. Caller-permissionless. Fee taken pre-CPI.",
+        "Replaces the deleted `swap_onyc_to_usdc` because OnRe's withdraw",
+        "side is asymmetric — see `docs/WITHDRAW_REDESIGN.md`."
+      ],
+      "discriminator": [
+        117,
+        2,
+        5,
+        175,
+        6,
+        12,
+        151,
+        176
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "relayerConfig",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  108,
+                  97,
+                  121,
+                  101,
+                  114,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "relayerAuthority",
+          "docs": [
+            "`invoke_relayer_signed` for the OnRe CPI."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  108,
+                  97,
+                  121,
+                  101,
+                  114
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "usdcMint",
+          "relations": [
+            "relayerConfig"
+          ]
+        },
+        {
+          "name": "onycMint",
+          "relations": [
+            "relayerConfig"
+          ]
+        },
+        {
+          "name": "usdcAta",
+          "docs": [
+            "Pre-balance snapshot source for the `claim_redemption_usdc` delta.",
+            "Boxed: total stack budget for `try_accounts` overflows the eBPF",
+            "4 KiB cap when every `InterfaceAccount<TokenAccount>` is inline."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "relayerAuthority"
+              },
+              {
+                "kind": "account",
+                "path": "tokenProgram"
+              },
+              {
+                "kind": "account",
+                "path": "usdcMint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "onycAta",
+          "docs": [
+            "Source of the fee transfer; OnRe's CPI also pulls from here via the",
+            "`redeemer_token_account` slot in `remaining_accounts`. Boxed for",
+            "the same stack-budget reason as `usdc_ata`."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "relayerAuthority"
+              },
+              {
+                "kind": "account",
+                "path": "tokenProgram"
+              },
+              {
+                "kind": "account",
+                "path": "onycMint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "feeVault",
+          "writable": true,
+          "relations": [
+            "relayerConfig"
+          ]
+        },
+        {
+          "name": "nttInboxItem"
+        },
+        {
+          "name": "outflightFlow",
+          "docs": [
+            "Created by `unlock_onyc`; must be in `Claimed` status."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  111,
+                  117,
+                  116,
+                  102,
+                  108,
+                  105,
+                  103,
+                  104,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "nttInboxItem"
+              }
+            ]
+          }
+        },
+        {
+          "name": "redemptionTracker",
+          "docs": [
+            "Singleton init — fails if any prior redemption is still in flight.",
+            "This is the on-chain mutex that makes the ATA-delta math safe."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  100,
+                  101,
+                  109,
+                  112,
+                  116,
+                  105,
+                  111,
+                  110,
+                  95,
+                  116,
+                  114,
+                  97,
+                  99,
+                  107,
+                  101,
+                  114
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "tokenProgram"
+        },
+        {
+          "name": "systemProgram",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "sendUsdcToUser",
       "docs": [
-        "Send the flow's USDC amount back to the FOGO user recorded in",
-        "the `Flow` PDA. Consumes the PDA."
+        "Send USDC to `flow.fogo_sender` and close the PDA."
       ],
       "discriminator": [
         34,
@@ -1188,8 +2070,7 @@ export type Relayer = {
         {
           "name": "outflightFlow",
           "docs": [
-            "The one-shot receipt created by `unlock_onyc`. Closing it on",
-            "success returns rent to the original payer and blocks replays."
+            "Closing on success returns rent to the original payer and blocks replays."
           ],
           "writable": true,
           "pda": {
@@ -1217,35 +2098,30 @@ export type Relayer = {
         },
         {
           "name": "rentDestination",
-          "docs": [
-            "The original payer who created this flow PDA. Receives the rent refund."
-          ],
           "writable": true
         },
         {
-          "name": "tokenProgram"
-        }
-      ],
-      "args": []
-    },
-    {
-      "name": "swapOnycToUsdc",
-      "docs": [
-        "Swap the flow's ONyc amount into USDC via OnRe."
-      ],
-      "discriminator": [
-        113,
-        41,
-        170,
-        211,
-        19,
-        16,
-        31,
-        63
-      ],
-      "accounts": [
-        {
-          "name": "relayerConfig",
+          "name": "redemptionTracker",
+          "docs": [
+            "Singleton redemption tracker slot — must NOT currently exist. Gating",
+            "`send_usdc_to_user` on this closes the outflow race in the withdraw-",
+            "chain delta math: while any `RedemptionTracker` is alive, a sibling",
+            "flow may be mid-redemption with its pre-balance snapshot pinned",
+            "against this very `usdc_ata`. A concurrent outflow here would poison",
+            "that delta (`B.redeemed − A.amount` instead of `B.redeemed`),",
+            "causing `BalanceUnderflow` or silent user under-credit.",
+            "",
+            "`SystemAccount` asserts `owner == system_program::ID`. Combined with",
+            "the seed pinning, this passes iff the PDA either never existed or",
+            "was closed (by `claim_redemption_usdc` / `cancel_redemption_onyc`)",
+            "and fails when a redemption is mid-flight — exactly the invariant",
+            "`claim_redemption_usdc`'s snapshot→reload math needs.",
+            "",
+            "Liveness note: already-`Swapped` flows wait on the pending redemption",
+            "to complete. Stuck redemptions are covered by",
+            "`cancel_redemption_onyc`. This is a deliberate correctness-over-",
+            "latency trade."
+          ],
           "pda": {
             "seeds": [
               {
@@ -1253,211 +2129,23 @@ export type Relayer = {
                 "value": [
                   114,
                   101,
-                  108,
-                  97,
-                  121,
+                  100,
                   101,
-                  114,
-                  95,
-                  99,
+                  109,
+                  112,
+                  116,
+                  105,
                   111,
                   110,
-                  102,
-                  105,
-                  103
-                ]
-              }
-            ]
-          }
-        },
-        {
-          "name": "relayerAuthority",
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
+                  95,
+                  116,
                   114,
-                  101,
-                  108,
                   97,
-                  121,
+                  99,
+                  107,
                   101,
                   114
                 ]
-              }
-            ]
-          }
-        },
-        {
-          "name": "usdcMint",
-          "relations": [
-            "relayerConfig"
-          ]
-        },
-        {
-          "name": "onycMint",
-          "relations": [
-            "relayerConfig"
-          ]
-        },
-        {
-          "name": "usdcAta",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "account",
-                "path": "relayerAuthority"
-              },
-              {
-                "kind": "account",
-                "path": "tokenProgram"
-              },
-              {
-                "kind": "account",
-                "path": "usdcMint"
-              }
-            ],
-            "program": {
-              "kind": "const",
-              "value": [
-                140,
-                151,
-                37,
-                143,
-                78,
-                36,
-                137,
-                241,
-                187,
-                61,
-                16,
-                41,
-                20,
-                142,
-                13,
-                131,
-                11,
-                90,
-                19,
-                153,
-                218,
-                255,
-                16,
-                132,
-                4,
-                142,
-                123,
-                216,
-                219,
-                233,
-                248,
-                89
-              ]
-            }
-          }
-        },
-        {
-          "name": "onycAta",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "account",
-                "path": "relayerAuthority"
-              },
-              {
-                "kind": "account",
-                "path": "tokenProgram"
-              },
-              {
-                "kind": "account",
-                "path": "onycMint"
-              }
-            ],
-            "program": {
-              "kind": "const",
-              "value": [
-                140,
-                151,
-                37,
-                143,
-                78,
-                36,
-                137,
-                241,
-                187,
-                61,
-                16,
-                41,
-                20,
-                142,
-                13,
-                131,
-                11,
-                90,
-                19,
-                153,
-                218,
-                255,
-                16,
-                132,
-                4,
-                142,
-                123,
-                216,
-                219,
-                233,
-                248,
-                89
-              ]
-            }
-          }
-        },
-        {
-          "name": "feeVault",
-          "docs": [
-            "Single fee vault — receives the pre-swap withdrawal fee. Pinned by",
-            "`has_one = fee_vault` on `relayer_config`. Can be any pre-existing",
-            "ONyc token account (configured at `initialize` time)."
-          ],
-          "writable": true,
-          "relations": [
-            "relayerConfig"
-          ]
-        },
-        {
-          "name": "nttInboxItem",
-          "docs": [
-            "NTT inbox-item PDA — seed material for the flow PDA."
-          ]
-        },
-        {
-          "name": "outflightFlow",
-          "docs": [
-            "The flow PDA created by `unlock_onyc`. Must be in `Claimed` status."
-          ],
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  111,
-                  117,
-                  116,
-                  102,
-                  108,
-                  105,
-                  103,
-                  104,
-                  116
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "nttInboxItem"
               }
             ]
           }
@@ -1470,9 +2158,6 @@ export type Relayer = {
     },
     {
       "name": "swapUsdcToOnyc",
-      "docs": [
-        "Swap the flow's USDC amount into ONyc via OnRe."
-      ],
       "discriminator": [
         88,
         26,
@@ -1512,6 +2197,9 @@ export type Relayer = {
         },
         {
           "name": "relayerAuthority",
+          "docs": [
+            "transfer out of `onyc_ata` to `fee_vault`."
+          ],
           "pda": {
             "seeds": [
               {
@@ -1530,6 +2218,39 @@ export type Relayer = {
           }
         },
         {
+          "name": "depositAuthority",
+          "docs": [
+            "(as `user`) and the post-swap ONyc handoff into `onyc_ata`. Bump",
+            "runtime-derived (not persisted on `RelayerConfig`)."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  101,
+                  112,
+                  111,
+                  115,
+                  105,
+                  116,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
           "name": "usdcMint",
           "relations": [
             "relayerConfig"
@@ -1542,13 +2263,23 @@ export type Relayer = {
           ]
         },
         {
-          "name": "usdcAta",
+          "name": "depositUsdcAta",
+          "docs": [
+            "Deposit-leg USDC source for the OnRe `take_offer_permissionless` CPI.",
+            "Owned by `deposit_authority`; OnRe enforces",
+            "`user_token_in_account.authority == user` so this is the only USDC",
+            "account OnRe will accept here.",
+            "Boxed: `try_accounts` for this struct overflows the eBPF 4 KiB stack",
+            "budget when every `InterfaceAccount<TokenAccount>` materialises",
+            "inline (~165 B each + alignment). Boxing pushes them to the heap",
+            "without changing semantics."
+          ],
           "writable": true,
           "pda": {
             "seeds": [
               {
                 "kind": "account",
-                "path": "relayerAuthority"
+                "path": "depositAuthority"
               },
               {
                 "kind": "account",
@@ -1599,7 +2330,75 @@ export type Relayer = {
           }
         },
         {
+          "name": "depositOnycAta",
+          "docs": [
+            "Transient deposit-leg ONyc sink. OnRe's",
+            "`user_token_out_account.authority == user` constraint forces this",
+            "to be the deposit_authority's ATA. We immediately drain it into",
+            "`onyc_ata` post-CPI. Boxed for the same stack-budget reason as",
+            "`deposit_usdc_ata`."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "depositAuthority"
+              },
+              {
+                "kind": "account",
+                "path": "tokenProgram"
+              },
+              {
+                "kind": "account",
+                "path": "onycMint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
           "name": "onycAta",
+          "docs": [
+            "Long-lived ONyc account that downstream `lock_onyc` reads from.",
+            "Boxed for the same stack-budget reason as the deposit ATAs above."
+          ],
           "writable": true,
           "pda": {
             "seeds": [
@@ -1658,10 +2457,8 @@ export type Relayer = {
         {
           "name": "feeVault",
           "docs": [
-            "Single fee vault — receives the post-swap deposit fee. Pinned by",
-            "`has_one = fee_vault` on `relayer_config`. Can be any pre-existing",
-            "ONyc token account (configured at `initialize` time); does not need",
-            "to be relayer-owned."
+            "Pinned by `has_one = fee_vault`. Any pre-existing ONyc account;",
+            "need not be relayer-owned."
           ],
           "writable": true,
           "relations": [
@@ -1669,15 +2466,12 @@ export type Relayer = {
           ]
         },
         {
-          "name": "gatewayClaim",
-          "docs": [
-            "Gateway claim PDA — seed material for the flow PDA."
-          ]
+          "name": "gatewayClaim"
         },
         {
           "name": "inflightFlow",
           "docs": [
-            "The flow PDA created by `claim_usdc`. Must be in `Claimed` status."
+            "Created by `claim_usdc`; must be in `Claimed` status."
           ],
           "writable": true,
           "pda": {
@@ -1711,12 +2505,9 @@ export type Relayer = {
     {
       "name": "sweep",
       "docs": [
-        "Authority-only escape hatch to extract stranded balances from the",
-        "relayer-PDA-owned USDC/ONyc ATAs (pre-upgrade commingled fees,",
-        "dust, accidental direct transfers, etc.). Operational flows always",
-        "move exact `Flow.amount` so anything credited outside a tracked",
-        "flow would otherwise be locked forever. See `sweep.rs` for the",
-        "full trust-model rationale."
+        "Authority-only escape hatch for stranded balances on the",
+        "PDA-owned ATAs (commingled fees, dust, accidental transfers).",
+        "See `sweep.rs` for the trust-model rationale."
       ],
       "discriminator": [
         40,
@@ -1784,15 +2575,13 @@ export type Relayer = {
         {
           "name": "mint",
           "docs": [
-            "The mint of the tokens being swept. Constrained at runtime to be",
-            "either `usdc_mint` or `onyc_mint` from `relayer_config`."
+            "Runtime-constrained to `usdc_mint` or `onyc_mint` from config."
           ]
         },
         {
           "name": "from",
           "docs": [
-            "Source — the relayer-authority-owned ATA for `mint`. The",
-            "associated-token derivation pins this implicitly."
+            "Source — relayer-authority-owned ATA for `mint` (ATA derivation pins)."
           ],
           "writable": true,
           "pda": {
@@ -1852,9 +2641,7 @@ export type Relayer = {
         {
           "name": "to",
           "docs": [
-            "Destination — any token account holding `mint`. Authority's",
-            "discretion (typically the configured `fee_vault` for ONyc, or a",
-            "treasury account for USDC)."
+            "Authority's discretion (typically `fee_vault` for ONyc, treasury for USDC)."
           ],
           "writable": true
         },
@@ -1872,9 +2659,8 @@ export type Relayer = {
     {
       "name": "unlockOnyc",
       "docs": [
-        "Release ONyc from NTT custody for an inbound withdrawal VAA, and",
-        "record a `Flow` receipt binding the USDC return to the FOGO user",
-        "who initiated the withdrawal."
+        "Release ONyc from NTT custody and record a `Flow` receipt for the",
+        "withdrawal initiator."
       ],
       "discriminator": [
         225,
@@ -2003,26 +2789,21 @@ export type Relayer = {
         {
           "name": "nttInboxItem",
           "docs": [
-            "NTT inbox-item PDA. Created by the NTT `redeem` CPI; we use its",
-            "pubkey as unique seed material for the flow PDA."
+            "Per-VAA NTT inbox-item PDA — its pubkey seeds the flow PDA."
           ]
         },
         {
           "name": "nttTransceiverMessage",
           "docs": [
-            "NTT `ValidatedTransceiverMessage` for this inbound transfer — same",
-            "account that the caller must pass to the `redeem` CPI in",
-            "`remaining_accounts`. We parse `fogo_sender` directly from its",
-            "already-validated bytes. The `owner` constraint pins the writer to",
-            "the NTT program (which for OnRe's deployment is also the transceiver",
-            "program), so nothing outside NTT can have crafted this data."
+            "`fogo_sender` is parsed from this already-validated bytes. `owner`",
+            "pins the writer to NTT (== transceiver in OnRe's deployment), so",
+            "nothing outside NTT can have crafted this data."
           ]
         },
         {
           "name": "outflightFlow",
           "docs": [
-            "One-shot receipt PDA for the withdrawal leg. `init` fails on",
-            "replay (same NTT inbox → same PDA → already exists)."
+            "`init` blocks replay (same NTT inbox → same PDA → already exists)."
           ],
           "writable": true,
           "pda": {
@@ -2079,6 +2860,19 @@ export type Relayer = {
       ]
     },
     {
+      "name": "redemptionTracker",
+      "discriminator": [
+        1,
+        150,
+        121,
+        192,
+        138,
+        107,
+        94,
+        3
+      ]
+    },
+    {
       "name": "relayerConfig",
       "discriminator": [
         116,
@@ -2130,6 +2924,45 @@ export type Relayer = {
         174,
         42,
         160
+      ]
+    },
+    {
+      "name": "redemptionCancelled",
+      "discriminator": [
+        22,
+        106,
+        118,
+        26,
+        83,
+        110,
+        71,
+        174
+      ]
+    },
+    {
+      "name": "redemptionClaimed",
+      "discriminator": [
+        107,
+        251,
+        199,
+        213,
+        59,
+        173,
+        53,
+        189
+      ]
+    },
+    {
+      "name": "redemptionRequested",
+      "discriminator": [
+        245,
+        155,
+        98,
+        131,
+        210,
+        25,
+        137,
+        146
       ]
     },
     {
@@ -2277,6 +3110,26 @@ export type Relayer = {
       "code": 6020,
       "name": "pendingAuthorityMismatch",
       "msg": "Signer does not match relayer_config.pending_authority"
+    },
+    {
+      "code": 6021,
+      "name": "redemptionNotFulfilled",
+      "msg": "OnRe RedemptionRequest PDA still exists — redemption_admin has not fulfilled yet"
+    },
+    {
+      "code": 6022,
+      "name": "redemptionRequestMismatch",
+      "msg": "Provided redemption_request account does not match tracker.redemption_request"
+    },
+    {
+      "code": 6023,
+      "name": "redemptionTrackerFlowMismatch",
+      "msg": "RedemptionTracker.flow does not match the bound Flow PDA"
+    },
+    {
+      "code": 6024,
+      "name": "missingRedemptionState",
+      "msg": "RedemptionTracker missing or unexpected for this flow status"
     }
   ],
   "types": [
@@ -2284,24 +3137,17 @@ export type Relayer = {
       "name": "flow",
       "docs": [
         "One-shot receipt binding an inbound bridge message to a FOGO user wallet.",
+        "Used by both legs — direction is implicit in the seed prefix",
+        "(`FLOW_INBOUND_SEED` vs `FLOW_OUTBOUND_SEED`).",
         "",
-        "Used by both deposit and withdrawal legs — direction is implicit in the",
-        "PDA seed prefix (`FLOW_INBOUND_SEED` vs `FLOW_OUTBOUND_SEED`).",
+        "PDA seeds: `[FLOW_*_SEED, bridge_claim_pda.key()]`. Uniqueness and replay",
+        "protection are delegated to the per-VAA claim account created by Wormhole",
+        "Gateway / NTT — no hashing needed here.",
         "",
-        "Created by `claim_usdc` or `unlock_onyc` when the relayer processes an",
-        "inbound Wormhole message. The `fogo_sender` field records the originating",
-        "FOGO user's wallet (parsed from the VAA payload). Consumed by `lock_onyc`",
-        "or `send_usdc_to_user`, which read `fogo_sender` as the outbound",
-        "recipient.",
-        "",
-        "The `status` field tracks which pipeline step has completed, enabling",
-        "resumability if a multi-step flow stalls. The `amount` field isolates",
-        "each flow's capital so concurrent flows don't mix funds.",
-        "",
-        "PDA seeds: `[FLOW_*_SEED, bridge_claim_pda.key()]`, where",
-        "`bridge_claim_pda` is the per-VAA claim account created by Wormhole",
-        "Gateway or NTT. This delegates uniqueness and replay protection to the",
-        "bridge program itself — no hashing needed."
+        "**Field set is byte-stable across the withdraw redesign**. Withdraw-chain",
+        "redemption tracking lives in the sidecar `RedemptionTracker` PDA below",
+        "rather than as new fields here, to preserve compatibility with any",
+        "already-allocated `Flow` PDAs."
       ],
       "type": {
         "kind": "struct",
@@ -2309,8 +3155,7 @@ export type Relayer = {
           {
             "name": "fogoSender",
             "docs": [
-              "FOGO address of the user who originated the bridge message.",
-              "Becomes the outbound Wormhole recipient on the return leg."
+              "Originator on FOGO; becomes the outbound recipient on the return leg."
             ],
             "type": {
               "array": [
@@ -2321,9 +3166,6 @@ export type Relayer = {
           },
           {
             "name": "status",
-            "docs": [
-              "Current status in the pipeline."
-            ],
             "type": {
               "defined": {
                 "name": "flowStatus"
@@ -2340,15 +3182,12 @@ export type Relayer = {
           {
             "name": "payer",
             "docs": [
-              "The payer who created this flow PDA (receives rent on close)."
+              "Receives rent on close."
             ],
             "type": "pubkey"
           },
           {
             "name": "bump",
-            "docs": [
-              "PDA bump."
-            ],
             "type": "u8"
           }
         ]
@@ -2356,9 +3195,6 @@ export type Relayer = {
     },
     {
       "name": "flowStatus",
-      "docs": [
-        "Status of a flow through the relayer pipeline."
-      ],
       "type": {
         "kind": "enum",
         "variants": [
@@ -2367,16 +3203,15 @@ export type Relayer = {
           },
           {
             "name": "swapped"
+          },
+          {
+            "name": "redemptionPending"
           }
         ]
       }
     },
     {
       "name": "onycLocked",
-      "docs": [
-        "Emitted by `lock_onyc` after NTT locks the flow's ONyc amount and",
-        "initiates the bONyc transfer back to FOGO."
-      ],
       "type": {
         "kind": "struct",
         "fields": [
@@ -2407,13 +3242,9 @@ export type Relayer = {
     {
       "name": "onycSwapped",
       "docs": [
-        "Emitted by `swap_usdc_to_onyc` after the OnRe swap completes and the",
-        "post-swap deposit fee has been moved to the fee vault.",
-        "",
-        "`gross_amount` = ONyc received from OnRe (pre-fee).",
-        "`fee_amount`   = deposit fee retained by the relayer (gross - net).",
-        "`net_amount`   = ONyc recorded on the `Flow` PDA (== amount the eventual",
-        "`lock_onyc` will ship back to FOGO)."
+        "`gross_amount` = ONyc received from OnRe; `fee_amount` = deposit fee",
+        "retained; `net_amount` = ONyc recorded on Flow (== amount the eventual",
+        "`lock_onyc` ships back to FOGO)."
       ],
       "type": {
         "kind": "struct",
@@ -2439,11 +3270,6 @@ export type Relayer = {
     },
     {
       "name": "onycUnlocked",
-      "docs": [
-        "Emitted by `unlock_onyc` after the NTT redeem + release CPIs land ONyc",
-        "in the relayer ATA. No fee logic on this leg — fees are taken at",
-        "`swap_onyc_to_usdc`."
-      ],
       "type": {
         "kind": "struct",
         "fields": [
@@ -2472,13 +3298,179 @@ export type Relayer = {
       }
     },
     {
+      "name": "redemptionCancelled",
+      "docs": [
+        "Withdraw chain — emitted by `cancel_redemption_onyc` when the authority",
+        "aborts an in-flight OnRe redemption (e.g. stuck `redemption_admin`,",
+        "kill-switch, KYC issue). `returned_onyc_amount` is the ONyc that OnRe",
+        "has unlocked back into the relayer's `onyc_ata` and is now re-recorded",
+        "on the flow as `flow.amount` with status rolled back to `Claimed`.",
+        "Note: the withdraw fee taken by `request_redemption_onyc` is NOT",
+        "refunded by this path — operator off-chain reconciliation handles dust."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "flow",
+            "type": "pubkey"
+          },
+          {
+            "name": "redemptionRequest",
+            "type": "pubkey"
+          },
+          {
+            "name": "returnedOnycAmount",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "redemptionClaimed",
+      "docs": [
+        "Withdraw chain — emitted by `claim_redemption_usdc` after OnRe has",
+        "fulfilled and we've recorded the USDC delta on the flow. `usdc_received`",
+        "is the post-fulfillment ATA delta and the amount `send_usdc_to_user`",
+        "will ship back to FOGO."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "flow",
+            "type": "pubkey"
+          },
+          {
+            "name": "redemptionRequest",
+            "type": "pubkey"
+          },
+          {
+            "name": "onycAmountIn",
+            "type": "u64"
+          },
+          {
+            "name": "usdcReceived",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "redemptionRequested",
+      "docs": [
+        "Withdraw chain — emitted by `request_redemption_onyc` when ONyc has been",
+        "forwarded to OnRe and the singleton tracker is initialised.",
+        "`redemption_request` is the OnRe `RedemptionRequest` PDA we'll poll."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "flow",
+            "type": "pubkey"
+          },
+          {
+            "name": "redemptionRequest",
+            "type": "pubkey"
+          },
+          {
+            "name": "grossAmount",
+            "type": "u64"
+          },
+          {
+            "name": "feeAmount",
+            "type": "u64"
+          },
+          {
+            "name": "netAmount",
+            "type": "u64"
+          },
+          {
+            "name": "usdcAtaPreBalance",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "redemptionTracker",
+      "docs": [
+        "Singleton sidecar PDA tracking the in-flight withdraw-chain redemption.",
+        "",
+        "PDA seeds: `[REDEMPTION_TRACKER_SEED]` (no per-flow discriminator —",
+        "only one withdraw redemption may be in flight across the whole program",
+        "at a time). The PDA's existence is the in-flight mutex: `init` in",
+        "`request_redemption_onyc` fails if another redemption is mid-flight,",
+        "preventing the USDC-delta race where two flows would otherwise read the",
+        "combined balance change as their own.",
+        "",
+        "Created by `request_redemption_onyc`; closed by `claim_redemption_usdc`",
+        "(rent → `payer`). Never exists on the deposit chain.",
+        "",
+        "See `docs/WITHDRAW_REDESIGN.md` §2.2."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "flow",
+            "docs": [
+              "Outbound `Flow` PDA this tracker is bound to. Pinned by",
+              "`claim_redemption_usdc` via `tracker.flow == flow.key()`."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "redemptionRequest",
+            "docs": [
+              "OnRe `RedemptionRequest` PDA we created. The relayer polls for its",
+              "closure as the fulfillment signal — when this account no longer",
+              "exists on chain, OnRe's `redemption_admin` has fulfilled."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "usdcAtaPreBalance",
+            "docs": [
+              "Relayer's USDC ATA balance snapshotted *before*",
+              "`create_redemption_request` fires. `claim_redemption_usdc` computes",
+              "the post-fulfillment delta against this. Safe under the singleton",
+              "constraint above — no sibling redemption can pollute the delta."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "onycAmountIn",
+            "docs": [
+              "ONyc amount net-of-fee that we sent to OnRe. Audit-trail field;",
+              "not consumed by `claim_redemption_usdc` today, but emitted in events."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "payer",
+            "docs": [
+              "Pays for init, receives rent on close. Set to whoever called",
+              "`request_redemption_onyc`; may differ from the `claim_redemption_usdc`",
+              "caller."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
       "name": "relayerConfig",
       "docs": [
-        "Relayer configuration — the only long-lived state in this program.",
+        "The only long-lived state in this program.",
         "",
-        "The `authority` is a cold/admin key used only for governance (e.g.",
-        "updating config). All operational instructions are permissionless —",
-        "anyone can crank them because recipients are VAA-bound, amounts are",
+        "`authority` is a cold/admin key used only for governance. All operational",
+        "instructions are permissionless — recipients are VAA-bound, amounts are",
         "flow-bound, and CPI targets are compile-time constants."
       ],
       "type": {
@@ -2486,20 +3478,15 @@ export type Relayer = {
         "fields": [
           {
             "name": "authority",
-            "docs": [
-              "Admin key for governance operations."
-            ],
             "type": "pubkey"
           },
           {
             "name": "pendingAuthority",
             "docs": [
-              "Pending admin key, set by `configure(new_authority=Some(pk))`.",
-              "Becomes `authority` only after a separate `accept_authority`",
-              "transaction signed by this key. `None` when no rotation is",
-              "in flight. Two-step design accommodates multisig→multisig",
-              "rotations where the two parties cannot atomically co-sign",
-              "(e.g. two independent Squads vaults)."
+              "Two-step rotation accommodates multisig→multisig handoffs where the two",
+              "parties cannot atomically co-sign (e.g. two independent Squads vaults).",
+              "`None` when no rotation is in flight; set by `configure(new_authority)`,",
+              "promoted to `authority` by a separate `accept_authority` tx from this key."
             ],
             "type": {
               "option": "pubkey"
@@ -2507,52 +3494,39 @@ export type Relayer = {
           },
           {
             "name": "usdcMint",
-            "docs": [
-              "USDC token mint on Solana."
-            ],
             "type": "pubkey"
           },
           {
             "name": "onycMint",
-            "docs": [
-              "ONyc token mint on Solana."
-            ],
             "type": "pubkey"
           },
           {
             "name": "feeVault",
             "docs": [
-              "Single fee vault — PDA-addressed token account holding ALL",
-              "accumulated fees (both deposit-leg and withdrawal-leg, denominated",
-              "in ONyc)."
+              "Single PDA-addressed token account holding ALL accumulated fees from",
+              "both legs (denominated in ONyc)."
             ],
             "type": "pubkey"
           },
           {
             "name": "bump",
-            "docs": [
-              "Bump seed for the config PDA."
-            ],
             "type": "u8"
           },
           {
             "name": "relayerAuthorityBump",
-            "docs": [
-              "Bump seed for the relayer authority PDA (needed for CPI invoke_signed)."
-            ],
             "type": "u8"
           },
           {
             "name": "depositFeeBps",
             "docs": [
-              "Fee in basis points (1 bps = 0.01%) charged on each deposit flow (USDC → ONyc)."
+              "Deposit-leg fee in bps (1 bps = 0.01%)."
             ],
             "type": "u16"
           },
           {
             "name": "withdrawFeeBps",
             "docs": [
-              "Fee in basis points (1 bps = 0.01%) charged on each withdrawal flow (ONyc → USDC)."
+              "Withdrawal-leg fee in bps."
             ],
             "type": "u16"
           }
@@ -2561,10 +3535,6 @@ export type Relayer = {
     },
     {
       "name": "usdcClaimed",
-      "docs": [
-        "Emitted by `claim_usdc` after the Gateway CPI lands USDC in the relayer",
-        "ATA. No fee logic on this leg — fees are taken at `swap_usdc_to_onyc`."
-      ],
       "type": {
         "kind": "struct",
         "fields": [
@@ -2594,10 +3564,6 @@ export type Relayer = {
     },
     {
       "name": "usdcSentToUser",
-      "docs": [
-        "Emitted by `send_usdc_to_user` after the Gateway outbound transfer is",
-        "submitted."
-      ],
       "type": {
         "kind": "struct",
         "fields": [
@@ -2628,14 +3594,9 @@ export type Relayer = {
     {
       "name": "usdcSwapped",
       "docs": [
-        "Emitted by `swap_onyc_to_usdc` after the pre-swap fee has been moved",
-        "to the fee vault and the OnRe swap completes.",
-        "",
-        "`gross_amount`  = ONyc input to the swap step (pre-fee, == flow.amount",
-        "from `unlock_onyc`).",
-        "`fee_amount`    = withdrawal fee in ONyc (taken pre-swap).",
-        "`net_amount`    = ONyc actually swapped (gross - fee).",
-        "`usdc_received` = USDC received from OnRe (recorded on the Flow PDA)."
+        "`gross_amount` = ONyc input (== flow.amount from `unlock_onyc`);",
+        "`fee_amount` = withdrawal fee taken pre-swap; `net_amount` = ONyc",
+        "actually swapped; `usdc_received` = USDC recorded on Flow."
       ],
       "type": {
         "kind": "struct",

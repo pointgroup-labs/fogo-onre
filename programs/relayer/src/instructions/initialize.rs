@@ -84,7 +84,7 @@ pub struct Initialize<'info> {
         associated_token::authority = relayer_authority,
         associated_token::token_program = token_program,
     )]
-    pub usdc_ata: InterfaceAccount<'info, TokenAccount>,
+    pub usdc_ata: Box<InterfaceAccount<'info, TokenAccount>>,
 
     #[account(
         init,
@@ -93,7 +93,7 @@ pub struct Initialize<'info> {
         associated_token::authority = relayer_authority,
         associated_token::token_program = token_program,
     )]
-    pub onyc_ata: InterfaceAccount<'info, TokenAccount>,
+    pub onyc_ata: Box<InterfaceAccount<'info, TokenAccount>>,
 
     /// `claim_usdc` mints into this ATA via TB then immediately sweeps it
     /// to `deposit_usdc_ata` under the redeemer's signature.
@@ -104,7 +104,7 @@ pub struct Initialize<'info> {
         associated_token::authority = redeemer_authority,
         associated_token::token_program = token_program,
     )]
-    pub redeemer_usdc_ata: InterfaceAccount<'info, TokenAccount>,
+    pub redeemer_usdc_ata: Box<InterfaceAccount<'info, TokenAccount>>,
 
     /// CHECK: PDA derived from DEPOSIT_AUTHORITY_SEED; owns the deposit-leg
     /// USDC + ONyc intermediate ATAs. Signs the OnRe `take_offer_permissionless`
@@ -130,7 +130,7 @@ pub struct Initialize<'info> {
         associated_token::authority = deposit_authority,
         associated_token::token_program = token_program,
     )]
-    pub deposit_usdc_ata: InterfaceAccount<'info, TokenAccount>,
+    pub deposit_usdc_ata: Box<InterfaceAccount<'info, TokenAccount>>,
 
     /// Transient deposit-chain ONyc sink: OnRe delivers ONyc here as the
     /// permissionless take's `user_token_out_account` (forced by OnRe's
@@ -144,7 +144,7 @@ pub struct Initialize<'info> {
         associated_token::authority = deposit_authority,
         associated_token::token_program = token_program,
     )]
-    pub deposit_onyc_ata: InterfaceAccount<'info, TokenAccount>,
+    pub deposit_onyc_ata: Box<InterfaceAccount<'info, TokenAccount>>,
 
     /// Anti-aliasing constraint: forbidding `fee_vault == onyc_ata`
     /// prevents silent self-transfer no-ops that would commingle user
@@ -154,7 +154,7 @@ pub struct Initialize<'info> {
         token::token_program = token_program,
         constraint = fee_vault.key() != onyc_ata.key() @ RelayerError::FeeVaultAliasesUserAta,
     )]
-    pub fee_vault: InterfaceAccount<'info, TokenAccount>,
+    pub fee_vault: Box<InterfaceAccount<'info, TokenAccount>>,
 
     pub token_program: Interface<'info, TokenInterface>,
     pub associated_token_program: Program<'info, AssociatedToken>,
