@@ -12,6 +12,25 @@ not depend on who pays the transaction fee. This is the result of several
 layered design choices documented here. None of the layers individually
 is sufficient; the model assumes all are in place.
 
+> **⚠️ April 2026 correction — withdraw chain (`unlock_onyc` →
+> `swap_onyc_to_usdc` → `send_usdc_to_user`)**: the "every operational
+> instruction is permissionless" property has been **verified false** for
+> the withdraw leg against the live OnRe protocol
+> (`onre-finance/onre-sol`). `swap_onyc_to_usdc` CPIs OnRe
+> `take_offer_permissionless` against an `Offer` PDA, but OnRe models
+> withdrawals as a separate `RedemptionOffer` account type with a
+> two-step async flow (`create_redemption_request` →
+> `fulfill_redemption_request`, the latter gated on `boss ||
+> redemption_admin`). The relayer-side withdraw chain therefore
+> **cannot complete on mainnet today**, and even after a redesign the
+> fulfill leg will inherit a soft dependency on OnRe's
+> `redemption_admin` — i.e. the system will no longer be fully
+> permissionless on the withdraw side. This invalidates several
+> claims further down (§3 OnRe trust row, §6 stuck-flow runbook
+> assumptions about re-cranking permissionlessly through the swap).
+> See `docs/PRE_DEPLOY_CHECKLIST.md` §4 for the deploy gate. The
+> deposit chain is unaffected.
+
 ---
 
 ## 1. Key inventory
@@ -88,6 +107,15 @@ out at the published price, plus apply OnRe's own fee. The relayer does
 not validate the OnRe price calculation; it trusts whatever ONyc amount
 `take_offer_permissionless` deposits to the relayer's authority-owned
 ATA, then applies the deposit fee on the post-swap output.
+
+> **⚠️ Asymmetric — applies to deposit only.** The withdraw direction
+> (ONyc → USDC) does NOT have a `take_offer_permissionless`
+> counterpart in OnRe. Withdrawals route through `RedemptionOffer`
+> (`create_redemption_request` → `fulfill_redemption_request`,
+> fulfill gated on `boss || redemption_admin`). The relayer's
+> `swap_onyc_to_usdc` is therefore mis-targeted today and the trust
+> assumption above does NOT cover the withdraw leg. See the banner
+> at the top of this document and `PRE_DEPLOY_CHECKLIST.md` §4.
 
 ### OnRe price-vector authority
 
@@ -355,7 +383,7 @@ runtime check.
 | Symptom                                               | Likely cause                                                           | First action                                                                                                                                                                                                                                                                                                                                       |
 | ----------------------------------------------------- | ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `constants.rs` diff in PR review                      | Possible CPI redirection (intentional or malicious)                    | Diff every changed `pub const Pubkey` and instruction tag against the canonical source linked in each const's doc comment. There is no automated test catching this — reviewer attention is the only line of defense.                                                                                                                              |
-| Flow PDA stuck in `Claimed`                           | Swap CPI failed (price vector stale, NTT/OnRe rate limit, OnRe paused) | Diagnose the upstream condition. The same flow can be re-cranked permissionlessly once the upstream clears — no cancel instruction exists in this version of the program; funds remain in the relayer's authority-owned ATAs and resume on the next successful swap.                                                                               |
+| Flow PDA stuck in `Claimed`                           | Swap CPI failed (price vector stale, NTT/OnRe rate limit, OnRe paused) | Diagnose the upstream condition. **Deposit-leg `swap_usdc_to_onyc`**: the same flow can be re-cranked permissionlessly once the upstream clears — no cancel instruction exists in this version of the program; funds remain in the relayer's authority-owned ATAs and resume on the next successful swap. **Withdraw-leg `swap_onyc_to_usdc`**: cannot be re-cranked at all on mainnet today — the instruction targets `take_offer_permissionless` against a (non-existent) symmetric `Offer`. See the banner at the top of this document; the withdraw chain requires either a relayer redesign (`request_redemption` + `claim_redemption`) or an OnRe protocol extension before any flow that reaches `Claimed` on the withdraw side can clear. |
 | Flow PDA stuck in `Swapped`                           | NTT lock CPI failed (rate limit, custody account state)                | Check NTT outbox rate limit; re-crank `lock_onyc` once it clears. Same caveat — no cancel path; recovery is "wait for upstream + retry".                                                                                                                                                                                                           |
 | `already in use` error on `claim_usdc`                | Replay attempt OR legitimate retry of a flow already created           | Inspect the existing Flow PDA — if it's at `Claimed`/`Swapped` for the same VAA, this is normal idempotence. No double-spend possible because the bridge's own `gateway_claim` PDA is also init-once.                                                                                                                                              |
 | Permanently stuck flow (upstream broken indefinitely) | OnRe / NTT discontinued, frozen mint, etc.                             | **There is no on-chain recovery path.** Funds in the in-flight ATAs require an upgrade-authority action (deploy a patched program with a one-shot rescue instruction, or migrate state to a new program). This is a known limitation of the v1 relayer — see `PRE_DEPLOY_CHECKLIST.md` §6 for the OnRe/NTT availability assumptions this rests on. |
