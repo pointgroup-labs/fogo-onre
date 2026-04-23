@@ -84,6 +84,6 @@ export {
   findRedeemerAuthorityPda,
   findRedemptionTrackerPda,
 } from './pda'
-export { type Relayer } from './types/fogo_relayer'
+export { type Relayer } from './types/fogo_onre_relayer'
 export { BN } from '@anchor-lang/core'
 export type { Provider } from '@anchor-lang/core'

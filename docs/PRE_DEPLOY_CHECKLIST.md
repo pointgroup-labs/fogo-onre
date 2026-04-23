@@ -20,7 +20,7 @@ If you cannot truthfully tick a box, **do not deploy**.
 - [ ] Compare the program ID embedded in the binary (`anchor keys list`)
       to the canonical `onrenRKgX54qtWeK3cuaTBE71xx7dWMXn82ubH61vAp` in
       `Anchor.toml` and `programs/relayer/src/lib.rs`. They MUST match.
-- [ ] Run `cargo test -p fogo-relayer --lib` and confirm all unit tests
+- [ ] Run `cargo test -p fogo-onre-relayer --lib` and confirm all unit tests
       pass.
 - [ ] **Manually diff `programs/relayer/src/constants.rs`** in the deploy
       commit against the previous release. There is no automated CI
@@ -310,7 +310,7 @@ items in §1-§8 are NOT affected and still require deployer sign-off.
 - **vitest**: 52 → 58 passing (1 `it.todo` for the withdraw-chain
   e2e — **note**: the todo is not just a missing test, it documents
   the missing relayer implementation; see §4).
-- **cargo unit tests** (`cargo test -p fogo-relayer --lib`): 1 → 12
+- **cargo unit tests** (`cargo test -p fogo-onre-relayer --lib`): 1 → 12
   passing — `apply_fee_bps` now covered for fee=0, fee=1 with rounding,
   fee=10000 / ZeroAmountFlow, gross=0, gross=u64::MAX with valid bps
   (u128 widening), out-of-range bps overflow → FeeOverflow,
@@ -325,10 +325,10 @@ items in §1-§8 are NOT affected and still require deployer sign-off.
 ### Auto-verified items (re-tick on every release)
 - [x] §1.2 Program ID consistency: `Anchor.toml` (all clusters),
       `programs/relayer/src/lib.rs` `declare_id!`, and
-      `target/deploy/fogo_relayer-keypair.json` pubkey all resolve
+      `target/deploy/fogo_onre_relayer-keypair.json` pubkey all resolve
       to `onrenRKgX54qtWeK3cuaTBE71xx7dWMXn82ubH61vAp` as of this
       addendum date.
-- [x] §1.3 `cargo test -p fogo-relayer --lib` — 12/12 passing.
+- [x] §1.3 `cargo test -p fogo-onre-relayer --lib` — 12/12 passing.
 - [x] §4 CPI program IDs in `programs/relayer/src/constants.rs`
       match the canonical mainnet addresses for: Wormhole Core
       (`worm2Zo…`), Token Bridge / Gateway (`wormDTU…`), NTT

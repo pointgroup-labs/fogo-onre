@@ -55,7 +55,7 @@ jobs:
       # `--lib` runs the in-tree unit tests without needing the Anchor
       # IDL build pipeline.
       - name: cargo test --lib
-        run: cargo test -p fogo-relayer --lib
+        run: cargo test -p fogo-onre-relayer --lib
 
   typescript:
     name: typescript (lint + tests)

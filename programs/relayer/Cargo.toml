@@ -1,12 +1,12 @@
 [package]
-name = "fogo-relayer"
+name = "fogo-onre-relayer"
 version = "0.1.0"
 description = "Fogo OnRe relayer — stateless PDA-custody relay between Wormhole Gateway, OnRe, and Wormhole NTT on Solana"
 edition = { workspace = true }
 
 [lib]
 crate-type = ["cdylib", "lib"]
-name = "fogo_relayer"
+name = "fogo_onre_relayer"
 
 [features]
 default = []

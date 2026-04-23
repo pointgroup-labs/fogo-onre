@@ -3,7 +3,7 @@ import type { PublicKey } from '@solana/web3.js'
 import type { TokenBridgeClaimContext, TokenBridgeTransferContext } from './gateway'
 import type { NttRedeemContext, NttTransferLockContext } from './ntt'
 import type { OnreSwapContext } from './onre'
-import type { Relayer } from './types/fogo_relayer'
+import type { Relayer } from './types/fogo_onre_relayer'
 import { BN, Program } from '@anchor-lang/core'
 
 import {
@@ -19,7 +19,7 @@ import {
   buildClaimWrappedRemainingAccounts,
   buildTransferWrappedRemainingAccounts,
 } from './gateway'
-import IDL from './idl/fogo_relayer.json'
+import IDL from './idl/fogo_onre_relayer.json'
 import {
   findInboxRateLimitPda,
   findNttConfigPda,
