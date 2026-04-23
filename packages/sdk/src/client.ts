@@ -30,7 +30,7 @@ import {
   findTokenAuthorityPda,
   nttTransferArgsHash,
 } from './ntt'
-import { buildOnreSwapRemainingAccounts } from './onre'
+import { buildOnreCancelRedemptionRequestRemainingAccounts, buildOnreCreateRedemptionRequestRemainingAccounts, buildOnreSwapRemainingAccounts } from './onre'
 import {
   findAuthorityPda,
   findConfigPda,
@@ -596,6 +596,184 @@ export class RelayerClient {
       { pubkey: tokenAuthorityPda, isSigner: false, isWritable: false },
       { pubkey: NTT_PROGRAM_ID, isSigner: false, isWritable: false },
     ]
+  }
+
+  /**
+   * Withdraw chain, leg 2: take the withdraw fee on ONyc, snapshot the
+   * relayer's USDC ATA pre-balance, and CPI into OnRe's
+   * `create_redemption_request` to enqueue the ONyc-for-USDC redemption.
+   *
+   * Permissionless. Pre: outflight `flow.status == Claimed`. Post:
+   * `flow.status == RedemptionPending`, singleton `RedemptionTracker`
+   * initialized at `[REDEMPTION_TRACKER_SEED]` with the live
+   * `RedemptionRequest` PDA OnRe just created (cached for leg 3's
+   * closed-PDA poll).
+   *
+   * Caller MUST pass the OnRe `RedemptionRequest` PDA derived from the
+   * `request_counter` value read off the live `RedemptionOffer` BEFORE
+   * the CPI fires (OnRe increments the counter inside the handler). When
+   * `onre` is omitted, `remainingAccounts` stays empty for failure-path
+   * tests that exercise relayer-side validation before the CPI.
+   */
+  requestRedemptionOnyc(params: {
+    payer: PublicKey
+    usdcMint: PublicKey
+    onycMint: PublicKey
+    nttInboxItem: PublicKey
+    /**
+     * OnRe-side context. When supplied, the SDK builds the 11-account
+     * remainingAccounts list. Required field is `redemptionRequest` —
+     * the caller-derived OnRe `RedemptionRequest` PDA.
+     */
+    onre?: {
+      redemptionRequest: PublicKey
+      tokenProgram?: PublicKey
+      programId?: PublicKey
+      state?: PublicKey
+    }
+  }) {
+    const [outflightFlow] = findOutflightFlowPda(params.nttInboxItem, this.program.programId)
+    const [redemptionTracker] = findRedemptionTrackerPda(this.program.programId)
+    const builder = this.program.methods
+      .requestRedemptionOnyc()
+      .accounts({
+        payer: params.payer,
+        relayerConfig: this.configPda,
+        relayerAuthority: this.authorityPda,
+        usdcMint: params.usdcMint,
+        onycMint: params.onycMint,
+        usdcAta: this.ata(params.usdcMint),
+        onycAta: this.ata(params.onycMint),
+        nttInboxItem: params.nttInboxItem,
+        outflightFlow,
+        redemptionTracker,
+        tokenProgram: TOKEN_PROGRAM_ID,
+      } as any)
+
+    if (!params.onre) {
+      return builder
+    }
+    return builder.remainingAccounts(
+      buildOnreCreateRedemptionRequestRemainingAccounts({
+        tokenInMint: params.onycMint,
+        tokenOutMint: params.usdcMint,
+        redeemer: this.authorityPda,
+        redeemerTokenAccount: this.ata(params.onycMint),
+        redemptionRequest: params.onre.redemptionRequest,
+        tokenProgram: params.onre.tokenProgram,
+        programId: params.onre.programId,
+        state: params.onre.state,
+      }),
+    )
+  }
+
+  /**
+   * Withdraw chain, leg 3: book the OnRe redemption fulfillment onto the
+   * outflight Flow and close the singleton tracker.
+   *
+   * Permissionless. Pre: `flow.status == RedemptionPending`, the
+   * `redemption_request` PDA the relayer recorded at request-time has been
+   * closed by OnRe's `fulfill_redemption_request` (zero lamports, empty
+   * data, system-owned), and the resulting USDC delta is sitting on the
+   * relayer USDC ATA.
+   *
+   * The relayer instruction issues NO CPI — it just verifies the closed
+   * request, computes the ATA delta against `tracker.usdc_ata_pre_balance`,
+   * advances the flow to `Swapped`, and closes the tracker (rent →
+   * `tracker.payer`).
+   */
+  claimRedemptionUsdc(params: {
+    cranker: PublicKey
+    usdcMint: PublicKey
+    nttInboxItem: PublicKey
+    /** Same `RedemptionRequest` PDA recorded on `tracker.redemption_request`. */
+    redemptionRequest: PublicKey
+    /** Original `request_redemption_onyc` payer; receives tracker rent. */
+    payerForClose: PublicKey
+  }) {
+    const [outflightFlow] = findOutflightFlowPda(params.nttInboxItem, this.program.programId)
+    const [redemptionTracker] = findRedemptionTrackerPda(this.program.programId)
+    return this.program.methods
+      .claimRedemptionUsdc()
+      .accounts({
+        cranker: params.cranker,
+        relayerConfig: this.configPda,
+        relayerAuthority: this.authorityPda,
+        usdcMint: params.usdcMint,
+        usdcAta: this.ata(params.usdcMint),
+        nttInboxItem: params.nttInboxItem,
+        outflightFlow,
+        redemptionTracker,
+        payerForClose: params.payerForClose,
+        redemptionRequest: params.redemptionRequest,
+        tokenProgram: TOKEN_PROGRAM_ID,
+      } as any)
+  }
+
+  /**
+   * Withdraw chain, recovery hatch: cancel an in-flight OnRe redemption.
+   * Authority-only. Pre: outflight `flow.status == RedemptionPending`.
+   * Post: ONyc returned to `onyc_ata`, `flow.status == Claimed` with
+   * `flow.amount == tracker.onyc_amount_in`, singleton tracker closed.
+   *
+   * Caller MUST pass the same `RedemptionRequest` PDA recorded on
+   * `tracker.redemption_request` AND the OnRe `state.redemption_admin`
+   * pubkey (rent destination on the OnRe-owned PDA close). When `onre`
+   * is omitted, `remainingAccounts` stays empty for failure-path tests.
+   */
+  cancelRedemptionOnyc(params: {
+    authority: PublicKey
+    onycMint: PublicKey
+    nttInboxItem: PublicKey
+    /** Original `request_redemption_onyc` payer; receives tracker rent. */
+    payerForClose: PublicKey
+    /**
+     * OnRe-side context. When supplied, the SDK builds the 13-account
+     * `cancel_redemption_request` remainingAccounts list.
+     */
+    onre?: {
+      redemptionRequest: PublicKey
+      redemptionAdmin: PublicKey
+      usdcMint: PublicKey
+      tokenProgram?: PublicKey
+      programId?: PublicKey
+      state?: PublicKey
+    }
+  }) {
+    const [outflightFlow] = findOutflightFlowPda(params.nttInboxItem, this.program.programId)
+    const [redemptionTracker] = findRedemptionTrackerPda(this.program.programId)
+    const builder = this.program.methods
+      .cancelRedemptionOnyc()
+      .accounts({
+        authority: params.authority,
+        relayerConfig: this.configPda,
+        relayerAuthority: this.authorityPda,
+        onycMint: params.onycMint,
+        onycAta: this.ata(params.onycMint),
+        nttInboxItem: params.nttInboxItem,
+        outflightFlow,
+        redemptionTracker,
+        payerForClose: params.payerForClose,
+        tokenProgram: TOKEN_PROGRAM_ID,
+      } as any)
+
+    if (!params.onre) {
+      return builder
+    }
+    return builder.remainingAccounts(
+      buildOnreCancelRedemptionRequestRemainingAccounts({
+        tokenInMint: params.onycMint,
+        tokenOutMint: params.onre.usdcMint,
+        signer: this.authorityPda,
+        redeemer: this.authorityPda,
+        redeemerTokenAccount: this.ata(params.onycMint),
+        redemptionAdmin: params.onre.redemptionAdmin,
+        redemptionRequest: params.onre.redemptionRequest,
+        tokenProgram: params.onre.tokenProgram,
+        programId: params.onre.programId,
+        state: params.onre.state,
+      }),
+    )
   }
 
   /** Fetch the relayer config account. */

@@ -1,16 +1,3 @@
-/**
- * OnRe (`onreuGhHHgVzMWSkj2oQDLDtvvGvoepBPkqyaubFcwe`) helpers.
- *
- * The relayer's `swap_usdc_to_onyc` and `swap_onyc_to_usdc` instructions
- * forward a fixed 22-entry `remainingAccounts` array verbatim into OnRe's
- * `take_offer_permissionless`. Both directions use the same shape — only the
- * `token_in` / `token_out` mint roles flip.
- *
- * `buildOnreSwapRemainingAccounts` assembles that array so callers don't have
- * to enumerate the layout by hand. PDA helpers + mainnet fixture constants
- * live here too so tests and SDK consumers share a single source of truth.
- */
-
 import type { AccountMeta } from '@solana/web3.js'
 import {
   ASSOCIATED_TOKEN_PROGRAM_ID,
@@ -72,6 +59,55 @@ export function findOnreMintAuthorityPda(
   )
 }
 
+/**
+ * OnRe `RedemptionOffer` PDA. Seeds: `[redemption_offer, token_in_mint,
+ * token_out_mint]`. NOTE the seed order is the *opposite* of the deposit
+ * `Offer` PDA — for a withdraw, `token_in_mint` is ONyc and
+ * `token_out_mint` is USDC. Don't reuse `findOnreOfferPda` here.
+ */
+export function findOnreRedemptionOfferPda(
+  tokenInMint: PublicKey,
+  tokenOutMint: PublicKey,
+  programId: PublicKey = ONRE_PROGRAM_ID,
+): [PublicKey, number] {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from('redemption_offer'), tokenInMint.toBuffer(), tokenOutMint.toBuffer()],
+    programId,
+  )
+}
+
+/**
+ * OnRe `redemption_offer_vault_authority` — single global PDA owning every
+ * redemption-vault token account on OnRe.
+ */
+export function findOnreRedemptionVaultAuthorityPda(
+  programId: PublicKey = ONRE_PROGRAM_ID,
+): [PublicKey, number] {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from('redemption_offer_vault_authority')],
+    programId,
+  )
+}
+
+/**
+ * OnRe `RedemptionRequest` PDA. Seeds: `[redemption_request,
+ * redemption_offer, request_id_le_u64]`. `request_id` is the
+ * `RedemptionOffer.request_counter` value snapshotted *before* the CPI
+ * fires, so callers must read the counter off the live offer fixture.
+ */
+export function findOnreRedemptionRequestPda(
+  redemptionOffer: PublicKey,
+  requestId: bigint,
+  programId: PublicKey = ONRE_PROGRAM_ID,
+): [PublicKey, number] {
+  const idBuf = Buffer.alloc(8)
+  idBuf.writeBigUInt64LE(requestId)
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from('redemption_request'), redemptionOffer.toBuffer(), idBuf],
+    programId,
+  )
+}
+
 // ---------------------------------------------------------------------------
 // Mainnet fixture addresses (used by E2E tests against frozen on-chain state)
 // ---------------------------------------------------------------------------
@@ -98,6 +134,33 @@ export const ONRE_BOSS_PUBKEY = new PublicKey('45YnzauhsBM8CpUz96Djf8UG5vqq2Dua6
 export const OFFER_TOKEN_IN_MINT_OFFSET = 8
 /** Offset of token_out_mint pubkey in Offer account data */
 export const OFFER_TOKEN_OUT_MINT_OFFSET = 40
+
+// ---------------------------------------------------------------------------
+// RedemptionOffer layout (Anchor account)
+//
+//   disc(8) + offer(32) + token_in_mint(32) + token_out_mint(32)
+//     + executed_redemptions(u128, 16) + requested_redemptions(u128, 16)
+//     + fee_basis_points(u16, 2) + request_counter(u64, 8) + bump(u8, 1)
+//     + reserved[u8; 109]
+// Total: 256 bytes
+// ---------------------------------------------------------------------------
+
+/** Anchor discriminator for OnRe `RedemptionOffer` (sha256("account:RedemptionOffer")[..8]). */
+export const REDEMPTION_OFFER_DISCRIMINATOR = new Uint8Array([
+  170, 229, 178, 15, 184, 107, 140, 41,
+])
+/** Total serialized size in bytes. */
+export const REDEMPTION_OFFER_SIZE = 256
+/** Offset of `offer` (deposit-Offer PDA reference) inside RedemptionOffer data. */
+export const REDEMPTION_OFFER_OFFER_OFFSET = 8
+/** Offset of `token_in_mint` inside RedemptionOffer data. */
+export const REDEMPTION_OFFER_TOKEN_IN_MINT_OFFSET = 40
+/** Offset of `token_out_mint` inside RedemptionOffer data. */
+export const REDEMPTION_OFFER_TOKEN_OUT_MINT_OFFSET = 72
+/** Offset of `request_counter` (u64 LE) inside RedemptionOffer data. */
+export const REDEMPTION_OFFER_REQUEST_COUNTER_OFFSET = 138
+/** Offset of `bump` (u8) inside RedemptionOffer data. */
+export const REDEMPTION_OFFER_BUMP_OFFSET = 146
 
 // ---------------------------------------------------------------------------
 // Account-list builder
@@ -312,6 +375,214 @@ export function buildOnreSwapRemainingAccounts(params: {
     { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
     // 22. OnRe program — required in account_infos for the CPI on strict
     //     validators (Agave). LiteSVM is permissive without it; mainnet is not.
+    { pubkey: programId, isSigner: false, isWritable: false },
+  ]
+}
+
+/**
+ * Build the 12-entry `remainingAccounts` array for OnRe's
+ * `create_redemption_request`. Layout (first 11 entries are
+ * account-declaration order from
+ * `programs/onreapp/src/instructions/redemption/create_redemption_request.rs`;
+ * the 12th is a Solana-runtime requirement, not an OnRe account):
+ *
+ *   1.  state
+ *   2.  redemption_offer (mut)
+ *   3.  redemption_request (init, mut)        ← position 2 (zero-indexed),
+ *                                                pinned by relayer constant
+ *                                                ONRE_CREATE_REDEMPTION_REQUEST_REDEMPTION_REQUEST_INDEX
+ *   4.  redeemer (signer, mut)                ← relayer_authority PDA
+ *   5.  redemption_vault_authority (PDA)
+ *   6.  token_in_mint                         ← ONyc on the withdraw side
+ *   7.  redeemer_token_account (mut, ATA)     ← relayer_authority's ONyc ATA
+ *   8.  vault_token_account (mut, ATA)        ← redemption_vault_authority's
+ *                                                ATA for ONyc
+ *   9.  token_program
+ *   10. associated_token_program
+ *   11. system_program
+ *   12. ONRE program ID (NOT consumed by OnRe's Accounts struct)
+ *
+ * ## Why entry 12 (the OnRe program) is appended
+ *
+ * The relayer's `invoke_relayer_signed` calls `solana_program::program::
+ * invoke_signed(&ix, account_infos, signers)`. The `account_infos` slice it
+ * passes is built from `ctx.remaining_accounts` — the runtime needs to find
+ * the *target program*'s `AccountInfo` inside that slice to dispatch the
+ * CPI. If the OnRe program isn't there, dispatch fails with `MissingAccount`
+ * / "Unknown program onreuGhHHgVzMWSkj2oQDLDtvvGvoepBPkqyaubFcwe" on both
+ * Agave and LiteSVM.
+ *
+ * OnRe's own `Accounts` struct only declares 11 entries and won't read
+ * entry 12 — Anchor scans by position from index 0 — so appending it is
+ * a pure runtime concession with no on-chain side effect. Same trick used
+ * by `buildOnreSwapRemainingAccounts` (entry 22 there).
+ *
+ * The relayer-side `ONRE_CREATE_REDEMPTION_REQUEST_REDEMPTION_REQUEST_INDEX`
+ * pins entry 3's role for the post-CPI binding read; entry 12 has no such
+ * pin because its presence (not its identity) is what matters.
+ */
+export function buildOnreCreateRedemptionRequestRemainingAccounts(params: {
+  /** Input mint (ONyc on the withdraw side). */
+  tokenInMint: PublicKey
+  /**
+   * Output mint (USDC on the withdraw side). Used to derive the
+   * `RedemptionOffer` PDA.
+   */
+  tokenOutMint: PublicKey
+  /** Redeemer = relayer_authority PDA. Forced to sign in the CPI helper. */
+  redeemer: PublicKey
+  /** Redeemer's `tokenIn` ATA (the relayer's `onyc_ata`). */
+  redeemerTokenAccount: PublicKey
+  /**
+   * `RedemptionRequest` PDA derived as `findOnreRedemptionRequestPda(
+   *   redemptionOffer, requestCounterBeforeCpi)`. Caller MUST read the
+   * counter off the live `RedemptionOffer` account before the CPI fires —
+   * OnRe increments it inside the handler.
+   */
+  redemptionRequest: PublicKey
+  /** Token program for the input mint. Defaults to SPL Token. */
+  tokenProgram?: PublicKey
+  /** Optional OnRe program override. Defaults to mainnet. */
+  programId?: PublicKey
+  /** Optional precomputed State PDA; defaults to `findOnreStatePda(programId)`. */
+  state?: PublicKey
+}): AccountMeta[] {
+  const programId = params.programId ?? ONRE_PROGRAM_ID
+  const tokenProgram = params.tokenProgram ?? TOKEN_PROGRAM_ID
+  const state = params.state ?? findOnreStatePda(programId)[0]
+
+  const [redemptionOffer] = findOnreRedemptionOfferPda(
+    params.tokenInMint, params.tokenOutMint, programId,
+  )
+  const [vaultAuthority] = findOnreRedemptionVaultAuthorityPda(programId)
+  const vaultTokenAccount = getAssociatedTokenAddressSync(
+    params.tokenInMint, vaultAuthority, true, tokenProgram,
+  )
+
+  return [
+    // 1.  state
+    { pubkey: state, isSigner: false, isWritable: false },
+    // 2.  redemption_offer (mut)
+    { pubkey: redemptionOffer, isSigner: false, isWritable: true },
+    // 3.  redemption_request (init, mut) — INDEX = 2 (the relayer pin)
+    { pubkey: params.redemptionRequest, isSigner: false, isWritable: true },
+    // 4.  redeemer (signer, mut) — relayer_authority PDA, signed via RELAYER_SEED
+    { pubkey: params.redeemer, isSigner: false, isWritable: true },
+    // 5.  redemption_vault_authority (PDA)
+    { pubkey: vaultAuthority, isSigner: false, isWritable: false },
+    // 6.  token_in_mint (ONyc)
+    { pubkey: params.tokenInMint, isSigner: false, isWritable: false },
+    // 7.  redeemer_token_account (mut, ATA of token_in/redeemer)
+    { pubkey: params.redeemerTokenAccount, isSigner: false, isWritable: true },
+    // 8.  vault_token_account (mut, ATA of token_in/vault_authority)
+    { pubkey: vaultTokenAccount, isSigner: false, isWritable: true },
+    // 9.  token_program
+    { pubkey: tokenProgram, isSigner: false, isWritable: false },
+    // 10. associated_token_program
+    { pubkey: ASSOCIATED_TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+    // 11. system_program
+    { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+    // 12. OnRe program — required in account_infos for the CPI on strict
+    //     validators (Agave + LiteSVM). The relayer's `invoke_signed` only
+    //     includes accounts it sees in `remaining_accounts`, so without
+    //     this entry the runtime reports "Unknown program" / MissingAccount.
+    { pubkey: programId, isSigner: false, isWritable: false },
+  ]
+}
+
+/**
+ * Build the 14-entry `remainingAccounts` array for OnRe's
+ * `cancel_redemption_request`. Layout (first 13 entries are
+ * account-declaration order from
+ * `programs/onreapp/src/instructions/redemption/cancel_redemption_request.rs`;
+ * the 14th is the OnRe program ID for runtime CPI dispatch — same reason
+ * documented on `buildOnreCreateRedemptionRequestRemainingAccounts`):
+ *
+ *   1.  state
+ *   2.  redemption_offer (mut)
+ *   3.  redemption_request (mut, close)        ← position 2 (zero-indexed),
+ *                                                pinned by relayer constant
+ *                                                ONRE_CANCEL_REDEMPTION_REQUEST_REDEMPTION_REQUEST_INDEX
+ *   4.  signer (signer, mut)                   ← relayer_authority PDA
+ *                                                (must match redemption_request.redeemer)
+ *   5.  redeemer (CHECK)                       ← also relayer_authority PDA
+ *   6.  redemption_admin (mut)                 ← rent recipient; pinned to state.redemption_admin
+ *   7.  redemption_vault_authority (PDA)
+ *   8.  token_in_mint                          ← ONyc on the withdraw side
+ *   9.  vault_token_account (mut, ATA)         ← redemption_vault_authority's
+ *                                                ATA for ONyc
+ *   10. redeemer_token_account (init_if_needed, mut, ATA)
+ *                                              ← relayer_authority's ONyc ATA
+ *   11. token_program
+ *   12. system_program
+ *   13. associated_token_program
+ *   14. ONRE program ID (NOT consumed by OnRe's Accounts struct)
+ */
+export function buildOnreCancelRedemptionRequestRemainingAccounts(params: {
+  /** Input mint (ONyc on the withdraw side). */
+  tokenInMint: PublicKey
+  /** Output mint (USDC on the withdraw side). Used to derive the `RedemptionOffer` PDA. */
+  tokenOutMint: PublicKey
+  /** Signer = relayer_authority PDA. Forced to sign in the CPI helper. */
+  signer: PublicKey
+  /**
+   * Redeemer recorded on the `RedemptionRequest`. For the relayer flow this
+   * is the same as `signer` (the relayer_authority PDA).
+   */
+  redeemer: PublicKey
+  /** Redeemer's `tokenIn` ATA (the relayer's `onyc_ata`). */
+  redeemerTokenAccount: PublicKey
+  /** OnRe `state.redemption_admin` — receives the closed-account rent. */
+  redemptionAdmin: PublicKey
+  /** Same `RedemptionRequest` PDA recorded on `tracker.redemption_request`. */
+  redemptionRequest: PublicKey
+  /** Token program for the input mint. Defaults to SPL Token. */
+  tokenProgram?: PublicKey
+  /** Optional OnRe program override. Defaults to mainnet. */
+  programId?: PublicKey
+  /** Optional precomputed State PDA; defaults to `findOnreStatePda(programId)`. */
+  state?: PublicKey
+}): AccountMeta[] {
+  const programId = params.programId ?? ONRE_PROGRAM_ID
+  const tokenProgram = params.tokenProgram ?? TOKEN_PROGRAM_ID
+  const state = params.state ?? findOnreStatePda(programId)[0]
+
+  const [redemptionOffer] = findOnreRedemptionOfferPda(
+    params.tokenInMint, params.tokenOutMint, programId,
+  )
+  const [vaultAuthority] = findOnreRedemptionVaultAuthorityPda(programId)
+  const vaultTokenAccount = getAssociatedTokenAddressSync(
+    params.tokenInMint, vaultAuthority, true, tokenProgram,
+  )
+
+  return [
+    // 1.  state
+    { pubkey: state, isSigner: false, isWritable: false },
+    // 2.  redemption_offer (mut)
+    { pubkey: redemptionOffer, isSigner: false, isWritable: true },
+    // 3.  redemption_request (mut, close) — INDEX = 2 (the relayer pin)
+    { pubkey: params.redemptionRequest, isSigner: false, isWritable: true },
+    // 4.  signer (signer, mut) — relayer_authority PDA, signed via RELAYER_SEED
+    { pubkey: params.signer, isSigner: false, isWritable: true },
+    // 5.  redeemer (CHECK) — must match redemption_request.redeemer
+    { pubkey: params.redeemer, isSigner: false, isWritable: false },
+    // 6.  redemption_admin (mut) — rent destination; must match state.redemption_admin
+    { pubkey: params.redemptionAdmin, isSigner: false, isWritable: true },
+    // 7.  redemption_vault_authority (PDA)
+    { pubkey: vaultAuthority, isSigner: false, isWritable: false },
+    // 8.  token_in_mint (ONyc)
+    { pubkey: params.tokenInMint, isSigner: false, isWritable: false },
+    // 9.  vault_token_account (mut, ATA of token_in/vault_authority)
+    { pubkey: vaultTokenAccount, isSigner: false, isWritable: true },
+    // 10. redeemer_token_account (init_if_needed, mut, ATA of token_in/redeemer)
+    { pubkey: params.redeemerTokenAccount, isSigner: false, isWritable: true },
+    // 11. token_program
+    { pubkey: tokenProgram, isSigner: false, isWritable: false },
+    // 12. system_program
+    { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+    // 13. associated_token_program
+    { pubkey: ASSOCIATED_TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+    // 14. OnRe program — see builder docstring above for why it's appended.
     { pubkey: programId, isSigner: false, isWritable: false },
   ]
 }

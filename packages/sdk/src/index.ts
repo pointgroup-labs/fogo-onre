@@ -46,10 +46,15 @@ export {
   type NttTransferLockContext,
 } from './ntt'
 export {
+  buildOnreCancelRedemptionRequestRemainingAccounts,
+  buildOnreCreateRedemptionRequestRemainingAccounts,
   buildOnreSwapRemainingAccounts,
   findOnreMintAuthorityPda,
   findOnreOfferPda,
   findOnrePermissionlessAuthorityPda,
+  findOnreRedemptionOfferPda,
+  findOnreRedemptionRequestPda,
+  findOnreRedemptionVaultAuthorityPda,
   findOnreStatePda,
   findOnreVaultAuthorityPda,
   OFFER_TOKEN_IN_MINT_OFFSET,
@@ -63,6 +68,13 @@ export {
   ONRE_VAULT_AUTHORITY_FIXTURE,
   type OnreDeployment,
   type OnreSwapContext,
+  REDEMPTION_OFFER_BUMP_OFFSET,
+  REDEMPTION_OFFER_DISCRIMINATOR,
+  REDEMPTION_OFFER_OFFER_OFFSET,
+  REDEMPTION_OFFER_REQUEST_COUNTER_OFFSET,
+  REDEMPTION_OFFER_SIZE,
+  REDEMPTION_OFFER_TOKEN_IN_MINT_OFFSET,
+  REDEMPTION_OFFER_TOKEN_OUT_MINT_OFFSET,
 } from './onre'
 export {
   findAuthorityPda,
