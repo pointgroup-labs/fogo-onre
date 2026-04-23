@@ -1,6 +1,6 @@
 import { keccak_256 } from '@noble/hashes/sha3.js'
 import { PublicKey } from '@solana/web3.js'
-import { FOGO_WORMHOLE_CHAIN_ID, NTT_PROGRAM_ID } from './constants'
+import { NTT_PROGRAM_ID } from './constants'
 
 // ---------------------------------------------------------------------------
 // PDA seed constants (mirror Wormhole NTT manager source)
@@ -155,5 +155,3 @@ export interface NttTransferLockContext {
   /** ONyc custody token account (from NTT config). */
   custody: PublicKey
 }
-
-export const DEFAULT_FROM_CHAIN = FOGO_WORMHOLE_CHAIN_ID

@@ -1,26 +1,3 @@
-/**
- * Wormhole Token Bridge ("Gateway") account-builder helpers for
- * `complete_wrapped_with_payload` (claim_usdc) and
- * `transfer_wrapped_with_payload` (send_usdc_to_user).
- *
- * USDC.s on FOGO is bridged to Solana in *wrapped* mode — USDC is canonical
- * on FOGO, Solana sees a wrapped representation. TB instruction enum:
- *   ... CompleteWrappedWithPayload(10), TransferWrappedWithPayload(11) ...
- *
- * # Verification status
- *
- * Every helper here except `findTokenBridgeCustodySignerPda` is
- * bridge-program-verified by a real CPI through the upstream `.so`:
- *   - Inbound — `tests/deposit-flow-e2e.test.ts`
- *   - Outbound — `tests/send-usdc-to-user-e2e.test.ts`
- *
- * `findTokenBridgeCustodySignerPda` is the lone exception: it's only used by
- * TB's NATIVE outbound path (`TransferNativeWithPayload`), which the relayer
- * never invokes. The seed-tripwire in
- * `tests/gateway-pda-derivations.test.ts` is all that's meaningfully testable
- * for it offline.
- */
-
 import { TOKEN_PROGRAM_ID } from '@solana/spl-token'
 import { PublicKey, SystemProgram, SYSVAR_CLOCK_PUBKEY, SYSVAR_RENT_PUBKEY } from '@solana/web3.js'
 import {

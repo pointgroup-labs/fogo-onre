@@ -210,7 +210,8 @@ export interface NttConfigData {
 export function serializeNttConfig(config: NttConfigData): Uint8Array {
   const data = new Uint8Array(192)
   let o = 0
-  data.set(CONFIG_DISC, o); o += 8
+  data.set(CONFIG_DISC, o)
+  o += 8
   o = writeU8(data, o, config.bump)
   o = writePublicKey(data, o, config.owner)
   // Option<Pubkey>: 1 byte discriminant + 32 bytes if Some
@@ -247,9 +248,11 @@ export interface NttManagerPeerData {
 export function serializeNttManagerPeer(peer: NttManagerPeerData): Uint8Array {
   const data = new Uint8Array(42)
   let o = 0
-  data.set(NTT_MANAGER_PEER_DISC, o); o += 8
+  data.set(NTT_MANAGER_PEER_DISC, o)
+  o += 8
   o = writeU8(data, o, peer.bump)
-  data.set(peer.address, o); o += 32
+  data.set(peer.address, o)
+  o += 32
   o = writeU8(data, o, peer.tokenDecimals)
   return data
 }
@@ -267,7 +270,8 @@ export interface RegisteredTransceiverData {
 export function serializeRegisteredTransceiver(t: RegisteredTransceiverData): Uint8Array {
   const data = new Uint8Array(42)
   let o = 0
-  data.set(REGISTERED_TRANSCEIVER_DISC, o); o += 8
+  data.set(REGISTERED_TRANSCEIVER_DISC, o)
+  o += 8
   o = writeU8(data, o, t.bump)
   o = writeU8(data, o, t.id)
   o = writePublicKey(data, o, t.transceiverAddress)
@@ -289,7 +293,8 @@ export interface InboxRateLimitData {
 export function serializeInboxRateLimit(r: InboxRateLimitData): Uint8Array {
   const data = new Uint8Array(33)
   let o = 0
-  data.set(INBOX_RATE_LIMIT_DISC, o); o += 8
+  data.set(INBOX_RATE_LIMIT_DISC, o)
+  o += 8
   o = writeU8(data, o, r.bump)
   o = writeU64LE(data, o, r.limit)
   o = writeU64LE(data, o, r.capacityAtLastTx)
@@ -310,7 +315,8 @@ export interface OutboxRateLimitData {
 export function serializeOutboxRateLimit(r: OutboxRateLimitData): Uint8Array {
   const data = new Uint8Array(32)
   let o = 0
-  data.set(OUTBOX_RATE_LIMIT_DISC, o); o += 8
+  data.set(OUTBOX_RATE_LIMIT_DISC, o)
+  o += 8
   o = writeU64LE(data, o, r.limit)
   o = writeU64LE(data, o, r.capacityAtLastTx)
   o = writeU64LE(data, o, r.lastTxTimestamp)
@@ -341,7 +347,8 @@ export const ReleaseStatus = {
 export function serializeInboxItem(item: InboxItemData): Uint8Array {
   const data = new Uint8Array(59)
   let o = 0
-  data.set(INBOX_ITEM_DISC, o); o += 8
+  data.set(INBOX_ITEM_DISC, o)
+  o += 8
   o = writeBool(data, o, item.init)
   o = writeU8(data, o, item.bump)
   o = writeU64LE(data, o, item.amount)
@@ -373,14 +380,17 @@ export interface OutboxItemData {
 export function serializeOutboxItem(item: OutboxItemData): Uint8Array {
   const data = new Uint8Array(124)
   let o = 0
-  data.set(OUTBOX_ITEM_DISC, o); o += 8
+  data.set(OUTBOX_ITEM_DISC, o)
+  o += 8
   // TrimmedAmount
   o = writeU64LE(data, o, item.amount)
   o = writeU8(data, o, item.decimals)
   o = writePublicKey(data, o, item.sender)
   o = writeU16LE(data, o, item.recipientChain)
-  data.set(item.recipientNttManager, o); o += 32
-  data.set(item.recipientAddress, o); o += 32
+  data.set(item.recipientNttManager, o)
+  o += 32
+  data.set(item.recipientAddress, o)
+  o += 32
   o = writeU64LE(data, o, item.releaseTimestamp)
   o = writeBool(data, o, item.released)
   return data
@@ -519,12 +529,17 @@ function nativeTokenTransferBorsh(p: NttManagerMessageParams): Uint8Array {
   const view = new DataView(buf.buffer)
   let o = 0
   // TrimmedAmount (Borsh field order): amount u64 LE, then decimals u8
-  view.setBigUint64(o, p.trimmedAmount, true); o += 8
-  buf[o] = p.trimmedDecimals; o += 1
+  view.setBigUint64(o, p.trimmedAmount, true)
+  o += 8
+  buf[o] = p.trimmedDecimals
+  o += 1
   // NativeTokenTransfer (Borsh field order): source_token, to_chain, to
-  buf.set(p.sourceToken, o); o += 32
-  view.setUint16(o, p.toChain, true); o += 2
-  buf.set(p.to, o); o += 32
+  buf.set(p.sourceToken, o)
+  o += 32
+  view.setUint16(o, p.toChain, true)
+  o += 2
+  buf.set(p.to, o)
+  o += 32
   // additional_payload = EmptyPayload → 0 bytes (A::SIZE == Some(0))
   return buf
 }
@@ -545,14 +560,20 @@ function nativeTokenTransferWire(p: NttManagerMessageParams): Uint8Array {
   const view = new DataView(buf.buffer)
   let o = 0
   // Prefix `0x99 N T T`
-  buf.set(NATIVE_TOKEN_TRANSFER_PREFIX, o); o += 4
+  buf.set(NATIVE_TOKEN_TRANSFER_PREFIX, o)
+  o += 4
   // TrimmedAmount (wire order, REVERSED): decimals u8, then amount u64 BE
-  buf[o] = p.trimmedDecimals; o += 1
-  view.setBigUint64(o, p.trimmedAmount, false); o += 8
+  buf[o] = p.trimmedDecimals
+  o += 1
+  view.setBigUint64(o, p.trimmedAmount, false)
+  o += 8
   // NativeTokenTransfer (wire order): source_token, to, to_chain
-  buf.set(p.sourceToken, o); o += 32
-  buf.set(p.to, o); o += 32
-  view.setUint16(o, p.toChain, false); o += 2
+  buf.set(p.sourceToken, o)
+  o += 32
+  buf.set(p.to, o)
+  o += 32
+  view.setUint16(o, p.toChain, false)
+  o += 2
   // No additional_payload bytes when A::SIZE == Some(0)
   return buf
 }
@@ -563,9 +584,12 @@ function nttManagerMessageWire(p: NttManagerMessageParams): Uint8Array {
   const buf = new Uint8Array(32 + 32 + 2 + inner.length)
   const view = new DataView(buf.buffer)
   let o = 0
-  buf.set(p.id, o); o += 32
-  buf.set(p.sender, o); o += 32
-  view.setUint16(o, inner.length, false); o += 2 // payload_len BE
+  buf.set(p.id, o)
+  o += 32
+  buf.set(p.sender, o)
+  o += 32
+  view.setUint16(o, inner.length, false) // payload_len BE
+  o += 2
   buf.set(inner, o)
   return buf
 }
@@ -602,10 +626,14 @@ export function serializeValidatedTransceiverMessage(p: ValidatedTransceiverMess
   const buf = new Uint8Array(8 + 2 + 32 + 32 + inner.length)
   const view = new DataView(buf.buffer)
   let o = 0
-  buf.set(VALIDATED_TRANSCEIVER_MESSAGE_DISC, o); o += 8
-  view.setUint16(o, p.fromChain, true); o += 2 // LE (Borsh)
-  buf.set(p.sourceNttManager, o); o += 32
-  buf.set(p.recipientNttManager, o); o += 32
+  buf.set(VALIDATED_TRANSCEIVER_MESSAGE_DISC, o)
+  o += 8
+  view.setUint16(o, p.fromChain, true) // LE (Borsh)
+  o += 2
+  buf.set(p.sourceNttManager, o)
+  o += 32
+  buf.set(p.recipientNttManager, o)
+  o += 32
   buf.set(inner, o)
   return buf
 }

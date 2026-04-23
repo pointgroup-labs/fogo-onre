@@ -70,7 +70,7 @@ pub mod relayer {
     /// Forward flow's ONyc to OnRe via `create_redemption_request` and
     /// init the singleton tracker. Caller-permissionless. Fee taken pre-CPI.
     /// Replaces the deleted `swap_onyc_to_usdc` because OnRe's withdraw
-    /// side is asymmetric — see `docs/WITHDRAW_REDESIGN.md`.
+    /// side is asymmetric.
     pub fn request_redemption_onyc<'info>(
         ctx: Context<'info, RequestRedemptionOnyc<'info>>,
     ) -> Result<()> {

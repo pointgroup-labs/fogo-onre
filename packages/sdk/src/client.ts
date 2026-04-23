@@ -155,8 +155,6 @@ export class RelayerClient {
    * `configure({ newAuthority })` call). On success, the pending key
    * atomically becomes the new `authority` and the pending slot
    * clears. The current authority does not need to participate.
-   *
-   * @param params.pendingAuthority - defaults to provider wallet pubkey
    */
   async acceptAuthority(params: {
     pendingAuthority?: PublicKey

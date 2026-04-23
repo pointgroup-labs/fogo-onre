@@ -60,7 +60,9 @@ export interface PostedVaaParams {
  */
 export function buildPostedVaaData(params: PostedVaaParams): Uint8Array {
   const fogoSender = params.fogoSender
-  if (fogoSender.length !== 32) { throw new Error('fogoSender must be 32 bytes') }
+  if (fogoSender.length !== 32) {
+    throw new Error('fogoSender must be 32 bytes')
+  }
 
   // Build Token Bridge payload
   // payload_id(1) + amount(32) + token_address(32) + token_chain(2) +

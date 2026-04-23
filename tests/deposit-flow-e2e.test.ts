@@ -211,7 +211,7 @@ describe('deposit flow e2e (claim_usdc → OnRe swap → NTT transfer_burn)', ()
 
   it('claim_usdc → swap_usdc_to_onyc → lock_onyc succeeds', async () => {
     const usdcAta = getAssociatedTokenAddressSync(usdcMint.publicKey, relayerAuthorityPda, true)
-    const onycAta = getAssociatedTokenAddressSync(onycMint.publicKey, relayerAuthorityPda, true)
+    const _onycAta = getAssociatedTokenAddressSync(onycMint.publicKey, relayerAuthorityPda, true)
 
     // -------------------------------------------------------------------
     // Step 0: claim_usdc — Token Bridge CPI mints wrapped USDC into the
