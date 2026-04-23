@@ -181,5 +181,4 @@ pub struct CancelRedemptionOnyc<'info> {
     pub payer_for_close: UncheckedAccount<'info>,
 
     pub token_program: Interface<'info, TokenInterface>,
-    pub system_program: Program<'info, System>,
 }

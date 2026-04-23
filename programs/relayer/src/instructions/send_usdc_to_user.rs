@@ -4,7 +4,7 @@ use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};
 
 use crate::constants::{
     CONFIG_SEED, FLOW_OUTBOUND_SEED, FOGO_WORMHOLE_CHAIN_ID, GATEWAY_PROGRAM_ID,
-    GATEWAY_TRANSFER_OUT_IX, RELAYER_SEED, SENDER_SEED,
+    GATEWAY_TRANSFER_OUT_IX, REDEMPTION_TRACKER_SEED, RELAYER_SEED, SENDER_SEED,
 };
 use crate::cpi::invoke_relayer_signed_with_sender;
 use crate::error::RelayerError;
@@ -154,6 +154,30 @@ pub struct SendUsdcToUser<'info> {
     /// CHECK: validated against `outflight_flow.payer`.
     #[account(mut, address = outflight_flow.payer)]
     pub rent_destination: UncheckedAccount<'info>,
+
+    /// Singleton redemption tracker slot — must NOT currently exist. Gating
+    /// `send_usdc_to_user` on this closes the outflow race in the withdraw-
+    /// chain delta math: while any `RedemptionTracker` is alive, a sibling
+    /// flow may be mid-redemption with its pre-balance snapshot pinned
+    /// against this very `usdc_ata`. A concurrent outflow here would poison
+    /// that delta (`B.redeemed − A.amount` instead of `B.redeemed`),
+    /// causing `BalanceUnderflow` or silent user under-credit.
+    ///
+    /// `SystemAccount` asserts `owner == system_program::ID`. Combined with
+    /// the seed pinning, this passes iff the PDA either never existed or
+    /// was closed (by `claim_redemption_usdc` / `cancel_redemption_onyc`)
+    /// and fails when a redemption is mid-flight — exactly the invariant
+    /// `claim_redemption_usdc`'s snapshot→reload math needs.
+    ///
+    /// Liveness note: already-`Swapped` flows wait on the pending redemption
+    /// to complete. Stuck redemptions are covered by
+    /// `cancel_redemption_onyc`. This is a deliberate correctness-over-
+    /// latency trade.
+    #[account(
+        seeds = [REDEMPTION_TRACKER_SEED],
+        bump,
+    )]
+    pub redemption_tracker: SystemAccount<'info>,
 
     pub token_program: Interface<'info, TokenInterface>,
 }
