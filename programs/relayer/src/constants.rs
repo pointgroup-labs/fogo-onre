@@ -37,29 +37,8 @@ pub const NTT_TRANSFER_LOCK_IX: [u8; 8] = [179, 158, 146, 148, 151, 46, 176, 200
 pub const NTT_REDEEM_IX: [u8; 8] = [184, 12, 86, 149, 70, 196, 97, 225];
 pub const NTT_RELEASE_INBOUND_UNLOCK_IX: [u8; 8] = [182, 162, 62, 206, 197, 137, 83, 98];
 
-// OnRe — `global:take_offer_permissionless`. Used by the deposit chain only
-// (`swap_usdc_to_onyc` against the symmetric `Offer` PDA).
+// OnRe — `global:take_offer_permissionless`.
 pub const ONRE_TAKE_OFFER_IX: [u8; 8] = [37, 190, 224, 77, 197, 39, 203, 230];
-
-// OnRe — `global:create_redemption_request`. Used by the withdraw chain's
-// `request_redemption_onyc` (added in WITHDRAW_REDESIGN.md §2.3.1). OnRe's
-// withdraw side is asymmetric: there is no permissionless atomic counterpart
-// to `take_offer_permissionless`. We submit a redemption request, then poll
-// for its closure (signal that OnRe `redemption_admin` has fulfilled it).
-pub const ONRE_CREATE_REDEMPTION_REQUEST_IX: [u8; 8] = [201, 53, 181, 254, 115, 137, 70, 151];
-
-/// `RedemptionOffer` PDA seed under OnRe. Note: seed order is
-/// `[seed, ONyc_mint, USDC_mint]` — the *opposite* of the deposit `Offer`
-/// PDA (`[b"offer", USDC_mint, ONyc_mint]`). Don't reuse `OFFER_SEED` here.
-pub const ONRE_REDEMPTION_OFFER_SEED: &[u8] = b"redemption_offer";
-
-/// `RedemptionRequest` PDA seed under OnRe. Per-request, derived as
-/// `[seed, redemption_offer, request_counter_le_u64]`. Counter is read off
-/// the `RedemptionOffer` account *before* CPI fires (see spec §2.3.1 step 4).
-pub const ONRE_REDEMPTION_REQUEST_SEED: &[u8] = b"redemption_request";
-
-/// Single global PDA owning every redemption-vault token account on OnRe.
-pub const ONRE_REDEMPTION_OFFER_VAULT_AUTHORITY_SEED: &[u8] = b"redemption_offer_vault_authority";
 
 /// SPL Token `Approve` (variant 4) — needed for the NTT session-authority
 /// delegate handshake in `lock_onyc`.

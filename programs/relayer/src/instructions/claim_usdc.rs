@@ -118,10 +118,6 @@ pub fn handler<'info>(ctx: Context<'info, ClaimUsdc<'info>>) -> Result<()> {
     flow.amount = amount;
     flow.payer = ctx.accounts.payer.key();
     flow.bump = ctx.bumps.inflight_flow;
-    // Deposit chain never enters RedemptionPending; explicit None pins the
-    // invariant locally instead of relying on Anchor zero-init defaults.
-    flow.redemption_request = None;
-    flow.usdc_ata_pre_balance = None;
 
     emit!(UsdcClaimed {
         flow: flow_key,

@@ -64,13 +64,4 @@ pub enum RelayerError {
 
     #[msg("Signer does not match relayer_config.pending_authority")]
     PendingAuthorityMismatch,
-
-    #[msg("OnRe RedemptionRequest PDA still exists — redemption_admin has not fulfilled yet")]
-    RedemptionNotFulfilled,
-
-    #[msg("Provided redemption_request account does not match flow.redemption_request")]
-    RedemptionRequestMismatch,
-
-    #[msg("Flow is missing redemption-tracking state expected for this status")]
-    MissingRedemptionState,
 }

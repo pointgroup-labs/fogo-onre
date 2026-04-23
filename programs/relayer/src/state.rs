@@ -71,15 +71,9 @@ fn apply_fee_bps(gross: u64, bps: u16) -> Result<(u64, u64)> {
 }
 
 #[derive(InitSpace, AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(test, derive(Debug))]
 pub enum FlowStatus {
     /// Inbound bridge complete, awaiting swap.
     Claimed,
-    /// Withdraw chain only: ONyc has been forwarded to OnRe via
-    /// `create_redemption_request`; awaiting `redemption_admin` fulfillment
-    /// (out-of-band) and a subsequent `claim_redemption_usdc` from a cranker.
-    /// See `docs/WITHDRAW_REDESIGN.md` §2.1.
-    RedemptionPending,
     /// Swap complete, awaiting outbound bridge.
     Swapped,
 }
@@ -106,18 +100,6 @@ pub struct Flow {
     pub payer: Pubkey,
 
     pub bump: u8,
-
-    /// Withdraw chain only: address of the OnRe `RedemptionRequest` PDA
-    /// associated with this flow. `Some(_)` iff `status == RedemptionPending`;
-    /// cleared back to `None` by `claim_redemption_usdc`. Always `None` on
-    /// the deposit chain.
-    pub redemption_request: Option<Pubkey>,
-
-    /// Withdraw chain only: relayer's USDC ATA balance snapshotted *before*
-    /// `create_redemption_request` fires. Used by `claim_redemption_usdc` to
-    /// compute the post-fulfillment delta. `Some(_)` while
-    /// `RedemptionPending`; `None` otherwise.
-    pub usdc_ata_pre_balance: Option<u64>,
 }
 
 #[cfg(test)]
@@ -245,79 +227,5 @@ mod tests {
         };
         let e = cfg.validate().unwrap_err();
         assert_eq!(err_code(e), code_of(RelayerError::FeeBpsTooHigh));
-    }
-
-    /// Deposit-chain flows never set the redemption fields. This is a
-    /// shape guard: if a future refactor accidentally requires those
-    /// fields to be `Some` on construction, this test fails before any
-    /// instruction handler ships. The borsh serialization round-trip
-    /// itself is exercised end-to-end by LiteSVM tests via Anchor's
-    /// account loader.
-    #[test]
-    fn flow_with_none_redemption_fields_holds_shape() {
-        let original = Flow {
-            fogo_sender: [7u8; 32],
-            status: FlowStatus::Claimed,
-            amount: 1_234_567,
-            payer: Pubkey::new_unique(),
-            bump: 254,
-            redemption_request: None,
-            usdc_ata_pre_balance: None,
-        };
-        assert_eq!(original.status, FlowStatus::Claimed);
-        assert_eq!(original.redemption_request, None);
-        assert_eq!(original.usdc_ata_pre_balance, None);
-    }
-
-    /// Withdraw-chain shape during `RedemptionPending`. Verifies that the
-    /// PDA pubkey and the snapshotted ATA balance are addressable on the
-    /// struct as `Some(_)` — the values `claim_redemption_usdc` will rely
-    /// on for its delta math.
-    #[test]
-    fn flow_with_some_redemption_fields_holds_shape() {
-        let req = Pubkey::new_unique();
-        let original = Flow {
-            fogo_sender: [9u8; 32],
-            status: FlowStatus::RedemptionPending,
-            amount: 999_000,
-            payer: Pubkey::new_unique(),
-            bump: 1,
-            redemption_request: Some(req),
-            usdc_ata_pre_balance: Some(u64::MAX - 1),
-        };
-        assert_eq!(original.status, FlowStatus::RedemptionPending);
-        assert_eq!(original.redemption_request, Some(req));
-        assert_eq!(original.usdc_ata_pre_balance, Some(u64::MAX - 1));
-    }
-
-    /// Compile-time-style guard for the OnRe instruction discriminators.
-    /// Every constant in `constants.rs` that claims to be a sighash is
-    /// re-derived here from `sha256("global:" + name)[..8]`. If OnRe ever
-    /// renames an instruction (or if someone fat-fingers a constant), this
-    /// test fires before any CPI ships.
-    ///
-    /// Spec ref: `docs/WITHDRAW_REDESIGN.md` §4.1.
-    #[test]
-    fn onre_instruction_discriminators_match_anchor_sighash() {
-        use crate::constants::{ONRE_CREATE_REDEMPTION_REQUEST_IX, ONRE_TAKE_OFFER_IX};
-
-        fn sighash(name: &str) -> [u8; 8] {
-            let preimage = format!("global:{name}");
-            let digest = solana_sha256_hasher::hashv(&[preimage.as_bytes()]);
-            let mut out = [0u8; 8];
-            out.copy_from_slice(&digest.to_bytes()[..8]);
-            out
-        }
-
-        assert_eq!(
-            sighash("take_offer_permissionless"),
-            ONRE_TAKE_OFFER_IX,
-            "ONRE_TAKE_OFFER_IX no longer matches sha256('global:take_offer_permissionless')[..8]"
-        );
-        assert_eq!(
-            sighash("create_redemption_request"),
-            ONRE_CREATE_REDEMPTION_REQUEST_IX,
-            "ONRE_CREATE_REDEMPTION_REQUEST_IX no longer matches sha256('global:create_redemption_request')[..8]"
-        );
     }
 }

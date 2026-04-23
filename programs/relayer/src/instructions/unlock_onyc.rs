@@ -139,11 +139,6 @@ pub fn handler<'info>(
     flow.amount = amount;
     flow.payer = ctx.accounts.payer.key();
     flow.bump = ctx.bumps.outflight_flow;
-    // Set explicitly here even though the next ix in the withdraw chain
-    // (`request_redemption_onyc`) overwrites these. Keeps the post-init
-    // invariant `RedemptionPending => Some(_)` checkable in isolation.
-    flow.redemption_request = None;
-    flow.usdc_ata_pre_balance = None;
 
     emit!(OnycUnlocked {
         flow: flow_key,
