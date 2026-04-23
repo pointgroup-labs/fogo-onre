@@ -89,68 +89,114 @@ length = 0). The relayer's USDC ATA balance has increased by
 
 ## 2. Relayer-side design
 
-### 2.1 New `FlowStatus` variant
+> **Backward-compat constraint** (added after first §5.2 attempt was
+> reverted in commit `35bc49f`): the program ID
+> `Re1ayRHhmeqByGjgT5uLFExZCvQ8sv6LK74xowK8pJH` is shared across
+> mainnet/devnet/localnet. Any change to `Flow`'s borsh layout would
+> brick already-allocated `Flow` PDAs from prior deploys (devnet soak,
+> testing, etc.). Therefore: `Flow` must stay byte-stable, and any new
+> withdraw-chain state has to live in a sidecar PDA.
+
+### 2.1 New `FlowStatus` variant — appended to preserve borsh tags
 
 ```rust
 pub enum FlowStatus {
-    Claimed,            // existing — set by claim_usdc / unlock_onyc
-    RedemptionPending,  // NEW — set by request_redemption_onyc
-    Swapped,            // existing — set by swap_usdc_to_onyc / claim_redemption_usdc
+    Claimed,            // tag 0, unchanged
+    Swapped,            // tag 1, unchanged
+    RedemptionPending,  // tag 2, NEW — appended (NOT inserted) to keep
+                        // existing PDAs deserialisable
 }
 ```
+
+Borsh encodes enum variants as a 1-byte positional tag. Inserting
+`RedemptionPending` *between* `Claimed` and `Swapped` would shift
+`Swapped` from tag 1 to tag 2 and break every existing Flow PDA on
+read. `derive(InitSpace)` reports `1 + max(variant_init_space) = 1`
+regardless of variant count (≤256 payload-less arms), so `Flow`'s
+total size is unchanged.
 
 Deposit chain still uses `Claimed → Swapped` (no behavior change).
 Withdraw chain becomes `Claimed → RedemptionPending → Swapped`.
 
-### 2.2 New `Flow` field
+### 2.2 Sidecar `RedemptionTracker` PDA (replaces the original "new Flow fields" plan)
 
-The relayer needs to remember which OnRe `RedemptionRequest` PDA to
-poll. The cleanest place to put it is on the `Flow` itself:
+Rather than extending `Flow` (incompatible with live PDAs), the
+withdraw-chain state lives in a sidecar account that exists only while
+a flow is `RedemptionPending`:
 
 ```rust
-pub struct Flow {
-    pub fogo_sender: [u8; 32],
-    pub status: FlowStatus,
-    pub amount: u64,                                  // ONyc pre-redemption, then USDC post-claim
+#[account]
+#[derive(InitSpace)]
+pub struct RedemptionTracker {
+    /// Outbound `Flow` PDA this tracker is paired with — 1:1 binding
+    /// enforced by both the seed derivation AND a stored field for
+    /// belt-and-braces.
+    pub flow: Pubkey,
+
+    /// OnRe `RedemptionRequest` PDA. The relayer polls for its closure
+    /// as the fulfillment signal (see §2.3.2).
+    pub redemption_request: Pubkey,
+
+    /// Relayer's USDC ATA balance snapshotted *before*
+    /// `create_redemption_request` fires. `claim_redemption_usdc`
+    /// computes the post-fulfillment delta against this.
+    pub usdc_ata_pre_balance: u64,
+
+    /// ONyc amount net of fee that was sent to OnRe — for audit trail
+    /// and for the §2.4 race-safety check (`expected_usdc` strategy).
+    pub onyc_amount_in: u64,
+
+    /// Pays for init, receives rent on close (= cranker who called
+    /// `request_redemption_onyc`).
     pub payer: Pubkey,
+
     pub bump: u8,
-    pub redemption_request: Option<Pubkey>,           // NEW — Some(pda) iff status == RedemptionPending
-    pub usdc_ata_pre_balance: Option<u64>,            // NEW — snapshotted at request time, used by claim sanity check
 }
 ```
 
-`InitSpace` macro auto-recomputes; size delta = 1 + 32 + 1 + 8 = 42 bytes
-(both `Option`s carry a 1-byte discriminant).
+**Seeds**: `[REDEMPTION_TRACKER_SEED, flow_pda]` — exactly one tracker
+per `Flow`. The same cranker-permissionless model as the rest of the
+program (anyone can pay for init; recipient is bound by Flow's
+fogo_sender, not by the cranker).
 
-> **Audit attention**: existing inbound deposits never use these new
-> fields (always `None`). Backward compatibility for in-flight Flow
-> PDAs at deploy time: there are none on a fresh deploy. If we ever
-> redeploy under the same program ID with live Flow PDAs, the
-> InitSpace change shifts layout — handle via a versioned migration
-> (out of scope for this spec).
+**Lifecycle**:
+- Created in `request_redemption_onyc` alongside the
+  `flow.status = RedemptionPending` write. Both writes happen in a
+  single tx; if the OnRe CPI fails, both revert.
+- Closed in `claim_redemption_usdc` (rent → `tracker.payer`) alongside
+  the `flow.status = Swapped` write.
+
+**Why a sidecar is strictly better than mutating `Flow`**:
+1. Zero compatibility risk for any existing Flow PDA.
+2. Deposit-chain Flow PDAs cost zero extra bytes — the tracker only
+   exists for withdraw flows that actually hit OnRe redemption.
+3. Reverting path (a) in favor of path (b) is one
+   `delete RedemptionTracker` away — no Flow migration needed.
+4. The `RedemptionTracker::INIT_SPACE` audit surface is bounded to a
+   single account and trivially countable.
 
 ### 2.3 Replace `swap_onyc_to_usdc` with two instructions
 
 #### 2.3.1 `request_redemption_onyc` (permissionless)
 
 Replaces the front-half of the old swap. Pre: `flow.status == Claimed`.
-Post: `flow.status == RedemptionPending`,
-`flow.redemption_request == Some(pda)`,
-`flow.usdc_ata_pre_balance == Some(balance)`.
+Post: `flow.status == RedemptionPending`, sidecar
+`RedemptionTracker` PDA initialised with the OnRe `RedemptionRequest`
+address and the USDC ATA pre-balance snapshot.
 
 Steps:
 1. Take withdrawal-leg fee from `flow.amount` ONyc, route to `fee_vault`
    (same logic as current `swap_onyc_to_usdc:30-47`).
-2. Snapshot `usdc_ata.amount` into `flow.usdc_ata_pre_balance`.
-3. CPI `create_redemption_request(amount=net)` on OnRe. The relayer's
+2. Snapshot `usdc_ata.amount` into `tracker.usdc_ata_pre_balance`.
+3. Read `redemption_offer.request_counter` *before* the CPI fires;
+   derive the `RedemptionRequest` PDA address; store in
+   `tracker.redemption_request`.
+4. CPI `create_redemption_request(amount=net)` on OnRe. The relayer's
    `relayer_authority` PDA is the `redeemer` (signs via PDA seeds).
-4. Compute and store the resulting `RedemptionRequest` PDA address in
-   `flow.redemption_request`. The PDA derivation needs the
-   `request_counter` *before* increment — read it from
-   `redemption_offer.request_counter` before the CPI fires.
-5. Set `flow.amount = net` (the ONyc amount in flight; will be replaced
-   by post-CPI USDC delta in step 2.3.2).
-6. Set `flow.status = RedemptionPending`.
+5. Set `tracker.flow = flow.key()`, `tracker.onyc_amount_in = net`,
+   `tracker.payer = ctx.accounts.payer.key()`, `tracker.bump`.
+6. Set `flow.amount = net` (will be replaced by USDC delta in §2.3.2);
+   set `flow.status = RedemptionPending`.
 
 Required `remaining_accounts`: full OnRe `create_redemption_request`
 account list from §1.3, with the `redeemer` slot positionally bound
@@ -159,14 +205,15 @@ to `relayer_authority`.
 #### 2.3.2 `claim_redemption_usdc` (permissionless)
 
 Replaces the back-half. Pre: `flow.status == RedemptionPending`,
-`flow.redemption_request == Some(pda)`,
-`flow.usdc_ata_pre_balance == Some(_)`. Post: `flow.status == Swapped`,
-`flow.amount = USDC delta`.
+sidecar `RedemptionTracker` exists for this flow. Post:
+`flow.status == Swapped`, `flow.amount = USDC delta`, tracker closed
+to `tracker.payer`.
 
 Steps:
-1. Take `redemption_request_account: AccountInfo` from accounts; require
-   `redemption_request_account.key() == flow.redemption_request.unwrap()`.
-2. Verify the PDA was closed:
+1. Anchor `has_one`-style check: `tracker.flow == flow.key()`.
+2. Take `redemption_request_account: AccountInfo` from accounts; require
+   `redemption_request_account.key() == tracker.redemption_request`.
+3. Verify the PDA was closed:
    ```rust
    require!(
        redemption_request_account.lamports() == 0
@@ -175,39 +222,40 @@ Steps:
        RelayerError::RedemptionNotFulfilled
    );
    ```
-3. Reload `usdc_ata`. Compute
-   `delta = usdc_ata.amount - flow.usdc_ata_pre_balance.unwrap()`.
+4. Reload `usdc_ata`. Compute
+   `delta = usdc_ata.amount - tracker.usdc_ata_pre_balance`.
    Require `delta > 0`.
-4. `flow.amount = delta`; `flow.status = Swapped`;
-   `flow.redemption_request = None`; `flow.usdc_ata_pre_balance = None`.
+5. `flow.amount = delta`; `flow.status = Swapped`.
+6. Close `tracker` (Anchor `close = payer` constraint).
 
-After this, the existing `send_usdc_to_user` instruction works unchanged.
+After this, the existing `send_usdc_to_user` instruction works
+unchanged — it only reads `flow.fogo_sender` and `flow.amount`.
 
 ### 2.4 Concurrency safety
 
 Multiple withdraw flows can be `RedemptionPending` simultaneously —
 each has a distinct `RedemptionRequest` PDA (OnRe increments
-`request_counter` per request). Step 2.3.2's USDC delta calculation is
-the only race-prone part: if two flows race on `claim_redemption_usdc`
-while the USDC ATA receives funds for both, both might see the combined
-delta.
+`request_counter` per request) and a distinct `RedemptionTracker`
+(seeded by Flow). Step 2.3.2's USDC delta calculation is the only
+race-prone part: if two flows race on `claim_redemption_usdc` while the
+USDC ATA receives funds for both, both might see the combined delta.
 
-**Mitigation**: bind delta to the OnRe event, not the ATA balance.
-Concretely, in step 2.3.1 also store `flow.expected_usdc = price *
-amount` computed from the `RedemptionOffer`'s current price vector
-before the CPI. Then step 2.3.2 verifies `delta >= flow.expected_usdc`
-and decrements the ATA-balance snapshot for any sibling flow that
-claims after this one. Simpler alternative: serialise all withdraw
-claims behind a single mutex PDA. Open question for design review —
-flagged in §6.
+**Mitigation options** (open question §6):
+- **Mutex PDA**: serialise all `claim_redemption_usdc` calls. Simple
+  but bottlenecks throughput.
+- **`expected_usdc` snapshot in tracker**: store
+  `tracker.expected_usdc = price * onyc_amount_in` computed from the
+  `RedemptionOffer`'s current price vector before the CPI. Step 2.3.2
+  verifies `delta >= tracker.expected_usdc`. Precise, but requires us
+  to duplicate OnRe's pricing logic on-chain.
 
 ### 2.5 New `RelayerError` variants
 
 ```rust
 RedemptionNotFulfilled,         // RedemptionRequest PDA still exists
-RedemptionRequestMismatch,      // claim PDA != flow.redemption_request
-RedemptionPdaNotClosed,         // alias / clearer message variant
-MissingRedemptionState,         // flow.redemption_request was None when expected Some
+RedemptionRequestMismatch,      // claim PDA != tracker.redemption_request
+RedemptionTrackerFlowMismatch,  // tracker.flow != flow.key()
+MissingRedemptionState,         // tracker missing when status == RedemptionPending
 ```
 
 ### 2.6 New constants
@@ -221,6 +269,10 @@ pub const ONRE_REDEMPTION_OFFER_SEED: &[u8] = b"redemption_offer";
 pub const ONRE_REDEMPTION_REQUEST_SEED: &[u8] = b"redemption_request";
 pub const ONRE_REDEMPTION_OFFER_VAULT_AUTHORITY_SEED: &[u8] =
     b"redemption_offer_vault_authority";
+
+/// Relayer-side sidecar PDA seed: `[seed, flow_pda]`. One tracker per
+/// outbound Flow, exists only while `flow.status == RedemptionPending`.
+pub const REDEMPTION_TRACKER_SEED: &[u8] = b"redemption_tracker";
 ```
 
 (Note: the deposit-side `take_offer_permissionless` discriminator and
