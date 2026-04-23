@@ -73,6 +73,20 @@ pub struct RedemptionRequested {
     pub usdc_ata_pre_balance: u64,
 }
 
+/// Withdraw chain — emitted by `cancel_redemption_onyc` when the authority
+/// aborts an in-flight OnRe redemption (e.g. stuck `redemption_admin`,
+/// kill-switch, KYC issue). `returned_onyc_amount` is the ONyc that OnRe
+/// has unlocked back into the relayer's `onyc_ata` and is now re-recorded
+/// on the flow as `flow.amount` with status rolled back to `Claimed`.
+/// Note: the withdraw fee taken by `request_redemption_onyc` is NOT
+/// refunded by this path — operator off-chain reconciliation handles dust.
+#[event]
+pub struct RedemptionCancelled {
+    pub flow: Pubkey,
+    pub redemption_request: Pubkey,
+    pub returned_onyc_amount: u64,
+}
+
 /// Withdraw chain — emitted by `claim_redemption_usdc` after OnRe has
 /// fulfilled and we've recorded the USDC delta on the flow. `usdc_received`
 /// is the post-fulfillment ATA delta and the amount `send_usdc_to_user`

@@ -1,6 +1,7 @@
 #![allow(ambiguous_glob_reexports)]
 
 pub mod accept_authority;
+pub mod cancel_redemption_onyc;
 pub mod claim_redemption_usdc;
 pub mod claim_usdc;
 pub mod configure;
@@ -15,6 +16,7 @@ pub mod unlock_onyc;
 // Re-export Accounts structs and their auto-generated sibling modules
 // so the `#[program]` macro can find them at `crate::`.
 pub use accept_authority::*;
+pub use cancel_redemption_onyc::*;
 pub use claim_redemption_usdc::*;
 pub use claim_usdc::*;
 pub use configure::*;

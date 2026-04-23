@@ -83,6 +83,18 @@ pub mod relayer {
         claim_redemption_usdc::handler(ctx)
     }
 
+    /// Authority-only escape hatch. Aborts an in-flight OnRe redemption
+    /// (returns ONyc to `onyc_ata`, rolls flow back to `Claimed`, frees
+    /// the singleton). Authority-gated to prevent the
+    /// request→cancel→request fee-griefing loop a permissionless cancel
+    /// would enable. See `cancel_redemption_onyc.rs` for stuck-redemption
+    /// scenarios.
+    pub fn cancel_redemption_onyc<'info>(
+        ctx: Context<'info, CancelRedemptionOnyc<'info>>,
+    ) -> Result<()> {
+        cancel_redemption_onyc::handler(ctx)
+    }
+
     /// Send USDC to `flow.fogo_sender` and close the PDA.
     pub fn send_usdc_to_user<'info>(ctx: Context<'info, SendUsdcToUser<'info>>) -> Result<()> {
         send_usdc_to_user::handler(ctx)

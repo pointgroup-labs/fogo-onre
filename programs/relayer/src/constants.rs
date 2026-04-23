@@ -59,6 +59,29 @@ pub const ONRE_CREATE_REDEMPTION_REQUEST_IX: [u8; 8] = [201, 53, 181, 254, 115, 
 /// in commit "fix(relayer): bind tracker.redemption_request to CPI account").
 pub const ONRE_CREATE_REDEMPTION_REQUEST_REDEMPTION_REQUEST_INDEX: usize = 2;
 
+// OnRe — `global:cancel_redemption_request`. Authority-only escape hatch
+// invoked from `cancel_redemption_onyc` when an OnRe redemption is stuck
+// (e.g. `redemption_admin` outage, kill switch, KYC issue). Returns the
+// locked ONyc to the redeemer's ATA — for us, that's `relayer_authority`'s
+// `onyc_ata`, since we passed `relayer_authority` as the redeemer in the
+// matching `create_redemption_request`. Sighash:
+// `sha256("global:cancel_redemption_request")[..8]`.
+pub const ONRE_CANCEL_REDEMPTION_REQUEST_IX: [u8; 8] = [77, 155, 4, 179, 114, 233, 162, 45];
+
+/// Position of the `redemption_request` account in OnRe's
+/// `cancel_redemption_request` `Accounts` struct (zero-based). Currently
+/// the same slot as in `create_redemption_request` (2), but pinned
+/// independently because OnRe could theoretically reorder either struct
+/// without touching the other. `cancel_redemption_onyc` reads the key at
+/// this index post-CPI to confirm OnRe consumed the very PDA we recorded
+/// on `tracker.redemption_request`.
+///
+/// Source of truth (verified at session start, 2026-04):
+/// `onre-finance/onre-sol::programs/onreapp/src/instructions/redemption/
+/// cancel_redemption_request.rs` — `state(0), redemption_offer(1),
+/// redemption_request(2), signer(3), redeemer(4), ...`
+pub const ONRE_CANCEL_REDEMPTION_REQUEST_REDEMPTION_REQUEST_INDEX: usize = 2;
+
 /// `RedemptionOffer` PDA seed under OnRe. Note: seed order is
 /// `[seed, ONyc_mint, USDC_mint]` — the *opposite* of the deposit `Offer`
 /// PDA (`[b"offer", USDC_mint, ONyc_mint]`). Don't reuse `OFFER_SEED` here.

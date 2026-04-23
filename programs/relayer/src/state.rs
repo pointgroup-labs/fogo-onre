@@ -352,7 +352,10 @@ mod tests {
     /// Spec ref: `docs/WITHDRAW_REDESIGN.md` §4.1.
     #[test]
     fn onre_instruction_discriminators_match_anchor_sighash() {
-        use crate::constants::{ONRE_CREATE_REDEMPTION_REQUEST_IX, ONRE_TAKE_OFFER_IX};
+        use crate::constants::{
+            ONRE_CANCEL_REDEMPTION_REQUEST_IX, ONRE_CREATE_REDEMPTION_REQUEST_IX,
+            ONRE_TAKE_OFFER_IX,
+        };
 
         fn sighash(name: &str) -> [u8; 8] {
             let preimage = format!("global:{name}");
@@ -372,6 +375,11 @@ mod tests {
             ONRE_CREATE_REDEMPTION_REQUEST_IX,
             "ONRE_CREATE_REDEMPTION_REQUEST_IX no longer matches sha256('global:create_redemption_request')[..8]"
         );
+        assert_eq!(
+            sighash("cancel_redemption_request"),
+            ONRE_CANCEL_REDEMPTION_REQUEST_IX,
+            "ONRE_CANCEL_REDEMPTION_REQUEST_IX no longer matches sha256('global:cancel_redemption_request')[..8]"
+        );
     }
 
     /// Pins the OnRe `create_redemption_request` `redemption_request` slot
@@ -390,6 +398,16 @@ mod tests {
     fn onre_create_redemption_request_redemption_request_index_pinned() {
         use crate::constants::ONRE_CREATE_REDEMPTION_REQUEST_REDEMPTION_REQUEST_INDEX;
         assert_eq!(ONRE_CREATE_REDEMPTION_REQUEST_REDEMPTION_REQUEST_INDEX, 2);
+    }
+
+    /// Same shape as the create-side index pin above, for OnRe's
+    /// `cancel_redemption_request`. `cancel_redemption_onyc` reads the
+    /// key at this index post-CPI to assert it equals the
+    /// `tracker.redemption_request` we recorded at create time.
+    #[test]
+    fn onre_cancel_redemption_request_redemption_request_index_pinned() {
+        use crate::constants::ONRE_CANCEL_REDEMPTION_REQUEST_REDEMPTION_REQUEST_INDEX;
+        assert_eq!(ONRE_CANCEL_REDEMPTION_REQUEST_REDEMPTION_REQUEST_INDEX, 2);
     }
 
     /// The deposit-leg authority MUST derive to a different address than
