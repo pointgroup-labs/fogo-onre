@@ -8,6 +8,7 @@ export {
   NTT_PROGRAM_ID,
   ONRE_PROGRAM_ID,
   REDEEMER_SEED,
+  REDEMPTION_TRACKER_SEED,
   RELAYER_PROGRAM_ID,
   RELAYER_SEED,
   WORMHOLE_CORE_BRIDGE_ID,
@@ -69,6 +70,7 @@ export {
   findInflightFlowPda,
   findOutflightFlowPda,
   findRedeemerAuthorityPda,
+  findRedemptionTrackerPda,
 } from './pda'
 export { type Relayer } from './types/fogo_relayer'
 export { BN } from '@anchor-lang/core'
