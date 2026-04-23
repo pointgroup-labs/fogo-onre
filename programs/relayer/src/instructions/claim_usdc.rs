@@ -4,8 +4,8 @@ use anchor_spl::token_interface::{
 };
 
 use crate::constants::{
-    CONFIG_SEED, DEPOSIT_AUTHORITY_SEED, FLOW_INBOUND_SEED, GATEWAY_COMPLETE_TRANSFER_IX,
-    GATEWAY_PROGRAM_ID, REDEEMER_SEED, RELAYER_SEED, WORMHOLE_CORE_BRIDGE_ID,
+    CONFIG_SEED, FLOW_INBOUND_SEED, GATEWAY_COMPLETE_TRANSFER_IX, GATEWAY_PROGRAM_ID,
+    REDEEMER_SEED, REDEMPTION_TRACKER_SEED, RELAYER_SEED, WORMHOLE_CORE_BRIDGE_ID,
 };
 use crate::cpi::invoke_relayer_signed_with_redeemer;
 use crate::error::RelayerError;
@@ -40,13 +40,17 @@ const TB_ACCOUNTS_MIN_LEN: usize = TB_IDX_GATEWAY_CLAIM + 1;
 ///
 /// TB `CompleteWrappedWithPayload` requires `redeemer.key == to.owner`. We
 /// use a short-lived intake ATA owned by the redeemer PDA as `to`, then
-/// immediately sweep into `deposit_usdc_ata` (signed by the redeemer PDA)
-/// so the rest of the deposit pipeline operates on the long-lived deposit
-/// ATA. The deposit-side ATA is intentionally NOT `usdc_ata` (the
-/// `relayer_authority`-owned ATA) — that one is reserved as OnRe's
-/// fulfillment payout target on the withdraw chain, and isolating the
-/// deposit-chain inflows is what makes `claim_redemption_usdc`'s
-/// snapshot/delta math safe.
+/// immediately sweep into `usdc_ata` (signed by the redeemer PDA) so the
+/// rest of the deposit pipeline operates on the long-lived authority-owned
+/// ATA.
+///
+/// ## Withdraw-chain mutex
+///
+/// Gated on `redemption_tracker` PDA being absent (typed as
+/// `SystemAccount`, which asserts `owner == system_program::ID`). While a
+/// withdraw redemption is in flight the tracker exists, so this instruction
+/// fails — preventing deposit-side USDC inflows from polluting the
+/// snapshot/delta math in `claim_redemption_usdc`.
 ///
 /// `remaining_accounts` is Gateway's full account list with the relayer
 /// authority PDA appended for the CPI helper's signer flag.
@@ -93,7 +97,10 @@ pub fn handler<'info>(ctx: Context<'info, ClaimUsdc<'info>>) -> Result<()> {
         .ok_or(RelayerError::BalanceUnderflow)?;
     require!(amount > 0, RelayerError::ZeroAmountFlow);
 
-    // Sweep into the deposit-chain ATA, signed by the redeemer PDA.
+    // Sweep into the long-lived authority-owned ATA, signed by the redeemer
+    // PDA. Safe to write to `usdc_ata` here because `redemption_tracker`'s
+    // absence (enforced by Anchor's `SystemAccount` constraint) guarantees no
+    // withdraw redemption snapshot is currently in flight.
     let bump_arr = [redeemer_bump];
     let signer_seeds: &[&[&[u8]]] = &[&[REDEEMER_SEED, &bump_arr]];
     transfer_checked(
@@ -102,7 +109,7 @@ pub fn handler<'info>(ctx: Context<'info, ClaimUsdc<'info>>) -> Result<()> {
             TransferChecked {
                 from: ctx.accounts.redeemer_usdc_ata.to_account_info(),
                 mint: ctx.accounts.usdc_mint.to_account_info(),
-                to: ctx.accounts.deposit_usdc_ata.to_account_info(),
+                to: ctx.accounts.usdc_ata.to_account_info(),
                 authority: ctx.accounts.redeemer_authority.to_account_info(),
             },
             signer_seeds,
@@ -154,33 +161,39 @@ pub struct ClaimUsdc<'info> {
 
     pub usdc_mint: InterfaceAccount<'info, Mint>,
 
-    /// CHECK: PDA derived from DEPOSIT_AUTHORITY_SEED; owns
-    /// `deposit_usdc_ata`. Bump runtime-derived (not persisted on
-    /// `RelayerConfig`).
-    #[account(seeds = [DEPOSIT_AUTHORITY_SEED], bump)]
-    pub deposit_authority: UncheckedAccount<'info>,
-
-    /// Long-lived deposit-chain USDC sink: `claim_usdc` sweeps here, then
-    /// `swap_usdc_to_onyc` feeds OnRe `take_offer_permissionless` from this
-    /// account. Owned by `deposit_authority` (NOT `relayer_authority`) so
-    /// withdraw-chain inflows on `usdc_ata` stay isolated.
+    /// Long-lived authority-owned USDC sink. `claim_usdc` sweeps bridged
+    /// USDC here; downstream `swap_usdc_to_onyc` reads from the same ATA.
+    /// Boxed for stack-budget headroom (see `swap_usdc_to_onyc` for the
+    /// same rationale).
     #[account(
         mut,
         associated_token::mint = usdc_mint,
-        associated_token::authority = deposit_authority,
+        associated_token::authority = relayer_authority,
         associated_token::token_program = token_program,
     )]
-    pub deposit_usdc_ata: InterfaceAccount<'info, TokenAccount>,
+    pub usdc_ata: Box<InterfaceAccount<'info, TokenAccount>>,
 
     /// Short-lived intake ATA — TB mints into it during the CPI; we sweep
-    /// to `deposit_usdc_ata` in the same instruction.
+    /// to `usdc_ata` in the same instruction.
     #[account(
         mut,
         associated_token::mint = usdc_mint,
         associated_token::authority = redeemer_authority,
         associated_token::token_program = token_program,
     )]
-    pub redeemer_usdc_ata: InterfaceAccount<'info, TokenAccount>,
+    pub redeemer_usdc_ata: Box<InterfaceAccount<'info, TokenAccount>>,
+
+    /// Withdraw-chain mutex gate. `SystemAccount` asserts
+    /// `owner == system_program::ID`, which is true iff the singleton
+    /// `RedemptionTracker` PDA does NOT currently exist. While a withdraw
+    /// redemption is in flight the tracker is `init`'d (program-owned) and
+    /// this constraint fails — pausing deposit USDC inflows so they can't
+    /// pollute `claim_redemption_usdc`'s snapshot/delta math.
+    #[account(
+        seeds = [REDEMPTION_TRACKER_SEED],
+        bump,
+    )]
+    pub redemption_tracker: SystemAccount<'info>,
 
     /// `fogo_sender` is read from on-chain (guardian-signed) data, not args.
     /// CHECK: owner = Wormhole core bridge.

@@ -12,13 +12,11 @@
 //! The ATA-delta math in `claim_redemption_usdc` is correct because:
 //!   1. The singleton mutex ensures no concurrent withdraw redemption
 //!      contributes to `usdc_ata` between snapshot and read.
-//!   2. The deposit chain was migrated to `deposit_usdc_ata` (owned by
-//!      `deposit_authority`), so `claim_usdc` and `swap_usdc_to_onyc` no
-//!      longer touch `usdc_ata`. The `relayer_authority`-owned `usdc_ata`
-//!      is now single-writer (only OnRe `fulfill_redemption_request`
-//!      writes), single-reader (only `send_usdc_to_user` and our snapshot
-//!      read), and single-purpose. See `DEPOSIT_AUTHORITY_SEED` rationale
-//!      in `constants.rs`.
+//!   2. Every other instruction that touches `usdc_ata` (`claim_usdc`,
+//!      `swap_usdc_to_onyc`, `send_usdc_to_user`) carries a
+//!      `SystemAccount`-typed `redemption_tracker` constraint that fails
+//!      while the tracker exists, so no sibling tx can mutate `usdc_ata`
+//!      between snapshot and read.
 
 use anchor_lang::prelude::*;
 use anchor_spl::token_interface::{

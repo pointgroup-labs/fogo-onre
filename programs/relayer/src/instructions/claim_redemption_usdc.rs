@@ -60,10 +60,11 @@ pub fn handler(ctx: Context<ClaimRedemptionUsdc>) -> Result<()> {
     // invariants make this delta exact:
     //   - Singleton mutex (held by `redemption_tracker`'s existence since
     //     the request) blocks any sibling withdraw redemption.
-    //   - Deposit-side migration: `claim_usdc` and `swap_usdc_to_onyc`
-    //     route via `deposit_usdc_ata` (owned by `deposit_authority`), so
-    //     deposit-chain inflows never land here. The only writer between
-    //     snapshot and read is OnRe.
+    //   - Deposit-chain instructions (`claim_usdc`, `swap_usdc_to_onyc`) and
+    //     the user-outflow (`send_usdc_to_user`) all carry a
+    //     `SystemAccount`-typed `redemption_tracker` constraint that fails
+    //     while the tracker exists, so no sibling tx can mutate `usdc_ata`
+    //     between snapshot and read. The only writer is OnRe.
     ctx.accounts.usdc_ata.reload()?;
     let delta = ctx
         .accounts

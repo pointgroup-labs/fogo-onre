@@ -621,52 +621,19 @@ export type Relayer = {
           ]
         },
         {
-          "name": "depositAuthority",
+          "name": "usdcAta",
           "docs": [
-            "`deposit_usdc_ata`. Bump runtime-derived (not persisted on",
-            "`RelayerConfig`)."
-          ],
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  100,
-                  101,
-                  112,
-                  111,
-                  115,
-                  105,
-                  116,
-                  95,
-                  97,
-                  117,
-                  116,
-                  104,
-                  111,
-                  114,
-                  105,
-                  116,
-                  121
-                ]
-              }
-            ]
-          }
-        },
-        {
-          "name": "depositUsdcAta",
-          "docs": [
-            "Long-lived deposit-chain USDC sink: `claim_usdc` sweeps here, then",
-            "`swap_usdc_to_onyc` feeds OnRe `take_offer_permissionless` from this",
-            "account. Owned by `deposit_authority` (NOT `relayer_authority`) so",
-            "withdraw-chain inflows on `usdc_ata` stay isolated."
+            "Long-lived authority-owned USDC sink. `claim_usdc` sweeps bridged",
+            "USDC here; downstream `swap_usdc_to_onyc` reads from the same ATA.",
+            "Boxed for stack-budget headroom (see `swap_usdc_to_onyc` for the",
+            "same rationale)."
           ],
           "writable": true,
           "pda": {
             "seeds": [
               {
                 "kind": "account",
-                "path": "depositAuthority"
+                "path": "relayerAuthority"
               },
               {
                 "kind": "account",
@@ -720,7 +687,7 @@ export type Relayer = {
           "name": "redeemerUsdcAta",
           "docs": [
             "Short-lived intake ATA — TB mints into it during the CPI; we sweep",
-            "to `deposit_usdc_ata` in the same instruction."
+            "to `usdc_ata` in the same instruction."
           ],
           "writable": true,
           "pda": {
@@ -775,6 +742,44 @@ export type Relayer = {
                 89
               ]
             }
+          }
+        },
+        {
+          "name": "redemptionTracker",
+          "docs": [
+            "Withdraw-chain mutex gate. `SystemAccount` asserts",
+            "`owner == system_program::ID`, which is true iff the singleton",
+            "`RedemptionTracker` PDA does NOT currently exist. While a withdraw",
+            "redemption is in flight the tracker is `init`'d (program-owned) and",
+            "this constraint fails — pausing deposit USDC inflows so they can't",
+            "pollute `claim_redemption_usdc`'s snapshot/delta math."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  100,
+                  101,
+                  109,
+                  112,
+                  116,
+                  105,
+                  111,
+                  110,
+                  95,
+                  116,
+                  114,
+                  97,
+                  99,
+                  107,
+                  101,
+                  114
+                ]
+              }
+            ]
           }
         },
         {
@@ -1218,7 +1223,7 @@ export type Relayer = {
           "name": "redeemerUsdcAta",
           "docs": [
             "`claim_usdc` mints into this ATA via TB then immediately sweeps it",
-            "to `deposit_usdc_ata` under the redeemer's signature."
+            "to `usdc_ata` under the redeemer's signature."
           ],
           "writable": true,
           "pda": {
@@ -1234,170 +1239,6 @@ export type Relayer = {
               {
                 "kind": "account",
                 "path": "usdcMint"
-              }
-            ],
-            "program": {
-              "kind": "const",
-              "value": [
-                140,
-                151,
-                37,
-                143,
-                78,
-                36,
-                137,
-                241,
-                187,
-                61,
-                16,
-                41,
-                20,
-                142,
-                13,
-                131,
-                11,
-                90,
-                19,
-                153,
-                218,
-                255,
-                16,
-                132,
-                4,
-                142,
-                123,
-                216,
-                219,
-                233,
-                248,
-                89
-              ]
-            }
-          }
-        },
-        {
-          "name": "depositAuthority",
-          "docs": [
-            "USDC + ONyc intermediate ATAs. Signs the OnRe `take_offer_permissionless`",
-            "CPI in `swap_usdc_to_onyc`. Created here so its bump can be looked up",
-            "at runtime via `find_program_address` in the deposit-leg instructions",
-            "(we deliberately avoid persisting the bump on `RelayerConfig` to keep",
-            "its byte layout backward-compatible across already-allocated PDAs)."
-          ],
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  100,
-                  101,
-                  112,
-                  111,
-                  115,
-                  105,
-                  116,
-                  95,
-                  97,
-                  117,
-                  116,
-                  104,
-                  111,
-                  114,
-                  105,
-                  116,
-                  121
-                ]
-              }
-            ]
-          }
-        },
-        {
-          "name": "depositUsdcAta",
-          "docs": [
-            "Deposit-chain USDC sink: `claim_usdc` sweeps bridged USDC here, then",
-            "`swap_usdc_to_onyc` feeds it into OnRe's `take_offer_permissionless`",
-            "as `user_token_in_account`. Isolating from `usdc_ata` is what makes",
-            "the withdraw-chain delta math safe — see `DEPOSIT_AUTHORITY_SEED`",
-            "rationale in `constants.rs`."
-          ],
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "account",
-                "path": "depositAuthority"
-              },
-              {
-                "kind": "account",
-                "path": "tokenProgram"
-              },
-              {
-                "kind": "account",
-                "path": "usdcMint"
-              }
-            ],
-            "program": {
-              "kind": "const",
-              "value": [
-                140,
-                151,
-                37,
-                143,
-                78,
-                36,
-                137,
-                241,
-                187,
-                61,
-                16,
-                41,
-                20,
-                142,
-                13,
-                131,
-                11,
-                90,
-                19,
-                153,
-                218,
-                255,
-                16,
-                132,
-                4,
-                142,
-                123,
-                216,
-                219,
-                233,
-                248,
-                89
-              ]
-            }
-          }
-        },
-        {
-          "name": "depositOnycAta",
-          "docs": [
-            "Transient deposit-chain ONyc sink: OnRe delivers ONyc here as the",
-            "permissionless take's `user_token_out_account` (forced by OnRe's",
-            "`associated_token::authority = user` constraint). `swap_usdc_to_onyc`",
-            "then transfers the received ONyc into `onyc_ata` so `lock_onyc` keeps",
-            "its existing read path. Normally zero between instructions."
-          ],
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "account",
-                "path": "depositAuthority"
-              },
-              {
-                "kind": "account",
-                "path": "tokenProgram"
-              },
-              {
-                "kind": "account",
-                "path": "onycMint"
               }
             ],
             "program": {
@@ -2198,7 +2039,7 @@ export type Relayer = {
         {
           "name": "relayerAuthority",
           "docs": [
-            "transfer out of `onyc_ata` to `fee_vault`."
+            "and the post-swap fee transfer."
           ],
           "pda": {
             "seeds": [
@@ -2218,39 +2059,6 @@ export type Relayer = {
           }
         },
         {
-          "name": "depositAuthority",
-          "docs": [
-            "(as `user`) and the post-swap ONyc handoff into `onyc_ata`. Bump",
-            "runtime-derived (not persisted on `RelayerConfig`)."
-          ],
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  100,
-                  101,
-                  112,
-                  111,
-                  115,
-                  105,
-                  116,
-                  95,
-                  97,
-                  117,
-                  116,
-                  104,
-                  111,
-                  114,
-                  105,
-                  116,
-                  121
-                ]
-              }
-            ]
-          }
-        },
-        {
           "name": "usdcMint",
           "relations": [
             "relayerConfig"
@@ -2263,23 +2071,19 @@ export type Relayer = {
           ]
         },
         {
-          "name": "depositUsdcAta",
+          "name": "usdcAta",
           "docs": [
-            "Deposit-leg USDC source for the OnRe `take_offer_permissionless` CPI.",
-            "Owned by `deposit_authority`; OnRe enforces",
-            "`user_token_in_account.authority == user` so this is the only USDC",
-            "account OnRe will accept here.",
-            "Boxed: `try_accounts` for this struct overflows the eBPF 4 KiB stack",
-            "budget when every `InterfaceAccount<TokenAccount>` materialises",
-            "inline (~165 B each + alignment). Boxing pushes them to the heap",
-            "without changing semantics."
+            "USDC source for OnRe `take_offer_permissionless`. Owned by",
+            "`relayer_authority`; OnRe enforces `user_token_in_account.authority",
+            "== user`, satisfied because the relayer authority signs the CPI as",
+            "`user`. Boxed for stack budget."
           ],
           "writable": true,
           "pda": {
             "seeds": [
               {
                 "kind": "account",
-                "path": "depositAuthority"
+                "path": "relayerAuthority"
               },
               {
                 "kind": "account",
@@ -2330,74 +2134,10 @@ export type Relayer = {
           }
         },
         {
-          "name": "depositOnycAta",
-          "docs": [
-            "Transient deposit-leg ONyc sink. OnRe's",
-            "`user_token_out_account.authority == user` constraint forces this",
-            "to be the deposit_authority's ATA. We immediately drain it into",
-            "`onyc_ata` post-CPI. Boxed for the same stack-budget reason as",
-            "`deposit_usdc_ata`."
-          ],
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "account",
-                "path": "depositAuthority"
-              },
-              {
-                "kind": "account",
-                "path": "tokenProgram"
-              },
-              {
-                "kind": "account",
-                "path": "onycMint"
-              }
-            ],
-            "program": {
-              "kind": "const",
-              "value": [
-                140,
-                151,
-                37,
-                143,
-                78,
-                36,
-                137,
-                241,
-                187,
-                61,
-                16,
-                41,
-                20,
-                142,
-                13,
-                131,
-                11,
-                90,
-                19,
-                153,
-                218,
-                255,
-                16,
-                132,
-                4,
-                142,
-                123,
-                216,
-                219,
-                233,
-                248,
-                89
-              ]
-            }
-          }
-        },
-        {
           "name": "onycAta",
           "docs": [
-            "Long-lived ONyc account that downstream `lock_onyc` reads from.",
-            "Boxed for the same stack-budget reason as the deposit ATAs above."
+            "ONyc destination for the swap; also the source of the post-swap fee",
+            "transfer. Same authority story as `usdc_ata`."
           ],
           "writable": true,
           "pda": {
@@ -2457,13 +2197,50 @@ export type Relayer = {
         {
           "name": "feeVault",
           "docs": [
-            "Pinned by `has_one = fee_vault`. Any pre-existing ONyc account;",
-            "need not be relayer-owned."
+            "Pinned by `has_one = fee_vault`. Any pre-existing ONyc account; need",
+            "not be relayer-owned."
           ],
           "writable": true,
           "relations": [
             "relayerConfig"
           ]
+        },
+        {
+          "name": "redemptionTracker",
+          "docs": [
+            "Withdraw-chain mutex gate. `SystemAccount` asserts",
+            "`owner == system_program::ID`, true iff the singleton",
+            "`RedemptionTracker` PDA does NOT currently exist. While a withdraw",
+            "redemption is in flight this fails, pausing deposits so the",
+            "snapshot/delta math in `claim_redemption_usdc` stays correct."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  100,
+                  101,
+                  109,
+                  112,
+                  116,
+                  105,
+                  111,
+                  110,
+                  95,
+                  116,
+                  114,
+                  97,
+                  99,
+                  107,
+                  101,
+                  114
+                ]
+              }
+            ]
+          }
         },
         {
           "name": "gatewayClaim"
