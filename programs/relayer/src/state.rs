@@ -101,3 +101,131 @@ pub struct Flow {
 
     pub bump: u8,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn err_code(e: Error) -> u32 {
+        match e {
+            Error::AnchorError(ae) => ae.error_code_number,
+            _ => panic!("expected AnchorError, got {e:?}"),
+        }
+    }
+
+    fn code_of(re: RelayerError) -> u32 {
+        // Anchor error codes start at 6000 and increment by declaration order.
+        // We compare via the `Discriminator`-style `u32` to keep tests stable
+        // even if intermediate variants are added (which would shift numeric
+        // codes — a separate concern flagged at audit time).
+        (re as u32) + ERROR_CODE_OFFSET
+    }
+
+    #[test]
+    fn zero_bps_passes_through_full_amount() {
+        let (net, fee) = apply_fee_bps(1_000_000, 0).unwrap();
+        assert_eq!(net, 1_000_000);
+        assert_eq!(fee, 0);
+    }
+
+    #[test]
+    fn one_bps_one_unit_rounds_fee_to_zero() {
+        // floor(1 * 1 / 10_000) = 0 — fees round down (favors user, not vault).
+        let (net, fee) = apply_fee_bps(1, 1).unwrap();
+        assert_eq!(net, 1);
+        assert_eq!(fee, 0);
+    }
+
+    #[test]
+    fn one_bps_at_threshold_charges_one_unit() {
+        // First gross at which a 1-bps fee actually accrues.
+        let (net, fee) = apply_fee_bps(10_000, 1).unwrap();
+        assert_eq!(net, 9_999);
+        assert_eq!(fee, 1);
+    }
+
+    #[test]
+    fn max_bps_takes_entire_amount_and_rejects_zero_net() {
+        // 100% fee leaves the user with 0 — must fail closed, not silently
+        // forward a zero-amount transfer to the next CPI.
+        let e = apply_fee_bps(1_000, 10_000).unwrap_err();
+        assert_eq!(err_code(e), code_of(RelayerError::ZeroAmountFlow));
+    }
+
+    #[test]
+    fn near_max_bps_keeps_one_unit() {
+        // 99.99% fee on 1M USDC leaves 100 to user.
+        let (net, fee) = apply_fee_bps(1_000_000, 9_999).unwrap();
+        assert_eq!(fee, 999_900);
+        assert_eq!(net, 100);
+    }
+
+    #[test]
+    fn zero_gross_rejected() {
+        // Upstream guards ZeroAmountFlow before we get here; defense-in-depth.
+        let e = apply_fee_bps(0, 100).unwrap_err();
+        assert_eq!(err_code(e), code_of(RelayerError::ZeroAmountFlow));
+    }
+
+    #[test]
+    fn u64_max_with_valid_bps_fits_via_u128_widening() {
+        // The whole point of widening to u128 before mul: u64::MAX * 10_000
+        // would overflow u64 by ~14 bits. u128 has plenty of headroom.
+        let (net, fee) = apply_fee_bps(u64::MAX, 10).unwrap();
+        // 10 bps = 0.1%; fee ≈ u64::MAX / 1000.
+        assert!(fee > 0);
+        assert!(net > 0);
+        assert_eq!(net.checked_add(fee).unwrap(), u64::MAX);
+    }
+
+    #[test]
+    fn u64_max_with_one_bps_yields_minimal_fee() {
+        let (net, fee) = apply_fee_bps(u64::MAX, 1).unwrap();
+        // fee = floor(u64::MAX / 10_000)
+        assert_eq!(fee, u64::MAX / 10_000);
+        assert_eq!(net, u64::MAX - fee);
+    }
+
+    #[test]
+    fn out_of_range_bps_overflows_u64_and_returns_fee_overflow() {
+        // `validate()` rejects bps>10_000 at the config layer, but
+        // `apply_fee_bps` is the last line of defense if that invariant ever
+        // breaks: u64::MAX * 20_000 / 10_000 = 2*u64::MAX, which can't fit
+        // back in u64 → FeeOverflow (NOT silent truncation).
+        let e = apply_fee_bps(u64::MAX, 20_000).unwrap_err();
+        assert_eq!(err_code(e), code_of(RelayerError::FeeOverflow));
+    }
+
+    #[test]
+    fn validate_accepts_zero_and_max_fees() {
+        let cfg = RelayerConfig {
+            authority: Pubkey::default(),
+            pending_authority: None,
+            usdc_mint: Pubkey::default(),
+            onyc_mint: Pubkey::default(),
+            fee_vault: Pubkey::default(),
+            bump: 0,
+            relayer_authority_bump: 0,
+            deposit_fee_bps: 0,
+            withdraw_fee_bps: 10_000,
+        };
+        cfg.validate().unwrap();
+    }
+
+    #[test]
+    fn validate_rejects_above_max() {
+        let cfg = RelayerConfig {
+            authority: Pubkey::default(),
+            pending_authority: None,
+            usdc_mint: Pubkey::default(),
+            onyc_mint: Pubkey::default(),
+            fee_vault: Pubkey::default(),
+            bump: 0,
+            relayer_authority_bump: 0,
+            deposit_fee_bps: 10_001,
+            withdraw_fee_bps: 0,
+        };
+        let e = cfg.validate().unwrap_err();
+        assert_eq!(err_code(e), code_of(RelayerError::FeeBpsTooHigh));
+    }
+}
