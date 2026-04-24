@@ -340,7 +340,11 @@ mod tests {
     /// Minimal `RelayerConfig` fixture for fee-related tests. All
     /// non-fee fields are zero/default — they aren't read by `validate`
     /// or `promote_pending_fee_if_ready`.
-    fn cfg_with(deposit_fee_bps: u16, withdraw_fee_bps: u16, pending_fee: Option<PendingFee>) -> RelayerConfig {
+    fn cfg_with(
+        deposit_fee_bps: u16,
+        withdraw_fee_bps: u16,
+        pending_fee: Option<PendingFee>,
+    ) -> RelayerConfig {
         RelayerConfig {
             authority: Pubkey::default(),
             pending_authority: None,
@@ -515,7 +519,11 @@ mod tests {
     fn propose_decrease_applies_instantly_and_clears_only_its_leg() {
         // Both legs staged. Decreasing deposit must clear deposit staging
         // but leave withdraw staging untouched.
-        let mut cfg = cfg_with(100, 100, Some(pending_both(200, 250, NOW + FEE_TIMELOCK_SLOTS)));
+        let mut cfg = cfg_with(
+            100,
+            100,
+            Some(pending_both(200, 250, NOW + FEE_TIMELOCK_SLOTS)),
+        );
         cfg.propose_deposit_fee(50, NOW).unwrap();
         assert_eq!(cfg.deposit_fee_bps, 50, "decrease applies instantly");
         let p = cfg.pending_fee.expect("withdraw staging should survive");
@@ -529,7 +537,11 @@ mod tests {
         // and since the other leg is empty the bundle collapses to None
         // (the `is_empty` check inside propose_fee_change does this inline,
         // not a handler-tail filter).
-        let mut cfg = cfg_with(100, 0, Some(pending_deposit_only(200, NOW + FEE_TIMELOCK_SLOTS)));
+        let mut cfg = cfg_with(
+            100,
+            0,
+            Some(pending_deposit_only(200, NOW + FEE_TIMELOCK_SLOTS)),
+        );
         cfg.propose_deposit_fee(100, NOW).unwrap();
         assert_eq!(cfg.deposit_fee_bps, 100);
         assert_eq!(cfg.pending_fee, None, "empty bundle collapses inline");

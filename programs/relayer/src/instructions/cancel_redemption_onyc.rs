@@ -80,9 +80,8 @@ pub fn handler<'info>(ctx: Context<'info, CancelRedemptionOnyc<'info>>) -> Resul
     // wrong. We pin equality against `tracker.redemption_request`, which
     // was itself bound to the create-CPI's actual consumed PDA in
     // `request_redemption_onyc` (see binding-fix commit).
-    let cpi_redemption_request_key = *ctx.remaining_accounts
-        [ONRE_CANCEL_REDEMPTION_REQUEST_REDEMPTION_REQUEST_INDEX]
-        .key;
+    let cpi_redemption_request_key =
+        *ctx.remaining_accounts[ONRE_CANCEL_REDEMPTION_REQUEST_REDEMPTION_REQUEST_INDEX].key;
     require_keys_eq!(
         cpi_redemption_request_key,
         tracker.redemption_request,

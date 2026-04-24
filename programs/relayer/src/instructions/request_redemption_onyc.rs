@@ -99,9 +99,8 @@ pub fn handler<'info>(ctx: Context<'info, RequestRedemptionOnyc<'info>>) -> Resu
     // OnRe's `init` constraint inside the CPI seed-validates this account,
     // so if `invoke_relayer_signed` returned Ok the key here is provably the
     // real RedemptionRequest PDA.
-    let redemption_request_key = *ctx.remaining_accounts
-        [ONRE_CREATE_REDEMPTION_REQUEST_REDEMPTION_REQUEST_INDEX]
-        .key;
+    let redemption_request_key =
+        *ctx.remaining_accounts[ONRE_CREATE_REDEMPTION_REQUEST_REDEMPTION_REQUEST_INDEX].key;
 
     // Tracker init: PDA address sourced from the CPI's actual remaining
     // account, not from a separate cranker-controlled slot. See note above.

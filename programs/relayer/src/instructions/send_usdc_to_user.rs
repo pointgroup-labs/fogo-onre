@@ -49,8 +49,7 @@ pub fn handler<'info>(ctx: Context<'info, SendUsdcToUser<'info>>) -> Result<()> 
     // ["sender"] under crate::ID, NOT under Gateway — a Gateway-owned PDA
     // isn't signable from the relayer. Binding to our program ID is asserted
     // via `cpi_program_id` in the instruction data.
-    let (sender_pda, sender_bump) =
-        Pubkey::find_program_address(&[SENDER_SEED], &crate::ID);
+    let (sender_pda, sender_bump) = Pubkey::find_program_address(&[SENDER_SEED], &crate::ID);
 
     // TB's burn step calls `spl_token::burn(authority = authority_signer)`,
     // so the authority-PDA-owned ATA must first delegate `amount` of burn

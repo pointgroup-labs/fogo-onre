@@ -66,6 +66,6 @@ pub const VALIDATED_TRANSCEIVER_MESSAGE_DISC: [u8; 8] =
 /// Offset of `NttManagerMessage.sender` in
 /// `ValidatedTransceiverMessage<NativeTokenTransfer<_>>`:
 ///   disc(8) + from_chain(2) + source_ntt_manager(32)
-///   + recipient_ntt_manager(32) + NttManagerMessage.id(32) = 106.
-/// The next 32 bytes are the originating FOGO user wallet.
+///     + recipient_ntt_manager(32) + NttManagerMessage.id(32) = 106.
+///     The next 32 bytes are the originating FOGO user wallet.
 pub const TRANSCEIVER_MESSAGE_SENDER_OFFSET: usize = 106;
