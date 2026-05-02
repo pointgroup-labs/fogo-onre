@@ -9,8 +9,8 @@ readme = "./README.md"
 edition = "2021"
 
 [workspace.dependencies]
-anchor-lang = "1.0.1"
-anchor-spl = { version = "1.0.1", features = ["token", "associated_token"] }
+anchor-lang = "1.0.2"
+anchor-spl = { version = "1.0.2", features = ["token", "associated_token"] }
 anyhow = "1"
 
 [workspace.lints.clippy]
@@ -23,6 +23,7 @@ config = "scripts/spellcheck.toml"
 lto = "fat"
 codegen-units = 1
 overflow-checks = true
+opt-level = "z"
 
 [profile.release.build-override]
 opt-level = 3
