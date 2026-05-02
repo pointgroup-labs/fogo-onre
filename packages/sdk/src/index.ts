@@ -1,4 +1,4 @@
-export { RelayerClient } from './client'
+export { RelayerClient } from './client.js'
 export {
   CONFIG_SEED,
   FLOW_INBOUND_SEED,
@@ -12,7 +12,7 @@ export {
   RELAYER_PROGRAM_ID,
   RELAYER_SEED,
   WORMHOLE_CORE_BRIDGE_ID,
-} from './constants'
+} from './constants.js'
 export {
   buildClaimWrappedRemainingAccounts,
   buildTransferWrappedRemainingAccounts,
@@ -31,7 +31,7 @@ export {
   findTokenBridgeWrappedMintPda,
   type TokenBridgeClaimContext,
   type TokenBridgeTransferContext,
-} from './gateway'
+} from './gateway.js'
 export {
   findInboxItemPda,
   findInboxRateLimitPda,
@@ -44,7 +44,7 @@ export {
   type NttRedeemContext,
   nttTransferArgsHash,
   type NttTransferLockContext,
-} from './ntt'
+} from './ntt.js'
 export {
   buildOnreCancelRedemptionRequestRemainingAccounts,
   buildOnreCreateRedemptionRequestRemainingAccounts,
@@ -75,7 +75,7 @@ export {
   REDEMPTION_OFFER_SIZE,
   REDEMPTION_OFFER_TOKEN_IN_MINT_OFFSET,
   REDEMPTION_OFFER_TOKEN_OUT_MINT_OFFSET,
-} from './onre'
+} from './onre.js'
 export {
   findAuthorityPda,
   findConfigPda,
@@ -83,7 +83,7 @@ export {
   findOutflightFlowPda,
   findRedeemerAuthorityPda,
   findRedemptionTrackerPda,
-} from './pda'
-export { type Relayer } from './types/fogo_onre_relayer'
+} from './pda.js'
+export { type Relayer } from './types/fogo_onre_relayer.js'
 export { BN } from '@anchor-lang/core'
 export type { Provider } from '@anchor-lang/core'

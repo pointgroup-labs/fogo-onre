@@ -1,5 +1,5 @@
 import { PublicKey } from '@solana/web3.js'
-import IDL from './idl/fogo_onre_relayer.json'
+import IDL from './idl/fogo_onre_relayer.json' with { type: 'json' }
 
 // ---------------------------------------------------------------------------
 // Program IDs

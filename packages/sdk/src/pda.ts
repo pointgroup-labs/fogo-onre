@@ -7,7 +7,7 @@ import {
   REDEMPTION_TRACKER_SEED,
   RELAYER_PROGRAM_ID,
   RELAYER_SEED,
-} from './constants'
+} from './constants.js'
 
 export function findConfigPda(programId: PublicKey = RELAYER_PROGRAM_ID) {
   return PublicKey.findProgramAddressSync([CONFIG_SEED], programId)

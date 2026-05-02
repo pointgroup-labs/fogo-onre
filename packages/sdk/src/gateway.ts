@@ -4,7 +4,7 @@ import {
   GATEWAY_PROGRAM_ID,
   RELAYER_PROGRAM_ID,
   WORMHOLE_CORE_BRIDGE_ID,
-} from './constants'
+} from './constants.js'
 
 // Token Bridge PDA seeds — from solana/modules/token_bridge/program/src
 const TB_CONFIG_SEED = Buffer.from('config')

@@ -9,7 +9,7 @@ import {
   SystemProgram,
   SYSVAR_INSTRUCTIONS_PUBKEY,
 } from '@solana/web3.js'
-import { ONRE_PROGRAM_ID } from './constants'
+import { ONRE_PROGRAM_ID } from './constants.js'
 
 // ---------------------------------------------------------------------------
 // PDA derivations

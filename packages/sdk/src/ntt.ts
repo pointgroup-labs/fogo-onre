@@ -1,6 +1,6 @@
 import { keccak_256 } from '@noble/hashes/sha3.js'
 import { PublicKey } from '@solana/web3.js'
-import { NTT_PROGRAM_ID } from './constants'
+import { NTT_PROGRAM_ID } from './constants.js'
 
 // ---------------------------------------------------------------------------
 // PDA seed constants (mirror Wormhole NTT manager source)

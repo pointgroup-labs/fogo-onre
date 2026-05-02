@@ -2286,160 +2286,6 @@ export type Relayer = {
       "args": []
     },
     {
-      "name": "sweep",
-      "docs": [
-        "Authority-only escape hatch for stranded balances on the",
-        "PDA-owned ATAs (commingled fees, dust, accidental transfers).",
-        "See `sweep.rs` for the trust-model rationale."
-      ],
-      "discriminator": [
-        40,
-        23,
-        234,
-        175,
-        14,
-        61,
-        154,
-        177
-      ],
-      "accounts": [
-        {
-          "name": "authority",
-          "signer": true,
-          "relations": [
-            "relayerConfig"
-          ]
-        },
-        {
-          "name": "relayerConfig",
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  114,
-                  101,
-                  108,
-                  97,
-                  121,
-                  101,
-                  114,
-                  95,
-                  99,
-                  111,
-                  110,
-                  102,
-                  105,
-                  103
-                ]
-              }
-            ]
-          }
-        },
-        {
-          "name": "relayerAuthority",
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  114,
-                  101,
-                  108,
-                  97,
-                  121,
-                  101,
-                  114
-                ]
-              }
-            ]
-          }
-        },
-        {
-          "name": "mint",
-          "docs": [
-            "Runtime-constrained to `usdc_mint` or `onyc_mint` from config."
-          ]
-        },
-        {
-          "name": "from",
-          "docs": [
-            "Source — relayer-authority-owned ATA for `mint` (ATA derivation pins)."
-          ],
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "account",
-                "path": "relayerAuthority"
-              },
-              {
-                "kind": "account",
-                "path": "tokenProgram"
-              },
-              {
-                "kind": "account",
-                "path": "mint"
-              }
-            ],
-            "program": {
-              "kind": "const",
-              "value": [
-                140,
-                151,
-                37,
-                143,
-                78,
-                36,
-                137,
-                241,
-                187,
-                61,
-                16,
-                41,
-                20,
-                142,
-                13,
-                131,
-                11,
-                90,
-                19,
-                153,
-                218,
-                255,
-                16,
-                132,
-                4,
-                142,
-                123,
-                216,
-                219,
-                233,
-                248,
-                89
-              ]
-            }
-          }
-        },
-        {
-          "name": "to",
-          "docs": [
-            "Authority's discretion (typically `fee_vault` for ONyc, treasury for USDC)."
-          ],
-          "writable": true
-        },
-        {
-          "name": "tokenProgram"
-        }
-      ],
-      "args": [
-        {
-          "name": "amount",
-          "type": "u64"
-        }
-      ]
-    },
-    {
       "name": "unlockOnyc",
       "docs": [
         "Release ONyc from NTT custody and record a `Flow` receipt for the",
@@ -2773,19 +2619,6 @@ export type Relayer = {
         242,
         73
       ]
-    },
-    {
-      "name": "usdcSwapped",
-      "discriminator": [
-        146,
-        221,
-        3,
-        190,
-        76,
-        26,
-        133,
-        81
-      ]
     }
   ],
   "errors": [
@@ -2837,7 +2670,7 @@ export type Relayer = {
     {
       "code": 6009,
       "name": "feeBpsTooHigh",
-      "msg": "Fee basis points exceed maximum (10000 = 100%)"
+      "msg": "Fee basis points exceed MAX_FEE_BPS"
     },
     {
       "code": 6010,
@@ -2911,11 +2744,6 @@ export type Relayer = {
     },
     {
       "code": 6024,
-      "name": "missingRedemptionState",
-      "msg": "RedemptionTracker missing or unexpected for this flow status"
-    },
-    {
-      "code": 6025,
       "name": "emptyPendingFee",
       "msg": "PendingFee bundle has no inner leg set — invariant violation"
     }
@@ -3235,9 +3063,7 @@ export type Relayer = {
         "combined balance change as their own.",
         "",
         "Created by `request_redemption_onyc`; closed by `claim_redemption_usdc`",
-        "(rent → `payer`). Never exists on the deposit chain.",
-        "",
-        "See `docs/WITHDRAW_REDESIGN.md` §2.2."
+        "(rent → `payer`). Never exists on the deposit chain."
       ],
       "type": {
         "kind": "struct",
@@ -3315,8 +3141,7 @@ export type Relayer = {
         "accepted recovery for any cluster that already holds a",
         "pre-rollout PDA is to close it out-of-band (e.g. via a one-shot",
         "upgrade carrying a temporary realloc ix, or by re-`initialize`",
-        "after closing) before invoking any operational instruction. See",
-        "`docs/PRE_DEPLOY_CHECKLIST.md` §1.6."
+        "after closing) before invoking any operational instruction."
       ],
       "type": {
         "kind": "struct",
@@ -3456,39 +3281,6 @@ export type Relayer = {
           },
           {
             "name": "amount",
-            "type": "u64"
-          }
-        ]
-      }
-    },
-    {
-      "name": "usdcSwapped",
-      "docs": [
-        "`gross_amount` = ONyc input (== flow.amount from `unlock_onyc`);",
-        "`fee_amount` = withdrawal fee taken pre-swap; `net_amount` = ONyc",
-        "actually swapped; `usdc_received` = USDC recorded on Flow."
-      ],
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "flow",
-            "type": "pubkey"
-          },
-          {
-            "name": "grossAmount",
-            "type": "u64"
-          },
-          {
-            "name": "feeAmount",
-            "type": "u64"
-          },
-          {
-            "name": "netAmount",
-            "type": "u64"
-          },
-          {
-            "name": "usdcReceived",
             "type": "u64"
           }
         ]

@@ -1,9 +1,9 @@
 import type { Provider } from '@anchor-lang/core'
 import type { PublicKey } from '@solana/web3.js'
-import type { TokenBridgeClaimContext, TokenBridgeTransferContext } from './gateway'
-import type { NttRedeemContext, NttTransferLockContext } from './ntt'
-import type { OnreSwapContext } from './onre'
-import type { Relayer } from './types/fogo_onre_relayer'
+import type { TokenBridgeClaimContext, TokenBridgeTransferContext } from './gateway.js'
+import type { NttRedeemContext, NttTransferLockContext } from './ntt.js'
+import type { OnreSwapContext } from './onre.js'
+import type { Relayer } from './types/fogo_onre_relayer.js'
 import { BN, Program } from '@anchor-lang/core'
 
 import {
@@ -14,12 +14,12 @@ import {
 import {
   SystemProgram,
 } from '@solana/web3.js'
-import { FOGO_WORMHOLE_CHAIN_ID, NTT_PROGRAM_ID } from './constants'
+import { FOGO_WORMHOLE_CHAIN_ID, NTT_PROGRAM_ID } from './constants.js'
 import {
   buildClaimWrappedRemainingAccounts,
   buildTransferWrappedRemainingAccounts,
-} from './gateway'
-import IDL from './idl/fogo_onre_relayer.json'
+} from './gateway.js'
+import IDL from './idl/fogo_onre_relayer.json' with { type: 'json' }
 import {
   findInboxRateLimitPda,
   findNttConfigPda,
@@ -29,8 +29,8 @@ import {
   findSessionAuthorityPda,
   findTokenAuthorityPda,
   nttTransferArgsHash,
-} from './ntt'
-import { buildOnreCancelRedemptionRequestRemainingAccounts, buildOnreCreateRedemptionRequestRemainingAccounts, buildOnreSwapRemainingAccounts } from './onre'
+} from './ntt.js'
+import { buildOnreCancelRedemptionRequestRemainingAccounts, buildOnreCreateRedemptionRequestRemainingAccounts, buildOnreSwapRemainingAccounts } from './onre.js'
 import {
   findAuthorityPda,
   findConfigPda,
@@ -38,7 +38,7 @@ import {
   findOutflightFlowPda,
   findRedeemerAuthorityPda,
   findRedemptionTrackerPda,
-} from './pda'
+} from './pda.js'
 
 export class RelayerClient {
   readonly program: Program<Relayer>
@@ -170,33 +170,6 @@ export class RelayerClient {
       .accounts({
         pendingAuthority: pending,
         relayerConfig: this.configPda,
-      } as any)
-  }
-
-  /**
-   * Authority-only escape hatch to recover stranded balances from the
-   * relayer-PDA-owned USDC/ONyc ATAs. Operational flows always move the
-   * exact `Flow.amount` recorded by the inbound bridge step, so anything
-   * credited outside a tracked flow (pre-upgrade commingled fees, dust,
-   * accidental direct transfers, slippage gains) would otherwise be
-   * locked behind the PDA signature.
-   */
-  sweep(params: {
-    authority: PublicKey
-    mint: PublicKey
-    to: PublicKey
-    amount: BN
-  }) {
-    return this.program.methods
-      .sweep(params.amount)
-      .accounts({
-        authority: params.authority,
-        relayerConfig: this.configPda,
-        relayerAuthority: this.authorityPda,
-        mint: params.mint,
-        from: this.ata(params.mint),
-        to: params.to,
-        tokenProgram: TOKEN_PROGRAM_ID,
       } as any)
   }
 
