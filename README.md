@@ -1,48 +1,93 @@
-# Plan
+# Fogo OnRe
 
-> **⚠️ Status (Apr 2026): the withdraw chain (Phase 1 step 2 below)
-> is non-functional.** Verified against `onre-finance/onre-sol`: OnRe
-> exposes no permissionless ONyc→USDC swap. Withdrawals must go
-> through `RedemptionOffer` (`create_redemption_request` →
-> admin-fulfilled `fulfill_redemption_request`), which the current
-> relayer does not implement. The Phase 2 "instant withdrawals"
-> claim therefore does not hold once the reserve drains, since the
-> reserve cannot be replenished. See `docs/deploy-checklist.md`
-> §4 and `docs/architecture.md` (top-of-file banner) for the full
-> picture and resolution paths. Deposits are unaffected.
+A cross-chain yield bridge. Users deposit **USDC.s on FOGO** and receive
+**bONyc on FOGO** — a token that earns yield from
+[OnRe](https://github.com/onre-finance/onre-sol)'s tokenized reinsurance
+product (ONyc) on Solana. To withdraw, users send bONyc back and
+receive USDC.s.
 
-## Phase 1: Relayer + NTT only
+The on-chain bridge is a single immutable Solana program (the
+**relayer**) that holds no funds at rest and routes capital between
+[Wormhole Gateway](https://wormhole.com/products/gateway) (USDC),
+[Wormhole NTT](https://wormhole.com/products/native-token-transfers)
+(ONyc/bONyc), and [OnRe](https://github.com/onre-finance/onre-sol)
+(USDC ↔ ONyc).
 
-Deposit:
+## How it works
 
-1. User sends USDC.s via Gateway on FOGO > USDC arrives at relayer PDA on Solana
-2. Relayer swaps USDC > ONyc on OnRe (fee skimmed here)
-3. Relayer NTT-locks ONyc > bONyc minted to user on FOGO
-4. User holds bONyc directly
+```
+              FOGO                                 Solana
+              ────                                 ──────
+deposit:   USDC.s ──Gateway──> USDC ──swap──> ONyc ──NTT──> bONyc
+withdraw:  bONyc  ──NTT─────> ONyc ──redeem──> USDC ──Gateway──> USDC.s
+```
 
-Withdraw (**non-functional today, see banner above**):
+**Deposit** (one user transaction on FOGO; the rest is permissionless cranking):
 
-1. User burns bONyc on FOGO via NTT > ONyc released to relayer PDA
-2. Relayer swaps ONyc > USDC on OnRe (fee skimmed here) — **⚠️ no such permissionless instruction exists in OnRe**
-3. Relayer bridges USDC via Gateway > USDC.s to user on FOGO
+1. User sends USDC.s via Gateway → relayer receives USDC on Solana
+2. Relayer swaps USDC → ONyc on OnRe
+3. Relayer NTT-locks ONyc → bONyc minted to user on FOGO
 
-User signs one tx on FOGO (Gateway transfer or NTT burn). Relayer + cranker handle Solana side. User holds bONyc, yield accrues automatically as ONyc price appreciates.
+**Withdraw** (one user transaction on FOGO; OnRe asynchronously fulfills):
 
-Tradeoffs in phase 1:
+1. User NTT-sends bONyc → relayer receives ONyc on Solana
+2. Relayer requests redemption from OnRe (`request_redemption_onyc`)
+3. OnRe's `redemption_admin` fulfills the request, paying out USDC
+4. Relayer claims the USDC and Gateway-sends USDC.s back to the user
 
-- No instant withdrawals (every withdraw crosses 2 bridges + OnRe queue)
-- No reserve pool
-- OnRe 2.5%/week redemption cap hits users directly
+Yield accrues automatically: bONyc represents a claim on ONyc, whose
+on-chain price advances as OnRe's reinsurance positions earn.
 
-## Phase 2: Add FOGO vault in front
+## Trust model in one paragraph
 
-The relayer stays exactly the same. We just put the FOGO vault in front of it:
+The relayer is the user's trust boundary. Its program ID is canonical,
+its CPI destinations (Gateway, NTT, OnRe) are hardcoded, and it cannot
+move funds outside the user-signed flow — no admin can drain the
+in-transit ATAs. The config authority can adjust fees (capped at **10%
+per leg**, with a 2-day timelock on increases) and rotate the fee
+vault. The upgrade authority can ship a new `.so` and bypass everything
+— it must be a multisig or set to `None`. Full detail in
+[`docs/security.md`](./docs/security.md).
 
-User > FOGO Vault > (relayer + NTT in background)
+## Repo layout
 
-Vault adds: instant withdrawals, reserve pool, share token (wONyc), governance. The relayer doesn't change, it already does what the vault needs. **⚠️ "Instant withdrawals" only holds while the reserve has USDC.s; replenishing the reserve from Solana requires the broken Phase 1 withdraw chain to be fixed first.**
+```
+programs/relayer/    Anchor program (Rust). The only on-chain component.
+packages/sdk/        TypeScript SDK (@fogo-onre/sdk).
+tests/               LiteSVM end-to-end tests.
+docs/                Architecture, security model, deployment guides.
+scripts/             Codama client generation, changelog config.
+```
 
----
+## Quick start
 
-OnRe codebase:
-https://github.com/onre-finance/onre-sol/
+```bash
+# Build the program
+anchor build
+
+# Run the Rust unit tests + LiteSVM end-to-end tests
+anchor test
+pnpm test
+
+# Lint
+cargo clippy --workspace
+pnpm lint
+```
+
+Toolchain is pinned: Rust 1.95.0, Anchor 1.0.2, Solana CLI 3.1.8,
+pnpm 10.33.0, Node 24.
+
+## Documentation
+
+| File | Read for |
+| --- | --- |
+| [`docs/architecture.md`](./docs/architecture.md) | Full system design, CPI flow, component responsibilities |
+| [`docs/security.md`](./docs/security.md) | Trust assumptions, blast radius of every key, attack surface |
+| [`docs/deploy-checklist.md`](./docs/deploy-checklist.md) | Mandatory pre-deploy sign-off gate |
+| [`docs/deploy-mainnet.md`](./docs/deploy-mainnet.md) | Step-by-step mainnet deployment runbook |
+
+## Program ID
+
+`onrenRKgX54qtWeK3cuaTBE71xx7dWMXn82ubH61vAp` — same on localnet,
+devnet, and mainnet. Pinned in
+[`Anchor.toml`](./Anchor.toml) and `programs/relayer/src/lib.rs`.
