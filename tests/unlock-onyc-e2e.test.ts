@@ -40,6 +40,7 @@ import {
   NTT_INBOX_RL_FIXTURE,
   NTT_OUTBOX_RL_FIXTURE,
   NTT_PEER_FIXTURE,
+  pinBinaryFixtures,
   readPeerAddress,
   setRegisteredTransceiver,
   setValidatedTransceiverMessage,
@@ -58,6 +59,7 @@ describe('unlock_onyc e2e (NTT redeem + release_inbound_unlock, Locking mode)', 
 
   const CUSTODY_BALANCE = 10_000_000n // 10 ONyc in custody
 
+  beforeEach(() => pinBinaryFixtures())
   beforeEach(async () => {
     svm = createSvm()
     authority = Keypair.generate()

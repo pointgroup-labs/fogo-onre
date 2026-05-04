@@ -61,21 +61,53 @@ export const WITHDRAW_TEST_CONSTANTS = {
 const ONRE_MAINNET_BINARY_SHA256
   = 'abcea77d935ca5eb512f43a1b3a6241151c2efa74c80b7bd9a600b959f65f7d6'
 
+const NTT_MAINNET_BINARY_SHA256
+  = 'f5bb910cde4b99930623c041e315caac4cc2d39afcd034aea8f5097f78cff12d'
+
 /**
  * Pre-test guard: assert the OnRe `.so` fixture is byte-identical to the
  * pinned mainnet binary. Call inside `beforeEach`. Drift here means the
  * "real CPI" tests are no longer running against the binary they claim.
  */
 export function pinOnreBinaryFixture(): void {
-  const here = dirname(fileURLToPath(import.meta.url))
-  const so = readFileSync(
-    join(here, '../fixtures/programs/onreuGhHHgVzMWSkj2oQDLDtvvGvoepBPkqyaubFcwe.so'),
+  assertBinaryFixture(
+    'onreuGhHHgVzMWSkj2oQDLDtvvGvoepBPkqyaubFcwe.so',
+    ONRE_MAINNET_BINARY_SHA256,
+    'OnRe',
   )
+}
+
+/**
+ * Sister guard for the NTT `.so` fixture. Exists for the same reason as
+ * `pinOnreBinaryFixture`: the lock_onyc / unlock / send_usdc CPI tests
+ * only prove anything against the *real* mainnet NTT binary; an
+ * unintentional swap to a custom build silently invalidates the proof.
+ */
+export function pinNttBinaryFixture(): void {
+  assertBinaryFixture(
+    'nttu74CdAmsErx5daJVCQNoDZujswFrskMzonoZSdGk.so',
+    NTT_MAINNET_BINARY_SHA256,
+    'NTT',
+  )
+}
+
+/**
+ * Convenience: pin both third-party binary fixtures in one call. Use this
+ * in `beforeEach` for any test that CPIs into either OnRe or NTT.
+ */
+export function pinBinaryFixtures(): void {
+  pinOnreBinaryFixture()
+  pinNttBinaryFixture()
+}
+
+function assertBinaryFixture(filename: string, expectedSha256: string, label: string): void {
+  const here = dirname(fileURLToPath(import.meta.url))
+  const so = readFileSync(join(here, '../fixtures/programs/', filename))
   const got = createHash('sha256').update(so).digest('hex')
-  if (got !== ONRE_MAINNET_BINARY_SHA256) {
+  if (got !== expectedSha256) {
     throw new Error(
-      `OnRe binary fixture drift: expected sha256=${ONRE_MAINNET_BINARY_SHA256}, got ${got}. `
-      + `The withdraw E2E only proves real mainnet behavior when this hash matches. `
+      `${label} binary fixture drift: expected sha256=${expectedSha256}, got ${got}. `
+      + `The CPI tests only prove real mainnet behavior when this hash matches. `
       + `Refresh the fixture and update the constant intentionally.`,
     )
   }

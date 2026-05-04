@@ -7,6 +7,8 @@ export * from './onre-accounts'
 export { loadAndPatchOnreOffer, synthesizeOnreRedemptionOffer } from './onre-fixtures'
 export { createProvider, createSvm } from './svm'
 export {
+  pinBinaryFixtures,
+  pinNttBinaryFixture,
   pinOnreBinaryFixture,
   runUnlockOnycLeg1,
   setupWithdrawRig,

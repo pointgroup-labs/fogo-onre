@@ -23,7 +23,7 @@ import { PublicKey, SystemProgram } from '@solana/web3.js'
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
   FlowStatus,
-  pinOnreBinaryFixture,
+  pinBinaryFixtures,
   runUnlockOnycLeg1,
   setupWithdrawRig,
   synthesizeOnreRedemptionOffer,
@@ -40,7 +40,7 @@ describe('cancel_redemption_onyc e2e', () => {
   let rig: WithdrawRig
   const { NET_ONYC_TO_ONRE, USDC_PRE_BALANCE } = WITHDRAW_TEST_CONSTANTS
 
-  beforeEach(() => pinOnreBinaryFixture())
+  beforeEach(() => pinBinaryFixtures())
   beforeEach(async () => {
     rig = await setupWithdrawRig()
   })

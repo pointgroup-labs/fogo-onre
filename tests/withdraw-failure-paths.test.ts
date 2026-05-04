@@ -17,7 +17,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import {
   expectError,
   FlowStatus,
-  pinOnreBinaryFixture,
+  pinBinaryFixtures,
   runUnlockOnycLeg1,
   setupWithdrawRig,
   synthesizeOnreRedemptionOffer,
@@ -31,7 +31,7 @@ describe('withdraw failure paths', () => {
   let outflightPda: PublicKey
   const { USDC_PRE_BALANCE } = WITHDRAW_TEST_CONSTANTS
 
-  beforeEach(() => pinOnreBinaryFixture())
+  beforeEach(() => pinBinaryFixtures())
   beforeEach(async () => {
     rig = await setupWithdrawRig()
     const leg1 = await runUnlockOnycLeg1(rig)

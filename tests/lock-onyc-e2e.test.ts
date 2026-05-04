@@ -31,6 +31,7 @@ import {
   NTT_INBOX_RL_FIXTURE,
   NTT_OUTBOX_RL_FIXTURE,
   NTT_PEER_FIXTURE,
+  pinBinaryFixtures,
   setFlowAccount,
 } from './utils'
 
@@ -45,6 +46,7 @@ describe('lock_onyc e2e (NTT transfer_lock)', () => {
 
   const fogoSender = new Uint8Array(32).fill(0xAB)
 
+  beforeEach(() => pinBinaryFixtures())
   beforeEach(async () => {
     svm = createSvm()
     authority = Keypair.generate()

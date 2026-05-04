@@ -36,7 +36,7 @@ import { PublicKey, SystemProgram } from '@solana/web3.js'
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
   FlowStatus,
-  pinOnreBinaryFixture,
+  pinBinaryFixtures,
   runUnlockOnycLeg1,
   setupWithdrawRig,
   synthesizeOnreRedemptionOffer,
@@ -67,7 +67,7 @@ describe('withdraw flow e2e (unlock_onyc → request_redemption_onyc → claim_r
     }
   })
 
-  beforeEach(() => pinOnreBinaryFixture())
+  beforeEach(() => pinBinaryFixtures())
   beforeEach(async () => {
     rig = await setupWithdrawRig()
   })

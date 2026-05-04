@@ -36,6 +36,7 @@ import {
   NTT_INBOX_RL_FIXTURE,
   NTT_OUTBOX_RL_FIXTURE,
   NTT_PEER_FIXTURE,
+  pinBinaryFixtures,
   setFlowAccount,
 } from './utils'
 
@@ -56,6 +57,7 @@ describe('send_usdc_to_user e2e (NTT transfer_lock outbound on USDC.s, Locking m
   const sendAmount = 200_000n // 0.2 USDC.s
   const ATA_PRE_BALANCE = sendAmount // exactly the amount being transferred out
 
+  beforeEach(() => pinBinaryFixtures())
   beforeEach(async () => {
     svm = createSvm()
     authority = Keypair.generate()

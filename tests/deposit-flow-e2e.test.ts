@@ -54,6 +54,7 @@ import {
   ONRE_PERM_AUTHORITY_FIXTURE,
   ONRE_STATE_FIXTURE,
   ONRE_VAULT_AUTHORITY_FIXTURE,
+  pinBinaryFixtures,
   readPeerAddress,
   setRegisteredTransceiver,
   setValidatedTransceiverMessage,
@@ -77,6 +78,7 @@ describe('deposit flow e2e (claim_usdc → swap_usdc_to_onyc)', () => {
   // ONyc the OnRe vault holds (must be enough for the swap's output)
   const VAULT_ONYC_BALANCE = 10_000_000n
 
+  beforeEach(() => pinBinaryFixtures())
   beforeEach(async () => {
     svm = createSvm()
     // Set clock to 1 hour into the OnRe pricing vector's active period.
