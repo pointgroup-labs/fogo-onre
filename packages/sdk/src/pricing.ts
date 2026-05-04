@@ -170,7 +170,7 @@ export interface WithdrawQuote {
  *   2. `apply_withdraw_fee` skims `feeOnyc` to `fee_vault`.
  *   3. relayer requests redemption of `netOnyc` from OnRe.
  *      → `outputUsdc = netOnyc * onycPrice / priceScale`
- *   4. (async) OnRe's `redemption_admin` fulfils, then the relayer Gateway-sends
+ *   4. (async) OnRe's `redemption_admin` fulfils, then the relayer NTT-sends
  *      USDC.s back to the user.
  *
  * The actual USDC delivered is set by OnRe at fulfilment time; this quote uses

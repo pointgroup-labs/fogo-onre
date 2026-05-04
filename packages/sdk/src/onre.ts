@@ -11,10 +11,6 @@ import {
 } from '@solana/web3.js'
 import { ONRE_PROGRAM_ID } from './constants'
 
-// ---------------------------------------------------------------------------
-// PDA derivations
-// ---------------------------------------------------------------------------
-
 export function findOnreStatePda(
   programId: PublicKey = ONRE_PROGRAM_ID,
 ): [PublicKey, number] {
@@ -108,10 +104,6 @@ export function findOnreRedemptionRequestPda(
   )
 }
 
-// ---------------------------------------------------------------------------
-// Mainnet fixture addresses (used by E2E tests against frozen on-chain state)
-// ---------------------------------------------------------------------------
-
 /** OnRe Offer PDA for USDC->ONyc (mainnet mints) */
 export const ONRE_OFFER_FIXTURE = 'E88zkA9Pxb1i8EfSHrEW5ZUe6hiQbo8DHWQ3WhDFw7p6'
 /** OnRe State PDA */
@@ -126,26 +118,23 @@ export const ONRE_MINT_AUTHORITY_FIXTURE = 'AbpE5YLpdpxj2jRczG9P341Jicf67NvZsaZY
 /** Boss pubkey from mainnet State fixture (offset 9). */
 export const ONRE_BOSS_PUBKEY = new PublicKey('45YnzauhsBM8CpUz96Djf8UG5vqq2Dua62wuW9H3jaJ5')
 
-// ---------------------------------------------------------------------------
-// Offer data layout offsets (Anchor account: disc(8) + fields)
-// ---------------------------------------------------------------------------
-
 /** Offset of token_in_mint pubkey in Offer account data */
 export const OFFER_TOKEN_IN_MINT_OFFSET = 8
 /** Offset of token_out_mint pubkey in Offer account data */
 export const OFFER_TOKEN_OUT_MINT_OFFSET = 40
 
-// ---------------------------------------------------------------------------
-// RedemptionOffer layout (Anchor account)
-//
-//   disc(8) + offer(32) + token_in_mint(32) + token_out_mint(32)
-//     + executed_redemptions(u128, 16) + requested_redemptions(u128, 16)
-//     + fee_basis_points(u16, 2) + request_counter(u64, 8) + bump(u8, 1)
-//     + reserved[u8; 109]
-// Total: 256 bytes
-// ---------------------------------------------------------------------------
-
-/** Anchor discriminator for OnRe `RedemptionOffer` (sha256("account:RedemptionOffer")[..8]). */
+/**
+ * Anchor discriminator for OnRe `RedemptionOffer` (sha256("account:RedemptionOffer")[..8]).
+ *
+ * RedemptionOffer layout (Anchor account):
+ *
+ *   disc(8) + offer(32) + token_in_mint(32) + token_out_mint(32)
+ *     + executed_redemptions(u128, 16) + requested_redemptions(u128, 16)
+ *     + fee_basis_points(u16, 2) + request_counter(u64, 8) + bump(u8, 1)
+ *     + reserved[u8; 109]
+ *
+ * Total: 256 bytes. See offset constants below for individual field locations.
+ */
 export const REDEMPTION_OFFER_DISCRIMINATOR = new Uint8Array([
   170, 229, 178, 15, 184, 107, 140, 41,
 ])
@@ -161,10 +150,6 @@ export const REDEMPTION_OFFER_TOKEN_OUT_MINT_OFFSET = 72
 export const REDEMPTION_OFFER_REQUEST_COUNTER_OFFSET = 138
 /** Offset of `bump` (u8) inside RedemptionOffer data. */
 export const REDEMPTION_OFFER_BUMP_OFFSET = 146
-
-// ---------------------------------------------------------------------------
-// Account-list builder
-// ---------------------------------------------------------------------------
 
 /**
  * Coupled OnRe deployment identifiers. `state` is a PDA of `programId`, and
@@ -194,12 +179,6 @@ export const ONRE_MAINNET_DEPLOYMENT: OnreDeployment = {
  * mainnet defaults with a custom program. `tokenInProgram` and
  * `tokenOutProgram` are independent so Token-2022 mints can sit on either
  * side of the swap without forcing the other side to match.
- *
- * The `programId` / `state` / `boss` / `tokenProgram` fields are kept for
- * backward compatibility with the original (pre-`deployment`) shape. They
- * are mutually exclusive with `deployment` (resp. `tokenInProgram` /
- * `tokenOutProgram`) and `programId` + `state` + `boss` must be supplied
- * as a complete set if any one of them is set — partial overrides throw.
  */
 export interface OnreSwapContext {
   /** OnRe deployment (programId, state PDA, boss). Defaults to mainnet. */
@@ -214,62 +193,52 @@ export interface OnreSwapContext {
    * Override only if the on-chain boss uses a non-canonical token account.
    */
   bossTokenInAccount?: PublicKey
-
-  // ---- Deprecated legacy shape (mutually exclusive with `deployment`) ----
-
-  /** @deprecated Use `deployment.programId`. Must be paired with `state` + `boss`. */
-  programId?: PublicKey
-  /** @deprecated Use `deployment.state`. Must be paired with `programId` + `boss`. */
-  state?: PublicKey
-  /** @deprecated Use `deployment.boss`. Must be paired with `programId` + `state`. */
-  boss?: PublicKey
-  /** @deprecated Use `tokenInProgram` + `tokenOutProgram`. Sets both at once. */
-  tokenProgram?: PublicKey
 }
 
-/**
- * Resolve a context (possibly using deprecated legacy fields) into the
- * coupled `(deployment, tokenInProgram, tokenOutProgram)` triple. Throws on
- * partial / conflicting overrides.
- */
+/** Resolve a context into the coupled `(deployment, tokenInProgram, tokenOutProgram)` triple. */
 function resolveContext(ctx: OnreSwapContext | undefined): {
   deployment: OnreDeployment
   tokenInProgram: PublicKey
   tokenOutProgram: PublicKey
 } {
-  // ---- Deployment ----
-  const legacyDeploymentFields = [ctx?.programId, ctx?.state, ctx?.boss]
-  const legacySet = legacyDeploymentFields.filter(v => v !== undefined).length
-  if (ctx?.deployment && legacySet > 0) {
-    throw new Error(
-      'OnreSwapContext: `deployment` is mutually exclusive with the legacy '
-      + '`programId` / `state` / `boss` fields. Use `deployment` only.',
-    )
+  return {
+    deployment: ctx?.deployment ?? ONRE_MAINNET_DEPLOYMENT,
+    tokenInProgram: ctx?.tokenInProgram ?? TOKEN_PROGRAM_ID,
+    tokenOutProgram: ctx?.tokenOutProgram ?? TOKEN_PROGRAM_ID,
   }
-  if (legacySet > 0 && legacySet < 3) {
-    throw new Error(
-      'OnreSwapContext: legacy `programId`, `state`, and `boss` fields are '
-      + 'coupled — supply all three together (or migrate to `deployment`). '
-      + 'Partial overrides silently mix mainnet defaults with custom values.',
-    )
-  }
-  const deployment: OnreDeployment = ctx?.deployment
-    ?? (legacySet === 3
-      ? { programId: ctx!.programId!, state: ctx!.state!, boss: ctx!.boss! }
-      : ONRE_MAINNET_DEPLOYMENT)
+}
 
-  // ---- Token programs ----
-  const usesNewSplit = ctx?.tokenInProgram !== undefined || ctx?.tokenOutProgram !== undefined
-  if (ctx?.tokenProgram && usesNewSplit) {
-    throw new Error(
-      'OnreSwapContext: `tokenProgram` is mutually exclusive with '
-      + '`tokenInProgram` / `tokenOutProgram`. Pick one shape.',
-    )
-  }
-  const tokenInProgram = ctx?.tokenInProgram ?? ctx?.tokenProgram ?? TOKEN_PROGRAM_ID
-  const tokenOutProgram = ctx?.tokenOutProgram ?? ctx?.tokenProgram ?? TOKEN_PROGRAM_ID
-
-  return { deployment, tokenInProgram, tokenOutProgram }
+/**
+ * Shared derivation for the two redemption builders. Both
+ * `create_redemption_request` and `cancel_redemption_request` need the same
+ * `(state, redemptionOffer, vaultAuthority, vaultTokenAccount)` quadruple
+ * computed from `(tokenInMint, tokenOutMint, programId, tokenProgram)`.
+ */
+function resolveRedemptionVaultAccounts(params: {
+  tokenInMint: PublicKey
+  tokenOutMint: PublicKey
+  tokenProgram?: PublicKey
+  programId?: PublicKey
+  state?: PublicKey
+}): {
+  programId: PublicKey
+  tokenProgram: PublicKey
+  state: PublicKey
+  redemptionOffer: PublicKey
+  vaultAuthority: PublicKey
+  vaultTokenAccount: PublicKey
+} {
+  const programId = params.programId ?? ONRE_PROGRAM_ID
+  const tokenProgram = params.tokenProgram ?? TOKEN_PROGRAM_ID
+  const state = params.state ?? findOnreStatePda(programId)[0]
+  const [redemptionOffer] = findOnreRedemptionOfferPda(
+    params.tokenInMint, params.tokenOutMint, programId,
+  )
+  const [vaultAuthority] = findOnreRedemptionVaultAuthorityPda(programId)
+  const vaultTokenAccount = getAssociatedTokenAddressSync(
+    params.tokenInMint, vaultAuthority, true, tokenProgram,
+  )
+  return { programId, tokenProgram, state, redemptionOffer, vaultAuthority, vaultTokenAccount }
 }
 
 /**
@@ -447,17 +416,8 @@ export function buildOnreCreateRedemptionRequestRemainingAccounts(params: {
   /** Optional precomputed State PDA; defaults to `findOnreStatePda(programId)`. */
   state?: PublicKey
 }): AccountMeta[] {
-  const programId = params.programId ?? ONRE_PROGRAM_ID
-  const tokenProgram = params.tokenProgram ?? TOKEN_PROGRAM_ID
-  const state = params.state ?? findOnreStatePda(programId)[0]
-
-  const [redemptionOffer] = findOnreRedemptionOfferPda(
-    params.tokenInMint, params.tokenOutMint, programId,
-  )
-  const [vaultAuthority] = findOnreRedemptionVaultAuthorityPda(programId)
-  const vaultTokenAccount = getAssociatedTokenAddressSync(
-    params.tokenInMint, vaultAuthority, true, tokenProgram,
-  )
+  const { programId, tokenProgram, state, redemptionOffer, vaultAuthority, vaultTokenAccount }
+    = resolveRedemptionVaultAccounts(params)
 
   return [
     // 1.  state
@@ -543,17 +503,8 @@ export function buildOnreCancelRedemptionRequestRemainingAccounts(params: {
   /** Optional precomputed State PDA; defaults to `findOnreStatePda(programId)`. */
   state?: PublicKey
 }): AccountMeta[] {
-  const programId = params.programId ?? ONRE_PROGRAM_ID
-  const tokenProgram = params.tokenProgram ?? TOKEN_PROGRAM_ID
-  const state = params.state ?? findOnreStatePda(programId)[0]
-
-  const [redemptionOffer] = findOnreRedemptionOfferPda(
-    params.tokenInMint, params.tokenOutMint, programId,
-  )
-  const [vaultAuthority] = findOnreRedemptionVaultAuthorityPda(programId)
-  const vaultTokenAccount = getAssociatedTokenAddressSync(
-    params.tokenInMint, vaultAuthority, true, tokenProgram,
-  )
+  const { programId, tokenProgram, state, redemptionOffer, vaultAuthority, vaultTokenAccount }
+    = resolveRedemptionVaultAccounts(params)
 
   return [
     // 1.  state
