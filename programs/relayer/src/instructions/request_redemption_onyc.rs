@@ -71,7 +71,7 @@ pub fn handler<'info>(ctx: Context<'info, RequestRedemptionOnyc<'info>>) -> Resu
         .ok_or(RelayerError::BalanceUnderflow)?;
     require!(
         onyc_consumed == gross,
-        RelayerError::AuthorityNotInAccounts
+        RelayerError::UnexpectedOnycConsumed
     );
 
     // Sourced from the CPI's actual remaining account — OnRe's `init` has

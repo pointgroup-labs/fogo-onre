@@ -5,13 +5,6 @@
 //! lock-step. Discriminators and account-slot indices live next to them in
 //! `constants.rs` for the same reason.
 
-//! OnRe instruction arg layouts.
-//!
-//! These mirror the upstream Anchor handler signatures. When OnRe rev's an
-//! instruction's args struct, this is the one file that must change in
-//! lock-step. Discriminators and account-slot indices live next to them in
-//! `constants.rs` for the same reason.
-
 use anchor_lang::prelude::*;
 
 #[derive(AnchorSerialize)]

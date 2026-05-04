@@ -67,4 +67,7 @@ pub enum RelayerError {
 
     #[msg("Inbound NTT message did not originate from the FOGO peer chain")]
     WrongOriginChain,
+
+    #[msg("Post-CPI ONyc balance dropped — OnRe consumed ONyc unexpectedly")]
+    UnexpectedOnycConsumed,
 }
