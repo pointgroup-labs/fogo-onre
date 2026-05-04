@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef, useState } from 'react'
+import {useRef, useState} from 'react'
 import ErrorBoundary from '@/components/ErrorBoundary'
 import Header from '@/components/Header'
 import PendingTxList from '@/components/PendingTxList'
@@ -17,49 +17,52 @@ export default function Page() {
 
   return (
     <div className="min-h-screen flex flex-col">
-      <Header />
+      <Header/>
       <main className="flex-1 px-4 py-12 sm:px-6">
         <div className="mx-auto max-w-md flex flex-col gap-6">
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">Yield from OnRe</h1>
             <p className="mt-1 text-sm text-neutral-400">
-              Deposit USDC.s on FOGO. Hold bONyc. Withdraw when you want.
+              Deposit USDC.s on FOGO and earn yield backed by real-world reinsurance premiums.
             </p>
           </div>
           <ErrorBoundary label="protocol stats">
-            <ProtocolStats />
+            <ProtocolStats/>
           </ErrorBoundary>
-          <Tabs active={tab} onChange={setTab} />
+          <Tabs active={tab} onChange={setTab}/>
           <ErrorBoundary label={tab}>
-            <TransferCard kind={tab} />
+            <TransferCard kind={tab}/>
           </ErrorBoundary>
           <ErrorBoundary label="recent transactions">
-            <PendingTxList />
+            <PendingTxList/>
           </ErrorBoundary>
         </div>
       </main>
       <footer className="border-t border-neutral-800 px-4 py-4 text-xs text-neutral-500 sm:px-6">
-        <div className="mx-auto flex max-w-md flex-col items-center gap-2 sm:flex-row sm:justify-between">
-          <span className="text-neutral-600">Fogo OnRe</span>
-          <nav aria-label="Footer" className="flex flex-wrap items-center gap-x-4 gap-y-1">
-            <FooterLink href="https://github.com/fogo-protocol/fogo-onre/tree/main/docs">Docs</FooterLink>
-            <FooterLink href="https://github.com/fogo-protocol/fogo-onre">GitHub</FooterLink>
-            <FooterLink href="https://github.com/fogo-protocol/fogo-onre/blob/main/docs/security.md">Security</FooterLink>
-            <FooterLink href="https://solscan.io/account/onrenRKgX54qtWeK3cuaTBE71xx7dWMXn82ubH61vAp">Relayer</FooterLink>
-            <FooterLink href="https://fogo.io">Fogo</FooterLink>
-          </nav>
-        </div>
+        <nav
+          aria-label="Footer"
+          className="mx-auto flex max-w-md flex-wrap items-center justify-center gap-x-5 gap-y-1"
+        >
+          <FooterLink href="https://onre.finance">OnRe</FooterLink>
+          <FooterLink href="https://docs.onre.finance/technical-resources/token-configuration-and-reference">
+            OnRe Docs
+          </FooterLink>
+          <FooterLink href="https://app.onre.finance/earn/transparency">Transparency</FooterLink>
+          <FooterLink href="https://github.com/pointgroup-labs/fogo-onre">GitHub</FooterLink>
+          <FooterLink
+            href="https://github.com/pointgroup-labs/fogo-onre/blob/main/docs/security.md">Security</FooterLink>
+        </nav>
       </footer>
-      <ToastHost />
+      <ToastHost/>
     </div>
   )
 }
 
-function Tabs({ active, onChange }: { active: Tab, onChange: (t: Tab) => void }) {
+function Tabs({active, onChange}: { active: Tab, onChange: (t: Tab) => void }) {
   // Keyed map of button refs so the arrow-key handler can move focus to
   // the newly-active tab. `useRef` (not `useState`) because we never
   // need to render in response to ref mutations.
-  const buttonsRef = useRef<Record<Tab, HTMLButtonElement | null>>({ deposit: null, withdraw: null })
+  const buttonsRef = useRef<Record<Tab, HTMLButtonElement | null>>({deposit: null, withdraw: null})
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     const idx = TABS.indexOf(active)
@@ -69,14 +72,11 @@ function Tabs({ active, onChange }: { active: Tab, onChange: (t: Tab) => void })
     let nextIdx: number | null = null
     if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
       nextIdx = (idx + 1) % TABS.length
-    }
-    else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+    } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
       nextIdx = (idx - 1 + TABS.length) % TABS.length
-    }
-    else if (e.key === 'Home') {
+    } else if (e.key === 'Home') {
       nextIdx = 0
-    }
-    else if (e.key === 'End') {
+    } else if (e.key === 'End') {
       nextIdx = TABS.length - 1
     }
     if (nextIdx === null) {
@@ -113,7 +113,7 @@ function Tabs({ active, onChange }: { active: Tab, onChange: (t: Tab) => void })
 
 const ACTIVE_TAB_CLASS = 'bg-neutral-100 text-black'
 
-function FooterLink({ href, children }: { href: string, children: React.ReactNode }) {
+function FooterLink({href, children}: { href: string, children: React.ReactNode }) {
   return (
     <a
       href={href}
@@ -127,12 +127,12 @@ function FooterLink({ href, children }: { href: string, children: React.ReactNod
 }
 
 function TabButton({
-  ref,
-  current,
-  value,
-  onChange,
-  label,
-}: {
+                     ref,
+                     current,
+                     value,
+                     onChange,
+                     label,
+                   }: {
   ref: (el: HTMLButtonElement | null) => void
   current: Tab
   value: Tab
