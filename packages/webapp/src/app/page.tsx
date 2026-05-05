@@ -1,6 +1,6 @@
 'use client'
 
-import {useRef, useState} from 'react'
+import { useRef, useState } from 'react'
 import ErrorBoundary from '@/components/ErrorBoundary'
 import Header from '@/components/Header'
 import PendingTxList from '@/components/PendingTxList'
@@ -17,7 +17,7 @@ export default function Page() {
 
   return (
     <div className="min-h-screen flex flex-col">
-      <Header/>
+      <Header />
       <main className="flex-1 px-4 py-12 sm:px-6">
         <div className="mx-auto max-w-md flex flex-col gap-6">
           <div>
@@ -27,14 +27,14 @@ export default function Page() {
             </p>
           </div>
           <ErrorBoundary label="protocol stats">
-            <ProtocolStats/>
+            <ProtocolStats />
           </ErrorBoundary>
-          <Tabs active={tab} onChange={setTab}/>
+          <Tabs active={tab} onChange={setTab} />
           <ErrorBoundary label={tab}>
-            <TransferCard kind={tab}/>
+            <TransferCard kind={tab} />
           </ErrorBoundary>
           <ErrorBoundary label="recent transactions">
-            <PendingTxList/>
+            <PendingTxList />
           </ErrorBoundary>
         </div>
       </main>
@@ -50,19 +50,22 @@ export default function Page() {
           <FooterLink href="https://app.onre.finance/earn/transparency">Transparency</FooterLink>
           <FooterLink href="https://github.com/pointgroup-labs/fogo-onre">GitHub</FooterLink>
           <FooterLink
-            href="https://github.com/pointgroup-labs/fogo-onre/blob/main/docs/security.md">Security</FooterLink>
+            href="https://github.com/pointgroup-labs/fogo-onre/blob/main/docs/security.md"
+          >
+            Security
+          </FooterLink>
         </nav>
       </footer>
-      <ToastHost/>
+      <ToastHost />
     </div>
   )
 }
 
-function Tabs({active, onChange}: { active: Tab, onChange: (t: Tab) => void }) {
+function Tabs({ active, onChange }: { active: Tab, onChange: (t: Tab) => void }) {
   // Keyed map of button refs so the arrow-key handler can move focus to
   // the newly-active tab. `useRef` (not `useState`) because we never
   // need to render in response to ref mutations.
-  const buttonsRef = useRef<Record<Tab, HTMLButtonElement | null>>({deposit: null, withdraw: null})
+  const buttonsRef = useRef<Record<Tab, HTMLButtonElement | null>>({ deposit: null, withdraw: null })
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     const idx = TABS.indexOf(active)
@@ -113,7 +116,7 @@ function Tabs({active, onChange}: { active: Tab, onChange: (t: Tab) => void }) {
 
 const ACTIVE_TAB_CLASS = 'bg-neutral-100 text-black'
 
-function FooterLink({href, children}: { href: string, children: React.ReactNode }) {
+function FooterLink({ href, children }: { href: string, children: React.ReactNode }) {
   return (
     <a
       href={href}
@@ -127,12 +130,12 @@ function FooterLink({href, children}: { href: string, children: React.ReactNode 
 }
 
 function TabButton({
-                     ref,
-                     current,
-                     value,
-                     onChange,
-                     label,
-                   }: {
+  ref,
+  current,
+  value,
+  onChange,
+  label,
+}: {
   ref: (el: HTMLButtonElement | null) => void
   current: Tab
   value: Tab

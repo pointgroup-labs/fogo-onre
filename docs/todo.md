@@ -19,24 +19,24 @@ discount in exchange.
 The withdraw chain has three latency contributors:
 
 1. **NTT attestation** (bONyc → ONyc on Solana) — guardian quorum,
-   ~minutes, *unavoidable*
+   ~minutes, _unavoidable_
 2. **OnRe redemption fulfillment** (ONyc → USDC) — async, gated on
    `redemption_admin`, hours to days, **this is the only piece a DEX
    swap replaces**
 3. **Gateway attestation** (USDC → USDC.s on FOGO) — guardian quorum,
-   ~minutes, *unavoidable*
+   ~minutes, _unavoidable_
 
 So "instant" is really "minutes instead of hours" — meaningful, but
 not the synchronous UX a FOGO-side vault would give.
 
 ### Price source is the central trade-off
 
-|                | OnRe `RedemptionOffer` (today) | DEX route (proposed) |
-| -------------- | ------------------------------ | -------------------- |
-| Price source   | NAV — what ONyc is worth       | Market — what LPs pay |
-| Liquidity      | OnRe (the issuer)              | Whatever AMM pool exists |
-| Discount       | None (NAV − relayer fee)       | NAV − market spread − relayer fee |
-| Failure mode   | Slow                           | Slippage, sandwich, no liquidity |
+|              | OnRe `RedemptionOffer` (today) | DEX route (proposed)              |
+| ------------ | ------------------------------ | --------------------------------- |
+| Price source | NAV — what ONyc is worth       | Market — what LPs pay             |
+| Liquidity    | OnRe (the issuer)              | Whatever AMM pool exists          |
+| Discount     | None (NAV − relayer fee)       | NAV − market spread − relayer fee |
+| Failure mode | Slow                           | Slippage, sandwich, no liquidity  |
 
 ONyc's secondary market is almost certainly thin and discounted — LPs
 holding ONyc against OnRe's redemption-queue cap demand a premium. A

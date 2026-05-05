@@ -1,10 +1,11 @@
 'use client'
 
+import type { PendingTx } from '@/store/pending-txs'
 import { useEffect, useState } from 'react'
 import { BONYC_DECIMALS, USDC_DECIMALS } from '@/constants'
+import { usePendingTxsStore } from '@/store/pending-txs'
 import { fogoTxUrl, shortSig, wormholeTxUrl } from '@/utils/explorers'
 import { formatAmount } from '@/utils/transfer'
-import { type PendingTx, usePendingTxsStore } from '@/store/pending-txs'
 
 /**
  * Reload-resilient log of in-flight cross-chain transactions.
@@ -52,8 +53,7 @@ function PendingTxRow({
   const amount = (() => {
     try {
       return formatAmount(BigInt(tx.amount), decimals)
-    }
-    catch {
+    } catch {
       return '?'
     }
   })()

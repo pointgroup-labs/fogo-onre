@@ -4,8 +4,8 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
 const FOGO_NETWORK_NAME = process.env.NEXT_PUBLIC_FOGO_NETWORK ?? 'mainnet'
-const FOGO_RPC_DEFAULT= process.env.NEXT_PUBLIC_FOGO_RPC_URL
-    ?? (FOGO_NETWORK_NAME === 'testnet' ? 'https://testnet.fogo.io' : 'https://mainnet.fogo.io')
+const FOGO_RPC_DEFAULT = process.env.NEXT_PUBLIC_FOGO_RPC_URL
+  ?? (FOGO_NETWORK_NAME === 'testnet' ? 'https://testnet.fogo.io' : 'https://mainnet.fogo.io')
 const SOLANA_RPC_DEFAULT = process.env.NEXT_PUBLIC_SOLANA_RPC_URL ?? 'https://rpc.jpool.one'
 
 export interface SettingsState {
@@ -17,8 +17,10 @@ export interface SettingsState {
 
 const STORAGE_KEY = 'fogo-onre.settings.v1'
 
-/** Empty/whitespace-only strings collapse to `null` so resolution falls
- * through to env / hardcoded defaults instead of pinning an empty value. */
+/**
+ * Empty/whitespace-only strings collapse to `null` so resolution falls
+ * through to env / hardcoded defaults instead of pinning an empty value.
+ */
 function normalize(url: string | null): string | null {
   if (url === null) {
     return null
@@ -50,8 +52,10 @@ export interface ResolvedSettings {
   fogoRpcUrl: string
   /** Effective Solana RPC: user override → env → JPool. */
   solanaRpcUrl: string
-  /** Env/hardcoded default — what the user gets when they pick "Default"
-   * in the drawer. The drawer surfaces this in the preset label. */
+  /**
+   * Env/hardcoded default — what the user gets when they pick "Default"
+   * in the drawer. The drawer surfaces this in the preset label.
+   */
   fogoRpcDefault: string
   /** Env/hardcoded default. */
   solanaRpcDefault: string

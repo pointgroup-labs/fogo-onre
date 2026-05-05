@@ -22,8 +22,7 @@ export function safeQuoteDeposit(params: {
       onycPrice: params.onycPrice,
       priceScale: params.price.priceScale,
     })
-  }
-  catch {
+  } catch {
     return null
   }
 }
@@ -41,8 +40,7 @@ export function safeQuoteWithdraw(params: {
       onycPrice: params.onycPrice,
       priceScale: params.price.priceScale,
     })
-  }
-  catch {
+  } catch {
     return null
   }
 }

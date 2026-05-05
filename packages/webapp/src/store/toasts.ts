@@ -59,5 +59,5 @@ function scheduleAutoDismiss(toast: Toast, dismiss: (id: string) => void) {
   if (ms === null) {
     return
   }
-  setTimeout(() => dismiss(toast.id), ms)
+  setTimeout(dismiss, ms, toast.id)
 }

@@ -187,8 +187,7 @@ describe('send_usdc_to_user e2e (NTT transfer_lock outbound on USDC.s, Locking m
         })
         .signers([outboxItem])
         .rpc()
-    }
-    catch (e: any) {
+    } catch (e: any) {
       console.log('SEND ERROR:', e.message)
       if (e.logs) {
         console.log('SEND LOGS:', e.logs)

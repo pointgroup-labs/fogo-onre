@@ -79,12 +79,12 @@ pnpm 10.33.0, Node 24.
 
 ## Documentation
 
-| File | Read for |
-| --- | --- |
-| [`docs/architecture.md`](./docs/architecture.md) | Full system design, CPI flow, component responsibilities |
-| [`docs/security.md`](./docs/security.md) | Trust assumptions, blast radius of every key, attack surface |
-| [`docs/deploy-checklist.md`](./docs/deploy-checklist.md) | Mandatory pre-deploy sign-off gate |
-| [`docs/deploy-mainnet.md`](./docs/deploy-mainnet.md) | Step-by-step mainnet deployment runbook |
+| File                                                     | Read for                                                     |
+| -------------------------------------------------------- | ------------------------------------------------------------ |
+| [`docs/architecture.md`](./docs/architecture.md)         | Full system design, CPI flow, component responsibilities     |
+| [`docs/security.md`](./docs/security.md)                 | Trust assumptions, blast radius of every key, attack surface |
+| [`docs/deploy-checklist.md`](./docs/deploy-checklist.md) | Mandatory pre-deploy sign-off gate                           |
+| [`docs/deploy-mainnet.md`](./docs/deploy-mainnet.md)     | Step-by-step mainnet deployment runbook                      |
 
 ## Program ID
 

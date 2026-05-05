@@ -4,9 +4,9 @@ import { getAssociatedTokenAddressSync } from '@solana/spl-token'
 import { Connection, PublicKey } from '@solana/web3.js'
 import { useEffect, useState } from 'react'
 import { BONYC_MINT, USDC_S_MINT } from '@/constants'
-import { getFogoConnection } from '@/utils/connections'
 import { useDocumentVisible } from '@/hooks/useDocumentVisible'
 import { useSettings } from '@/store/settings'
+import { getFogoConnection } from '@/utils/connections'
 
 /**
  * Cross-chain settlement is the long pole of this app: a FOGO `transfer_burn`
@@ -42,8 +42,7 @@ async function readBalance(connection: Connection, ata: PublicKey): Promise<bigi
   try {
     const result = await connection.getTokenAccountBalance(ata, 'confirmed')
     return BigInt(result.value.amount)
-  }
-  catch {
+  } catch {
     return 0n
   }
 }

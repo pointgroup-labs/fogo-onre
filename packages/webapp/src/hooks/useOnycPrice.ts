@@ -3,6 +3,8 @@
 import { findOnreOfferPda, ONYC_MINT } from '@fogo-onre/sdk'
 import { useEffect, useState } from 'react'
 import { SOLANA_USDC_MINT } from '@/constants'
+import { useDocumentVisible } from '@/hooks/useDocumentVisible'
+import { useSettings } from '@/store/settings'
 import { getSolanaConnection } from '@/utils/connections'
 import {
   computeOnycPriceFromVector,
@@ -10,8 +12,6 @@ import {
   ONRE_PRICE_SCALE,
   selectActiveVector,
 } from '@/utils/onyc-price'
-import { useDocumentVisible } from '@/hooks/useDocumentVisible'
-import { useSettings } from '@/store/settings'
 
 /**
  * Live ONyc price snapshot fetched from the OnRe Offer account on Solana.
@@ -80,8 +80,7 @@ export function useOnycPrice(): { price: OnycPriceState | null, error: string | 
           fetchedAt: Date.now(),
         })
         setError(null)
-      }
-      catch (err) {
+      } catch (err) {
         if (cancelled) {
           return
         }

@@ -245,7 +245,7 @@ export async function runUnlockOnycLeg1(rig: WithdrawRig): Promise<{
   validatedMsgPda: PublicKey
 }> {
   const { ONYC_RELEASED, fogoSender } = WITHDRAW_TEST_CONSTANTS
-  const { svm, authority, client, onycMint, relayerAuthorityPda, custodyAta } = rig
+  const { svm, authority, client, onycMint, relayerAuthorityPda } = rig
 
   const messageId = new Uint8Array(32)
   crypto.getRandomValues(messageId)

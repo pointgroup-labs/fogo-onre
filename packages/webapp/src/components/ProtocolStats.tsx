@@ -1,7 +1,7 @@
 'use client'
 
-import { useProtocolState } from '@/hooks/useProtocolState'
 import { BONYC_DECIMALS, USDC_DECIMALS } from '@/constants'
+import { useProtocolState } from '@/hooks/useProtocolState'
 
 /**
  * Top-of-page stats strip. Three at-a-glance metrics that tell a user

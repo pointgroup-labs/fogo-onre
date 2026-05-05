@@ -138,8 +138,7 @@ describe('withdraw flow e2e (unlock_onyc → request_redemption_onyc → claim_r
           onre: { redemptionRequest: redemptionRequestPda },
         })
         .rpc()
-    }
-    catch (e: any) {
+    } catch (e: any) {
       console.log('REQUEST_REDEMPTION ERROR:', e.message)
       if (e.logs) {
         console.log('REQUEST_REDEMPTION LOGS:', e.logs)
@@ -220,8 +219,7 @@ describe('withdraw flow e2e (unlock_onyc → request_redemption_onyc → claim_r
           payerForClose: authority.publicKey,
         })
         .rpc()
-    }
-    catch (e: any) {
+    } catch (e: any) {
       console.log('CLAIM_REDEMPTION ERROR:', e.message)
       if (e.logs) {
         console.log('CLAIM_REDEMPTION LOGS:', e.logs)

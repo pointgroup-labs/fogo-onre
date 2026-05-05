@@ -25,7 +25,7 @@ export default antfu(
   {
     rules: {
       'antfu/consistent-list-newline': 'off',
-      'style/brace-style': ['error', '1tbs', {allowSingleLine: true}],
+      'style/brace-style': ['error', '1tbs', { allowSingleLine: true }],
 
       'toml/padding-line-between-pairs': 'off',
       'toml/array-element-newline': 'off',
@@ -42,6 +42,15 @@ export default antfu(
       'node/no-path-concat': 'off',
 
       'no-console': 'off',
+    },
+  },
+  {
+    // Next.js App Router files export `metadata`, `viewport`, etc.
+    // alongside the default component — that's the framework convention,
+    // not a Fast Refresh hazard.
+    files: ['packages/webapp/src/app/**/{layout,page,loading,error,not-found,template}.tsx'],
+    rules: {
+      'react-refresh/only-export-components': 'off',
     },
   },
 )

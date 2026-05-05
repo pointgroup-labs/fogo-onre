@@ -1,4 +1,4 @@
-export {RelayerClient} from './client'
+export { RelayerClient } from './client'
 export {
   BONYC_DECIMALS,
   CONFIG_SEED,
@@ -20,13 +20,13 @@ export {
   USDC_DECIMALS,
 } from './constants'
 export {
-  type BuildFogoNttTransferParams,
   buildFogoNttDepositIx,
+  type BuildFogoNttTransferParams,
   buildFogoNttWithdrawIx,
 } from './fogo'
 export {
-  type BuildNttTransferLockAccountListParams,
   buildNttTransferLockAccountList,
+  type BuildNttTransferLockAccountListParams,
   encodeNttTransferArgsBorsh,
   findInboxItemPda,
   findInboxRateLimitPda,
@@ -90,6 +90,6 @@ export {
   quoteWithdraw,
   type WithdrawQuote,
 } from './pricing'
-export {type FogoOnreRelayer} from './types/fogo_onre_relayer'
-export {BN} from '@anchor-lang/core'
-export type {Provider} from '@anchor-lang/core'
+export { type FogoOnreRelayer } from './types/fogo_onre_relayer'
+export { BN } from '@anchor-lang/core'
+export type { Provider } from '@anchor-lang/core'

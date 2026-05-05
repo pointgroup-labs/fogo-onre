@@ -13,15 +13,15 @@ follow it end to end.
 
 ## 1. What gets deployed (and what does not)
 
-| Artifact                                     | Where                      | This repo?                                |
-|----------------------------------------------|----------------------------|-------------------------------------------|
-| `relayer` Anchor program                     | Solana mainnet-beta        | ✅                                         |
-| Solana-side NTT manager (ONyc, locking mode) | Solana mainnet-beta        | ✅ — deployed via `ntt` CLI, see §7.1      |
-| FOGO-side NTT manager (bONyc, burning mode)  | FOGO chain                 | ✅ — deployed via `ntt` CLI, see §7.1      |
-| Solana-side NTT manager (USDC.s, wrap mode)  | Solana mainnet-beta        | ❌ — already live, you only reference it   |
-| FOGO-side NTT manager (USDC.s, native mode)  | FOGO chain                 | ❌ — already live, you only reference it   |
-| `@fogo-onre/sdk` (TS client)                 | npm (or internal registry) | ✅                                         |
-| OnRe program                                 | Solana                     | ❌ — already live, you only reference it   |
+| Artifact                                     | Where                      | This repo?                               |
+| -------------------------------------------- | -------------------------- | ---------------------------------------- |
+| `relayer` Anchor program                     | Solana mainnet-beta        | ✅                                       |
+| Solana-side NTT manager (ONyc, locking mode) | Solana mainnet-beta        | ✅ — deployed via `ntt` CLI, see §7.1    |
+| FOGO-side NTT manager (bONyc, burning mode)  | FOGO chain                 | ✅ — deployed via `ntt` CLI, see §7.1    |
+| Solana-side NTT manager (USDC.s, wrap mode)  | Solana mainnet-beta        | ❌ — already live, you only reference it |
+| FOGO-side NTT manager (USDC.s, native mode)  | FOGO chain                 | ❌ — already live, you only reference it |
+| `@fogo-onre/sdk` (TS client)                 | npm (or internal registry) | ✅                                       |
+| OnRe program                                 | Solana                     | ❌ — already live, you only reference it |
 
 There is **no FOGO-side smart contract written by us** beyond the NTT
 manager scaffold. Users hold bONyc directly on FOGO (it's the
@@ -37,7 +37,7 @@ Source: `Anchor.toml` `[programs.mainnet]` and
 `programs/relayer/src/constants.rs`):
 
 | Program                | Address                                       |
-|------------------------|-----------------------------------------------|
+| ---------------------- | --------------------------------------------- |
 | Wormhole NTT Manager   | `nttu74CdAmsErx5daJVCQNoDZujswFrskMzonoZSdGk` |
 | OnRe                   | `onreuGhHHgVzMWSkj2oQDLDtvvGvoepBPkqyaubFcwe` |
 | FOGO Wormhole chain ID | `51`                                          |
@@ -56,7 +56,7 @@ deploy-checklist.md §4.
 ### Toolchains (versions are strict)
 
 | Tool       | Pinned to | Pinned by                       |
-|------------|-----------|---------------------------------|
+| ---------- | --------- | ------------------------------- |
 | Rust       | 1.95.0    | `rust-toolchain.toml`           |
 | Anchor     | 1.0.1     | `Anchor.toml`                   |
 | Solana CLI | 3.1.8     | `Anchor.toml`                   |
@@ -106,7 +106,7 @@ program rent dominates the budget. Numbers below assume a 300–500 KB
 #### Solana
 
 | Bucket                                               | SOL           | Notes                                                                                      |
-|------------------------------------------------------|---------------|--------------------------------------------------------------------------------------------|
+| ---------------------------------------------------- | ------------- | ------------------------------------------------------------------------------------------ |
 | Relayer program rent                                 | **6–8**       | Scales with `.so` size; ~5.6 SOL at 400 KB                                                 |
 | NTT manager program rent (Solana side)               | **4–6**       | Comparable-size Anchor program                                                             |
 | `initialize` ix + all PDAs and ATAs                  | ~0.02         | RelayerConfig + USDC/ONyc ATAs + redeemer intake ATA + fee_vault ATA + NTT init accounts   |
@@ -126,7 +126,7 @@ contracts, which can drop these numbers by an order of magnitude.
 Assuming FOGO uses Solana-identical rent parameters:
 
 | Bucket                                                   | FOGO           | Notes                                                |
-|----------------------------------------------------------|----------------|------------------------------------------------------|
+| -------------------------------------------------------- | -------------- | ---------------------------------------------------- |
 | FOGO-side NTT manager program rent (Burning mode)        | **4–6**        | Comparable to Solana NTT manager size                |
 | NTT init + bONyc mint creation                           | ~0.01          | NTT manager creates the bONyc mint and pays its rent |
 | Peer registration + rate limit PDAs                      | ~0.005         | One-time                                             |
@@ -275,7 +275,7 @@ Source: `programs/relayer/src/instructions/initialize.rs:47-117` and
 `programs/relayer/src/lib.rs`.
 
 | Param                                                         | Type                | Source                                                                 |
-|---------------------------------------------------------------|---------------------|------------------------------------------------------------------------|
+| ------------------------------------------------------------- | ------------------- | ---------------------------------------------------------------------- |
 | `deposit_fee_bps`                                             | `u16` (0–1000)      | Decided value                                                          |
 | `withdraw_fee_bps`                                            | `u16` (0–1000)      | Decided value                                                          |
 | `authority` (signer)                                          | `Pubkey`            | Multisig                                                               |
@@ -294,12 +294,12 @@ derives every PDA and ATA for you.
 ### Build, route through multisig, send
 
 ```ts
-import {AnchorProvider} from '@anchor-lang/core'
-import {RelayerClient} from '@fogo-onre/sdk'
-import {Connection, PublicKey} from '@solana/web3.js'
+import { AnchorProvider } from '@anchor-lang/core'
+import { RelayerClient } from '@fogo-onre/sdk'
+import { Connection, PublicKey } from '@solana/web3.js'
 
 const connection = new Connection(MAINNET_RPC, 'confirmed')
-const provider = new AnchorProvider(connection, wallet, {commitment: 'confirmed'})
+const provider = new AnchorProvider(connection, wallet, { commitment: 'confirmed' })
 const client = new RelayerClient(provider)
 
 const builder = client.initialize({
@@ -348,15 +348,15 @@ These are not in this repo; they require talking to the operators of
 each system. Without them, flows stall and you'll see opaque CPI
 failures.
 
-| Integration                              | What you need                                                                                                                                                                   | Owner                                                        |
-|------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------|
-| **NTT peer registration**                | The FOGO-side NTT manager registered as a peer of the Solana NTT manager (and vice versa). Without it, `lock_onyc` / `unlock_onyc` revert on `peer not found`.                  | NTT manager admin (you, post-§7.1)                           |
-| **NTT rate limits**                      | Per-call + per-24h caps documented in deploy-checklist.md §5. Confirm they accommodate expected throughput.                                                                     | NTT manager admin (you, post-§7.1)                           |
-| **OnRe `Offer` (USDC → ONyc)**           | Live `Offer` PDA at `[b"offer", USDC_mint, ONyc_mint]` under OnRe. `swap_usdc_to_onyc` reverts without it.                                                                      | OnRe operator                                                |
-| **OnRe `RedemptionOffer` (ONyc → USDC)** | Required by `request_redemption_onyc`. Verify funded and active per deploy-checklist.md §4.                                                                                     | OnRe operator                                                |
-| **OnRe `redemption_admin` liveness**     | Asynchronously fulfills `RedemptionRequest` PDAs created by `request_redemption_onyc`. Latency is the user-visible withdraw SLA. See security.md §3 and deploy-checklist.md §8. | OnRe operator                                                |
-| **USDC.s NTT manager (FOGO ↔ Solana USDC)** | The USDC.s NTT deployment must already be live and the relayer's expected peers / rate limits configured. `claim_usdc` and `send_usdc_to_user` CPI it directly.                       | USDC.s NTT manager admin (third party)                       |
-| **OnRe price-vector update authority**   | Documented per deploy-checklist.md §6. Governs ONyc price evolution, which is what generates user yield.                                                                        | OnRe operator                                                |
+| Integration                                 | What you need                                                                                                                                                                   | Owner                                  |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- |
+| **NTT peer registration**                   | The FOGO-side NTT manager registered as a peer of the Solana NTT manager (and vice versa). Without it, `lock_onyc` / `unlock_onyc` revert on `peer not found`.                  | NTT manager admin (you, post-§7.1)     |
+| **NTT rate limits**                         | Per-call + per-24h caps documented in deploy-checklist.md §5. Confirm they accommodate expected throughput.                                                                     | NTT manager admin (you, post-§7.1)     |
+| **OnRe `Offer` (USDC → ONyc)**              | Live `Offer` PDA at `[b"offer", USDC_mint, ONyc_mint]` under OnRe. `swap_usdc_to_onyc` reverts without it.                                                                      | OnRe operator                          |
+| **OnRe `RedemptionOffer` (ONyc → USDC)**    | Required by `request_redemption_onyc`. Verify funded and active per deploy-checklist.md §4.                                                                                     | OnRe operator                          |
+| **OnRe `redemption_admin` liveness**        | Asynchronously fulfills `RedemptionRequest` PDAs created by `request_redemption_onyc`. Latency is the user-visible withdraw SLA. See security.md §3 and deploy-checklist.md §8. | OnRe operator                          |
+| **USDC.s NTT manager (FOGO ↔ Solana USDC)** | The USDC.s NTT deployment must already be live and the relayer's expected peers / rate limits configured. `claim_usdc` and `send_usdc_to_user` CPI it directly.                 | USDC.s NTT manager admin (third party) |
+| **OnRe price-vector update authority**      | Documented per deploy-checklist.md §6. Governs ONyc price evolution, which is what generates user yield.                                                                        | OnRe operator                          |
 
 ### 7.1. NTT setup for ONyc ↔ bONyc (one-time, before any deposit can land)
 
@@ -487,9 +487,10 @@ to users.
 4. Crank `swap_usdc_to_onyc`. Confirm the relayer's ONyc ATA balance
    increases.
 5. Crank `lock_onyc`. Confirm:
-  - bONyc lands on the test FOGO wallet
-  - The Flow PDA is closed (rent returned to the cranker)
-  - The fee vault balance increased by the expected amount
+
+- bONyc lands on the test FOGO wallet
+- The Flow PDA is closed (rent returned to the cranker)
+- The fee vault balance increased by the expected amount
 
 ### 8.2. Withdraw cycle (bONyc on FOGO → USDC.s on FOGO)
 
@@ -499,20 +500,23 @@ to users.
 3. Crank `unlock_onyc`. Confirm a Flow PDA appears in `Unlocked` state
    and the relayer's ONyc ATA balance increases by `gross`.
 4. Crank `request_redemption_onyc`. Confirm:
-  - The singleton `RedemptionTracker` PDA is allocated and bound to
-    this flow's `RedemptionRequest`
-  - The relayer's ONyc ATA balance decreased by exactly `gross`
-    (balance-delta guard)
+
+- The singleton `RedemptionTracker` PDA is allocated and bound to
+  this flow's `RedemptionRequest`
+- The relayer's ONyc ATA balance decreased by exactly `gross`
+  (balance-delta guard)
+
 5. Wait for OnRe's `redemption_admin` to fulfill the request. Document
    the observed latency for the operational runbook (deploy-checklist.md §8).
 6. Crank `claim_redemption_usdc`. Confirm USDC lands in the relayer's
    USDC ATA and the `RedemptionTracker` advances to `Claimed`.
 7. Crank `send_usdc_to_user`. Confirm:
-  - USDC.s lands on the test FOGO wallet via NTT
-  - The Flow PDA closes (rent returned to the cranker)
-  - The `RedemptionTracker` closes (rent returned to whoever paid for it)
-  - Fees applied per `apply_fee_bps` (`programs/relayer/src/state.rs`)
-    — zero rounding drift expected
+
+- USDC.s lands on the test FOGO wallet via NTT
+- The Flow PDA closes (rent returned to the cranker)
+- The `RedemptionTracker` closes (rent returned to whoever paid for it)
+- Fees applied per `apply_fee_bps` (`programs/relayer/src/state.rs`)
+  — zero rounding drift expected
 
 ### 8.3. Reconcile
 
@@ -555,16 +559,18 @@ Before declaring the deploy "live":
    //   → Squads-route under the NEW multisig, broadcast.
    ```
 3. **Monitoring is live:**
-  - Stuck Flow PDAs older than your stale-threshold (deposits should
-    close within minutes; alert if any sits >1h)
-  - Stuck `RedemptionTracker` — if it sits in `Requested` state past
-    the documented OnRe fulfillment SLA, page the cancel-decision owner
-  - Fee vault balance growing in line with deposit volume
-  - `pendingFee` becoming `Some(_)` — alert when a staged fee change
-    is about to apply (timelock = `FEE_TIMELOCK_SLOTS = 432_000`
-    slots ≈ 2 days)
-  - Relayer ATA balances: USDC and ONyc should usually be near zero
-    (in-transit only); persistent non-zero balances mean a stuck flow
+
+- Stuck Flow PDAs older than your stale-threshold (deposits should
+  close within minutes; alert if any sits >1h)
+- Stuck `RedemptionTracker` — if it sits in `Requested` state past
+  the documented OnRe fulfillment SLA, page the cancel-decision owner
+- Fee vault balance growing in line with deposit volume
+- `pendingFee` becoming `Some(_)` — alert when a staged fee change
+  is about to apply (timelock = `FEE_TIMELOCK_SLOTS = 432_000`
+  slots ≈ 2 days)
+- Relayer ATA balances: USDC and ONyc should usually be near zero
+  (in-transit only); persistent non-zero balances mean a stuck flow
+
 4. **Public deploy record published:** program ID, deploy commit hash,
    binary sha256, multisig address + roster, fee_vault address, SDK
    version, deploy date, signer.
@@ -574,7 +580,7 @@ Before declaring the deploy "live":
 ## 10. Reference: post-deploy admin operations
 
 | Operation                    | Instruction                                              | Signer                      | Effect                                                   |
-|------------------------------|----------------------------------------------------------|-----------------------------|----------------------------------------------------------|
+| ---------------------------- | -------------------------------------------------------- | --------------------------- | -------------------------------------------------------- |
 | Decrease fees                | `configure(deposit_fee_bps?, withdraw_fee_bps?, _)`      | authority                   | Instant                                                  |
 | Increase fees                | `configure(...)` then re-`configure(...)` after timelock | authority                   | ~2 days (auto-promoted on next `configure` after window) |
 | Rotate fee vault             | `configure(_, _, _)` with `fee_vault` account passed     | authority                   | Instant                                                  |
@@ -593,7 +599,7 @@ Anyone with SOL for tx fees can crank them.
 ## 11. Companion documents
 
 | File                                              | Read for                                             |
-|---------------------------------------------------|------------------------------------------------------|
+| ------------------------------------------------- | ---------------------------------------------------- |
 | [`deploy-checklist.md`](./deploy-checklist.md)    | Mandatory sign-off gate. Read before this guide.     |
 | [`security.md`](./security.md)                    | Trust assumptions, blast radius of each key          |
 | [`architecture.md`](./architecture.md)            | Full system design                                   |

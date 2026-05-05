@@ -6,9 +6,9 @@ import { getAssociatedTokenAddressSync } from '@solana/spl-token'
 import { Connection, PublicKey } from '@solana/web3.js'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { BONYC_MINT, USDC_S_MINT } from '@/constants'
-import { getFogoConnection } from '@/utils/connections'
 import { useDocumentVisible } from '@/hooks/useDocumentVisible'
 import { useSettings } from '@/store/settings'
+import { getFogoConnection } from '@/utils/connections'
 
 /**
  * Polled balance snapshot for the user's USDC.s and bONyc on FOGO.
@@ -28,15 +28,15 @@ async function fetchTokenBalance(connection: Connection, ata: PublicKey): Promis
   try {
     const result = await connection.getTokenAccountBalance(ata, 'confirmed')
     return BigInt(result.value.amount)
-  }
-  catch {
+  } catch {
     return 0n
   }
 }
 
 export interface UseBalancesResult {
   snapshot: BalanceSnapshot
-  /** Force an immediate refetch — call after a successful tx so the UI
+  /**
+   * Force an immediate refetch — call after a successful tx so the UI
    * doesn't show stale numbers for up to `REFRESH_MS` while the next poll
    * tick fires.
    */

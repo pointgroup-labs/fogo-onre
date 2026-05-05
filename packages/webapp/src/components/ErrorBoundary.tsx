@@ -1,6 +1,7 @@
 'use client'
 
-import { Component, type ReactNode } from 'react'
+import type { ReactNode } from 'react'
+import { Component } from 'react'
 
 /**
  * Top-level error boundary. Catches render-time exceptions in the
@@ -30,7 +31,6 @@ export default class ErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, info: { componentStack?: string | null }) {
-    // eslint-disable-next-line no-console
     console.error('[ErrorBoundary]', this.props.label ?? '', error, info.componentStack)
   }
 

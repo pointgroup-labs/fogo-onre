@@ -88,11 +88,6 @@ clean: ## clean: Remove build artefacts (target/, dist/, .next/)
 reset: clean ## clean: clean + drop node_modules (re-run 'make install' after)
 	rm -rf node_modules packages/*/node_modules
 
-validator: ## dev: Run solana-test-validator with the relayer .so preloaded
-	@test -f target/deploy/fogo_onre_relayer.so || $(MAKE) build
-	solana-test-validator --reset \
-	  --bpf-program onrenRKgX54qtWeK3cuaTBE71xx7dWMXn82ubH61vAp target/deploy/fogo_onre_relayer.so
-
 webapp-dev: ## dev: Next.js webapp in dev mode
 	pnpm webapp dev
 

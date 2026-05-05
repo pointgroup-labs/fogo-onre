@@ -85,8 +85,7 @@ export default function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
       if (e.shiftKey && document.activeElement === first) {
         e.preventDefault()
         last.focus()
-      }
-      else if (!e.shiftKey && document.activeElement === last) {
+      } else if (!e.shiftKey && document.activeElement === last) {
         e.preventDefault()
         first.focus()
       }
@@ -98,7 +97,7 @@ export default function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
       window.removeEventListener('keydown', onKey)
       document.body.style.overflow = prevOverflow
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react/exhaustive-deps
   }, [open])
 
   return (
@@ -243,10 +242,10 @@ function RpcSelect({ label, presets, effective, value, onChange }: RpcSelectProp
     if (draft === value) {
       return
     }
-    const id = window.setTimeout(() => onChange(draft || null), CUSTOM_DEBOUNCE_MS)
+    const id = window.setTimeout(onChange, CUSTOM_DEBOUNCE_MS, draft || null)
     return () => window.clearTimeout(id)
     // onChange is stable (zustand setter); intentionally omitted.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react/exhaustive-deps
   }, [draft, customMode, value])
 
   return (

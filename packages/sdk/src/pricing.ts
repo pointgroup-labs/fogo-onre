@@ -44,7 +44,7 @@ export function applyFeeBps(gross: bigint, bps: number): FeeBreakdown {
   if (net <= 0n) {
     throw new RangeError('net would be 0 (gross too small for this bps)')
   }
-  return {net, fee}
+  return { net, fee }
 }
 
 /**
@@ -142,13 +142,13 @@ export function quoteDeposit(params: {
   onycPrice: bigint
   priceScale: bigint
 }): DepositQuote {
-  const {inputUsdc, depositFeeBps, onycPrice, priceScale} = params
+  const { inputUsdc, depositFeeBps, onycPrice, priceScale } = params
   if (onycPrice <= 0n) {
     throw new RangeError('onycPrice must be > 0')
   }
   const grossOnyc = (inputUsdc * priceScale) / onycPrice
-  const {net, fee} = applyFeeBps(grossOnyc, depositFeeBps)
-  return {inputUsdc, grossOnyc, feeOnyc: fee, outputBonyc: net}
+  const { net, fee } = applyFeeBps(grossOnyc, depositFeeBps)
+  return { inputUsdc, grossOnyc, feeOnyc: fee, outputBonyc: net }
 }
 
 export interface WithdrawQuote {
@@ -182,11 +182,11 @@ export function quoteWithdraw(params: {
   onycPrice: bigint
   priceScale: bigint
 }): WithdrawQuote {
-  const {inputBonyc, withdrawFeeBps, onycPrice, priceScale} = params
+  const { inputBonyc, withdrawFeeBps, onycPrice, priceScale } = params
   if (onycPrice <= 0n) {
     throw new RangeError('onycPrice must be > 0')
   }
-  const {net, fee} = applyFeeBps(inputBonyc, withdrawFeeBps)
+  const { net, fee } = applyFeeBps(inputBonyc, withdrawFeeBps)
   const outputUsdc = (net * onycPrice) / priceScale
-  return {inputBonyc, feeOnyc: fee, netOnyc: net, outputUsdc}
+  return { inputBonyc, feeOnyc: fee, netOnyc: net, outputUsdc }
 }

@@ -34,7 +34,6 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import {
   computeInboxItemHash,
   createAta,
-  createMint,
   createMintWithAuthority,
   createProvider,
   createSvm,
@@ -242,8 +241,7 @@ describe('deposit flow e2e (claim_usdc → swap_usdc_to_onyc)', () => {
           },
         })
         .rpc()
-    }
-    catch (e: any) {
+    } catch (e: any) {
       console.log('CLAIM ERROR:', e.message)
       if (e.logs) {
         console.log('CLAIM LOGS:', e.logs)
@@ -272,8 +270,7 @@ describe('deposit flow e2e (claim_usdc → swap_usdc_to_onyc)', () => {
           onre: {},
         })
         .rpc()
-    }
-    catch (e: any) {
+    } catch (e: any) {
       console.log('SWAP ERROR:', e.message)
       if (e.logs) {
         console.log('SWAP LOGS:', e.logs)

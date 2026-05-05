@@ -38,7 +38,7 @@ export function parseAmount(input: string, decimals: number, symbol?: string): P
   if (input === '') {
     return { value: null, error: null }
   }
-  if (!/^\d*\.?\d*$/.test(input)) {
+  if (!/^\d*(?:\.\d*)?$/.test(input)) {
     return { value: null, error: 'Numbers only.' }
   }
   const [whole, fraction = ''] = input.split('.')
@@ -53,8 +53,7 @@ export function parseAmount(input: string, decimals: number, symbol?: string): P
   const combined = `${whole || '0'}${padded}`
   try {
     return { value: BigInt(combined), error: null }
-  }
-  catch {
+  } catch {
     return { value: null, error: 'Could not parse number.' }
   }
 }

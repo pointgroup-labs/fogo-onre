@@ -3,11 +3,10 @@
 import type { OnycPriceSnapshot } from '@fogo-onre/sdk'
 import { computeOnycPrice } from '@fogo-onre/sdk'
 import { useEffect, useState } from 'react'
-import { useOnycPrice } from '@/hooks/useOnycPrice'
-import { getReadOnlyRelayerClient } from '@/utils/connections'
-import { ONRE_PRICE_SCALE } from '@/utils/onyc-price'
 import { useDocumentVisible } from '@/hooks/useDocumentVisible'
+import { useOnycPrice } from '@/hooks/useOnycPrice'
 import { useSettings } from '@/store/settings'
+import { getReadOnlyRelayerClient } from '@/utils/connections'
 
 /**
  * Source of truth for the current `RelayerConfig` snapshot the UI quotes
@@ -83,8 +82,7 @@ export function useProtocolState(): ProtocolState | null {
           withdraw: Number(config.withdrawFeeBps),
         })
         setFeeFetchError(null)
-      }
-      catch (err) {
+      } catch (err) {
         if (cancelled) {
           return
         }

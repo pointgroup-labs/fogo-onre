@@ -2,6 +2,7 @@
 
 import type { SessionState } from '@fogo/sessions-sdk-react'
 import type { TransactionInstruction } from '@solana/web3.js'
+import type { TxStatus } from '@/utils/transfer'
 import {
   buildFogoNttDepositIx,
   buildFogoNttWithdrawIx,
@@ -17,7 +18,7 @@ import {
   FOGO_USDC_S_NTT_MANAGER_ID,
   USDC_S_MINT,
 } from '@/constants'
-import { error, idle, pending, success, type TxStatus } from '@/utils/transfer'
+import { error, idle, pending, success } from '@/utils/transfer'
 
 /**
  * Unified FOGO-side NTT `transfer_burn` hook covering both deposit
@@ -114,8 +115,7 @@ export function useFogoNttTransfer(kind: TransferKind, sessionState: SessionStat
       }
       setStatus(success(result.signature))
       setLastSubmission({ signature: result.signature, startedAt, amount })
-    }
-    catch (err: unknown) {
+    } catch (err: unknown) {
       const message = err instanceof Error ? err.message : `${config.failureLabel} failed`
       setStatus(error(message))
     }

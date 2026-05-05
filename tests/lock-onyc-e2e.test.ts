@@ -174,8 +174,6 @@ describe('lock_onyc e2e (NTT transfer_lock)', () => {
     // Outbox item is a new account (init)
     const outboxItem = Keypair.generate()
 
-    const custodyAta = getAssociatedTokenAddressSync(onycMint.publicKey, nttTokenAuthorityPda, true)
-
     try {
       await client
         .lockOnyc({
