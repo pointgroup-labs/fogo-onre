@@ -43,18 +43,8 @@ info: ## info: Print toolchain versions (paste into bug reports)
 install: ## setup: Install JS deps (frozen lockfile)
 	pnpm install --frozen-lockfile
 
-build: ## build: anchor build → sync IDL into SDK → sdk build
+build: ## build: anchor build → sdk build (SDK refreshes its own IDL via prebuild)
 	pnpm build
-
-sync-idl: ## build: Copy fresh target/idl/relayer.json into the SDK
-	@test -f target/idl/relayer.json || { echo "target/idl/relayer.json missing; run 'make build' first" >&2; exit 1; }
-	pnpm sync-idl
-
-idl-check: ## build: Verify SDK IDL matches the freshly-built canonical IDL (CI guard)
-	@anchor build >/dev/null
-	@diff -q target/idl/relayer.json packages/sdk/src/idl/fogo_onre_relayer.json \
-	  || { echo "SDK IDL is stale. Run 'make build' and commit." >&2; exit 1; }
-	@echo "✓ SDK IDL in sync with Rust source"
 
 test: ## test: Full suite (rebuilds via pretest)
 	pnpm test
@@ -86,7 +76,7 @@ fmt: ## quality: cargo fmt --all
 fmt-check: ## quality: cargo fmt --check (CI gate)
 	cargo fmt --all -- --check
 
-check: fmt-check lint test idl-check ## quality: Pre-push gate (fmt + lint + test + idl drift)
+check: fmt-check lint test ## quality: Pre-push gate (fmt + lint + test)
 
 audit: ## quality: cargo audit + pnpm audit (advisory; non-blocking)
 	-cargo audit
@@ -121,4 +111,4 @@ deploy-mainnet: ## deploy: anchor deploy to mainnet (typed confirmation required
 	  [[ "$$confirm" == "mainnet" ]] || { echo "Aborted." >&2; exit 1; }
 	@$(MAKE) deploy CLUSTER=mainnet
 
-ci: install fmt-check lint test idl-check ## ci: Exact sequence CI runs
+ci: install fmt-check lint test ## ci: Exact sequence CI runs

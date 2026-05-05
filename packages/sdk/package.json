@@ -16,8 +16,9 @@
     "src"
   ],
   "scripts": {
+    "prebuild": "mkdir -p src/idl && cp ../../target/idl/relayer.json src/idl/fogo_onre_relayer.json",
     "build": "tsc",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist src/idl/fogo_onre_relayer.json"
   },
   "dependencies": {
     "@anchor-lang/core": "^1.0.0",

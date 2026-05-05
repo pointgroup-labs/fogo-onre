@@ -5,8 +5,7 @@
   "scripts": {
     "sdk": "pnpm --filter @fogo-onre/sdk",
     "webapp": "pnpm --filter @fogo-onre/webapp",
-    "sync-idl": "cp target/idl/relayer.json packages/sdk/src/idl/fogo_onre_relayer.json",
-    "build": "anchor build && pnpm sync-idl && pnpm sdk build",
+    "build": "anchor build && pnpm sdk build",
     "lint": "eslint --cache .",
     "lint:fix": "pnpm lint --fix",
     "pretest": "pnpm build",
