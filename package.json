@@ -5,9 +5,11 @@
   "scripts": {
     "sdk": "pnpm --filter @fogo-onre/sdk",
     "webapp": "pnpm --filter @fogo-onre/webapp",
+    "sync-idl": "cp target/idl/relayer.json packages/sdk/src/idl/fogo_onre_relayer.json",
+    "build": "anchor build && pnpm sync-idl && pnpm sdk build",
     "lint": "eslint --cache .",
     "lint:fix": "pnpm lint --fix",
-    "pretest": "pnpm sdk build && anchor build",
+    "pretest": "pnpm build",
     "test": "vitest"
   },
   "dependencies": {
