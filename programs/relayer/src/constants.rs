@@ -1,19 +1,9 @@
 use anchor_lang::prelude::*;
 
-pub const ONRE_PROGRAM_ID: Pubkey = pubkey!("onreuGhHHgVzMWSkj2oQDLDtvvGvoepBPkqyaubFcwe");
-
-pub const NTT_PROGRAM_ID: Pubkey = pubkey!("nttu74CdAmsErx5daJVCQNoDZujswFrskMzonoZSdGk");
-
-// Outbound recipient model: each inbound NTT message carries the originating
-// FOGO user wallet as `NttManagerMessage.sender`. `claim_usdc` /
-// `unlock_onyc` parse it from the `ValidatedTransceiverMessage` account
-// (owned by the NTT program — unforgeable) and persist it to a `Flow` PDA
-// seeded by the per-VAA `inbox_item` PDA. `lock_onyc` /
-// `send_usdc_to_user` then read `fogo_sender` as the outbound recipient.
-// A stolen operator key cannot forge an `inbox_item` (CPI-created by NTT)
-// and thus cannot redirect outbound transfers.
-
 pub const FOGO_WORMHOLE_CHAIN_ID: u16 = 51;
+
+pub const ONRE_PROGRAM_ID: Pubkey = pubkey!("onreuGhHHgVzMWSkj2oQDLDtvvGvoepBPkqyaubFcwe");
+pub const NTT_PROGRAM_ID: Pubkey = pubkey!("nttu74CdAmsErx5daJVCQNoDZujswFrskMzonoZSdGk");
 
 pub const NTT_TRANSFER_LOCK_IX: [u8; 8] = [179, 158, 146, 148, 151, 46, 176, 200];
 pub const NTT_REDEEM_IX: [u8; 8] = [184, 12, 86, 149, 70, 196, 97, 225];
@@ -60,7 +50,6 @@ pub const REDEMPTION_TRACKER_SEED: &[u8] = b"redemption_tracker";
 pub const SPL_TOKEN_APPROVE_IX_TAG: u8 = 4;
 
 pub const RELAYER_SEED: &[u8] = b"relayer";
-
 pub const CONFIG_SEED: &[u8] = b"relayer_config";
 
 /// Minimum slot delay for fee *increases*. ≈ 2 days at 400ms slots.
@@ -74,9 +63,7 @@ pub const FEE_TIMELOCK_SLOTS: u64 = 432_000;
 pub const MAX_FEE_BPS: u16 = 1000;
 
 pub const FLOW_INBOUND_SEED: &[u8] = b"inflight";
-
 pub const FLOW_OUTBOUND_SEED: &[u8] = b"outflight";
 
 /// Approved as SPL `Approve` delegate before NTT `transfer_lock`.
 pub const NTT_SESSION_AUTHORITY_SEED: &[u8] = b"session_authority";
-
