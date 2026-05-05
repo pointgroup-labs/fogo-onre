@@ -5,16 +5,16 @@ import { isEstablished, useSession } from '@fogo/sessions-sdk-react'
 import { useEffect, useRef, useState } from 'react'
 import AmountInput from '@/components/AmountInput'
 import ReceiveField from '@/components/ReceiveField'
+import { BONYC_DECIMALS, BONYC_DEPLOYMENT_READY, USDC_DECIMALS } from '@/constants'
 import { useBalances } from '@/hooks/useBalances'
 import { useFlowStatus } from '@/hooks/useFlowStatus'
 import { useFogoNttTransfer } from '@/hooks/useFogoNttTransfer'
 import { useProtocolState } from '@/hooks/useProtocolState'
-import { BONYC_DECIMALS, BONYC_DEPLOYMENT_READY, USDC_DECIMALS } from '@/constants'
+import { usePendingTxsStore } from '@/store/pending-txs'
+import { useToastsStore } from '@/store/toasts'
 import { fogoTxUrl, shortSig, wormholeTxUrl } from '@/utils/explorers'
 import { safeQuoteDeposit, safeQuoteWithdraw } from '@/utils/quote'
 import { formatAmount, parseAmount } from '@/utils/transfer'
-import { usePendingTxsStore } from '@/store/pending-txs'
-import { useToastsStore } from '@/store/toasts'
 
 /**
  * Fires `fn` exactly once per *change* of `key`, ignoring re-renders
@@ -201,8 +201,7 @@ export default function TransferCard({ kind }: TransferCardProps) {
         title: kind === 'deposit' ? 'bONyc credited' : 'USDC.s credited',
         href: fogoTxUrl(flow.signature),
       })
-    }
-    else if (flow.phase === 'expired') {
+    } else if (flow.phase === 'expired') {
       upsertToast({
         id,
         kind: 'error',

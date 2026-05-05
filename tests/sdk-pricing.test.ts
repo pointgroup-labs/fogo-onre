@@ -1,10 +1,10 @@
+import type { OnycPriceSnapshot } from '@fogo-onre/sdk'
 import {
   applyFeeBps,
   computeOnycPrice,
   FEE_DENOMINATOR_BPS,
   humanPriceToBaseRatio,
   MAX_FEE_BPS,
-  type OnycPriceSnapshot,
   quoteDeposit,
   quoteWithdraw,
   SECONDS_PER_YEAR,
@@ -42,6 +42,7 @@ describe('applyFeeBps', () => {
     expect(() => applyFeeBps(-1n, 25)).toThrow(RangeError)
   })
 
+  // eslint-disable-next-line test/prefer-lowercase-title
   it('FEE_DENOMINATOR_BPS sanity', () => {
     expect(FEE_DENOMINATOR_BPS).toBe(10_000n)
   })
