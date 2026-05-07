@@ -25,6 +25,7 @@ import {
   findOutboxRateLimitPda,
   findRegisteredTransceiverPda,
   findTokenAuthorityPda,
+  NTT_TRANSFER_LOCK_ACCOUNT_COUNT,
 } from './ntt'
 import {
   buildOnreCancelRedemptionRequestRemainingAccounts,
@@ -165,16 +166,10 @@ export class RelayerClient {
     ntt?: NttRedeemContext
     redeemAccountsLen?: number
   }) {
-    const [inflightFlow] = findInflightFlowPda(params.nttInboxItem, this.program.programId)
-    const [redemptionTracker] = findRedemptionTrackerPda(this.program.programId)
-    const [userInboxAuthority] = findUserInboxAuthorityPda(
+    const { inflightFlow, redemptionTracker } = this.flowPdas(params.nttInboxItem)
+    const { userInboxAuthority, userInboxAta } = this.userInboxBindings(
       params.userWallet,
-      this.program.programId,
-    )
-    const userInboxAta = getAssociatedTokenAddressSync(
       params.usdcMint,
-      userInboxAuthority,
-      true, // allow PDA-owner ATA
     )
     const built = params.ntt
       ? this.buildNttRedeemReleaseAccounts({
@@ -229,8 +224,7 @@ export class RelayerClient {
     feeVault: PublicKey
     onre?: OnreSwapContext
   }) {
-    const [inflightFlow] = findInflightFlowPda(params.nttInboxItem, this.program.programId)
-    const [redemptionTracker] = findRedemptionTrackerPda(this.program.programId)
+    const { inflightFlow, redemptionTracker } = this.flowPdas(params.nttInboxItem)
     const builder = this.program.methods
       .swapUsdcToOnyc()
       .accountsPartial({
@@ -274,9 +268,9 @@ export class RelayerClient {
    * "lock without release" path — every successful `lock_onyc` emits the
    * Wormhole VAA atomically.
    *
-   * The remaining-accounts layout is `[...transferLock(14), ...release(15)]`
+   * The remaining-accounts layout is `[...transferLock(NTT_TRANSFER_LOCK_ACCOUNT_COUNT), ...release(15)]`
    * for a total of 29; the on-chain handler uses
-   * `transferLockAccountCount: 14` to split.
+   * `NTT_TRANSFER_LOCK_ACCOUNT_COUNT` to split.
    *
    * Failure-path callers (deliberately broken `remainingAccounts` for
    * negative tests) MUST omit `flowAmount` / `flowFogoSender` / `outboxItem`
@@ -307,9 +301,9 @@ export class RelayerClient {
       emitter?: PublicKey
     }
   }) {
-    const transferLockAccountCount = 14
+    const { inflightFlow } = this.flowPdas(params.nttInboxItem)
     const builder = this.program.methods
-      .lockOnyc(transferLockAccountCount)
+      .lockOnyc(NTT_TRANSFER_LOCK_ACCOUNT_COUNT)
       .accountsPartial({
         payer: params.payer,
         relayerConfig: this.configPda,
@@ -317,7 +311,7 @@ export class RelayerClient {
         onycMint: params.onycMint,
         onycAta: this.ata(params.onycMint),
         nttInboxItem: params.nttInboxItem,
-        inflightFlow: findInflightFlowPda(params.nttInboxItem, this.program.programId)[0],
+        inflightFlow,
         rentDestination: params.rentDestination,
         tokenProgram: TOKEN_PROGRAM_ID,
       })
@@ -334,14 +328,10 @@ export class RelayerClient {
       )
     }
 
-    const transferLock = buildNttTransferLockAccountList({
-      nttProgramId: NTT_ONYC_PROGRAM_ID,
-      fromOwner: this.authorityPda,
-      fromOwnerIsSigner: false,
-      fromTokenAccount: this.ata(params.onycMint),
+    const transferLock = this.transferLockAccounts({
       mint: params.onycMint,
+      nttProgramId: NTT_ONYC_PROGRAM_ID,
       outboxItem: params.outboxItem,
-      recipientChain: FOGO_WORMHOLE_CHAIN_ID,
       recipientAddress: params.flowFogoSender,
       amount: toBigInt(params.flowAmount),
     })
@@ -374,7 +364,7 @@ export class RelayerClient {
     ntt?: NttRedeemContext
     redeemAccountsLen?: number
   }) {
-    const [outflightFlow] = findOutflightFlowPda(params.nttInboxItem, this.program.programId)
+    const { outflightFlow } = this.flowPdas(params.nttInboxItem)
     const built = params.ntt
       ? this.buildNttRedeemReleaseAccounts({
           mint: params.onycMint,
@@ -418,8 +408,7 @@ export class RelayerClient {
     flowFogoSender?: Uint8Array
     outboxItem?: PublicKey
   }) {
-    const [outflightFlow] = findOutflightFlowPda(params.nttInboxItem, this.program.programId)
-    const [redemptionTracker] = findRedemptionTrackerPda(this.program.programId)
+    const { outflightFlow, redemptionTracker } = this.flowPdas(params.nttInboxItem)
     const builder = this.program.methods
       .sendUsdcToUser()
       .accountsPartial({
@@ -440,14 +429,10 @@ export class RelayerClient {
     }
 
     return builder.remainingAccounts(
-      buildNttTransferLockAccountList({
-        nttProgramId: NTT_USDC_PROGRAM_ID,
-        fromOwner: this.authorityPda,
-        fromOwnerIsSigner: false,
-        fromTokenAccount: this.ata(params.usdcMint),
+      this.transferLockAccounts({
         mint: params.usdcMint,
+        nttProgramId: NTT_USDC_PROGRAM_ID,
         outboxItem: params.outboxItem,
-        recipientChain: FOGO_WORMHOLE_CHAIN_ID,
         recipientAddress: params.flowFogoSender,
         amount: toBigInt(params.flowAmount),
       }),
@@ -542,8 +527,7 @@ export class RelayerClient {
       state?: PublicKey
     }
   }) {
-    const [outflightFlow] = findOutflightFlowPda(params.nttInboxItem, this.program.programId)
-    const [redemptionTracker] = findRedemptionTrackerPda(this.program.programId)
+    const { outflightFlow, redemptionTracker } = this.flowPdas(params.nttInboxItem)
     const builder = this.program.methods
       .requestRedemptionOnyc()
       .accountsPartial({
@@ -586,8 +570,7 @@ export class RelayerClient {
     redemptionRequest: PublicKey
     payerForClose: PublicKey
   }) {
-    const [outflightFlow] = findOutflightFlowPda(params.nttInboxItem, this.program.programId)
-    const [redemptionTracker] = findRedemptionTrackerPda(this.program.programId)
+    const { outflightFlow, redemptionTracker } = this.flowPdas(params.nttInboxItem)
     return this.program.methods
       .claimRedemptionUsdc()
       .accountsPartial({
@@ -619,8 +602,7 @@ export class RelayerClient {
       state?: PublicKey
     }
   }) {
-    const [outflightFlow] = findOutflightFlowPda(params.nttInboxItem, this.program.programId)
-    const [redemptionTracker] = findRedemptionTrackerPda(this.program.programId)
+    const { outflightFlow, redemptionTracker } = this.flowPdas(params.nttInboxItem)
     const builder = this.program.methods
       .cancelRedemptionOnyc()
       .accountsPartial({
@@ -671,6 +653,76 @@ export class RelayerClient {
 
   private ata(mint: PublicKey, owner: PublicKey = this.authorityPda) {
     return getAssociatedTokenAddressSync(mint, owner, true)
+  }
+
+  /**
+   * Derive the three flow-tracking PDAs keyed off a single `nttInboxItem`.
+   *
+   * Every flow-driving instruction (claim/swap/request/claim-redemption/
+   * cancel/lock/unlock/send) needs some subset of `{inflightFlow,
+   * outflightFlow, redemptionTracker}`. Centralising the derivation
+   * here keeps method bodies focused on which accounts an instruction
+   * actually consumes — callers destructure only what they need.
+   */
+  /**
+   * Shape the 14-account NTT `transfer_lock` argument list. Both
+   * outbound legs (USDC.s on `sendUsdcToUser`, ONyc on `lockOnyc`)
+   * pass an identical clump differing only in `mint` and the
+   * NTT manager program id, so the relayer authority/from-token
+   * derivation is centralised here.
+   */
+  private transferLockAccounts(args: {
+    mint: PublicKey
+    nttProgramId: PublicKey
+    outboxItem: PublicKey
+    recipientAddress: Uint8Array
+    amount: bigint
+  }) {
+    return buildNttTransferLockAccountList({
+      nttProgramId: args.nttProgramId,
+      fromOwner: this.authorityPda,
+      fromOwnerIsSigner: false,
+      fromTokenAccount: this.ata(args.mint),
+      mint: args.mint,
+      outboxItem: args.outboxItem,
+      recipientChain: FOGO_WORMHOLE_CHAIN_ID,
+      recipientAddress: args.recipientAddress,
+      amount: args.amount,
+    })
+  }
+
+  private flowPdas(nttInboxItem: PublicKey): {
+    inflightFlow: PublicKey
+    outflightFlow: PublicKey
+    redemptionTracker: PublicKey
+  } {
+    const [inflightFlow] = findInflightFlowPda(nttInboxItem, this.program.programId)
+    const [outflightFlow] = findOutflightFlowPda(nttInboxItem, this.program.programId)
+    const [redemptionTracker] = findRedemptionTrackerPda(this.program.programId)
+    return { inflightFlow, outflightFlow, redemptionTracker }
+  }
+
+  /**
+   * Per-user inbox-authority PDA + the ATA owned by it for `mint`.
+   *
+   * `claimUsdc` is the only consumer today; extracted so that any future
+   * inbox-aware instruction (e.g. send-back-to-sender) inherits the
+   * canonical derivation without copy-paste drift.
+   */
+  private userInboxBindings(userWallet: PublicKey, mint: PublicKey): {
+    userInboxAuthority: PublicKey
+    userInboxAta: PublicKey
+  } {
+    const [userInboxAuthority] = findUserInboxAuthorityPda(
+      userWallet,
+      this.program.programId,
+    )
+    const userInboxAta = getAssociatedTokenAddressSync(
+      mint,
+      userInboxAuthority,
+      true, // allow PDA-owner ATA
+    )
+    return { userInboxAuthority, userInboxAta }
   }
 
   /** Resolve the provider's wallet pubkey, supporting both anchor wallet and bare-key shapes. */

@@ -1,7 +1,12 @@
 import type { AccountMeta } from '@solana/web3.js'
 import { keccak_256 } from '@noble/hashes/sha3.js'
 import { getAssociatedTokenAddressSync, TOKEN_PROGRAM_ID } from '@solana/spl-token'
-import { PublicKey, SystemProgram } from '@solana/web3.js'
+import {
+  PublicKey,
+  SystemProgram,
+  SYSVAR_CLOCK_PUBKEY,
+  SYSVAR_RENT_PUBKEY,
+} from '@solana/web3.js'
 
 const CONFIG_SEED = Buffer.from('config')
 const NTT_MANAGER_PEER_SEED = Buffer.from('peer')
@@ -11,6 +16,8 @@ const OUTBOX_RATE_LIMIT_SEED = Buffer.from('outbox_rate_limit')
 const INBOX_ITEM_SEED = Buffer.from('inbox_item')
 const TOKEN_AUTHORITY_SEED = Buffer.from('token_authority')
 const SESSION_AUTHORITY_SEED = Buffer.from('session_authority')
+const EMITTER_SEED = Buffer.from('emitter')
+const WORMHOLE_MESSAGE_SEED = Buffer.from('message')
 
 function chainIdBeBuf(chainId: number): Buffer {
   const buf = Buffer.alloc(2)
@@ -204,6 +211,15 @@ export interface BuildNttTransferLockAccountListParams {
   shouldQueue?: boolean
 }
 
+/**
+ * Account count for the NTT `transfer_lock` instruction. The handler
+ * unpacks exactly this many trailing accounts; the relayer instructions
+ * (`lockOnyc`, `sendUsdcToUser`) pass it as the split-marker so the
+ * on-chain program knows where the NTT slice ends and the next builder
+ * (release-wormhole-outbound) begins.
+ */
+export const NTT_TRANSFER_LOCK_ACCOUNT_COUNT = 14
+
 export function buildNttTransferLockAccountList(
   params: BuildNttTransferLockAccountListParams,
 ): AccountMeta[] {
@@ -227,7 +243,7 @@ export function buildNttTransferLockAccountList(
     params.nttProgramId,
   )
 
-  return [
+  const accounts: AccountMeta[] = [
     { pubkey: params.fromOwner, isSigner: params.fromOwnerIsSigner, isWritable: true },
     { pubkey: configPda, isSigner: false, isWritable: false },
     { pubkey: params.mint, isSigner: false, isWritable: true },
@@ -242,5 +258,124 @@ export function buildNttTransferLockAccountList(
     { pubkey: sessionAuthorityPda, isSigner: false, isWritable: false },
     { pubkey: tokenAuthorityPda, isSigner: false, isWritable: false },
     { pubkey: params.nttProgramId, isSigner: false, isWritable: false },
+  ]
+  if (accounts.length !== NTT_TRANSFER_LOCK_ACCOUNT_COUNT) {
+    throw new Error(
+      `NTT transfer_lock account list drift: expected ${NTT_TRANSFER_LOCK_ACCOUNT_COUNT}, got ${accounts.length}`,
+    )
+  }
+  return accounts
+}
+
+/**
+ * NTT transceiver-emitter PDA: `["emitter"]` under the transceiver
+ * program ID. For the OnRe stack, the manager program *is* the
+ * transceiver, so callers pass `nttProgramId` here.
+ */
+export function findNttEmitterPda(
+  transceiverProgramId: PublicKey,
+): [PublicKey, number] {
+  return PublicKey.findProgramAddressSync([EMITTER_SEED], transceiverProgramId)
+}
+
+/**
+ * Per-outbox Wormhole message PDA: `["message", outbox_item]` under the
+ * transceiver program ID. NTT v3 init's this account during
+ * `release_wormhole_outbound`, so it must be writable.
+ */
+export function findNttWormholeMessagePda(
+  outboxItem: PublicKey,
+  transceiverProgramId: PublicKey,
+): [PublicKey, number] {
+  return PublicKey.findProgramAddressSync(
+    [WORMHOLE_MESSAGE_SEED, outboxItem.toBuffer()],
+    transceiverProgramId,
+  )
+}
+
+/**
+ * Inputs for the NTT v3 outbound publish step
+ * (`release_wormhole_outbound`). This is the *second* CPI in a
+ * lock-then-publish flow on the relayer side: `transfer_lock` mints the
+ * outbox item, `release_wormhole_outbound` posts it to Wormhole Core.
+ *
+ * Mainnet-verified ordering & writability via tx `3NR6EEbk…`'s top-level
+ * accounts array (15 entries, manager + outbox_item_signer at the v3
+ * tail, system/clock/rent grouped inside the wormhole composite, NOT at
+ * the tail).
+ *
+ * Wormhole Core PDAs (`bridge`, `fee_collector`, `sequence`) are
+ * caller-supplied because their derivation depends on the deployed
+ * Wormhole Core program ID — we deliberately don't hardcode that here
+ * to keep the SDK cluster-agnostic.
+ */
+export interface BuildNttReleaseWormholeOutboundAccountListParams {
+  /** Permissionless cranker (signs + pays). */
+  payer: PublicKey
+  /** NTT manager program id (USDC.s or ONyc on Solana). */
+  nttProgramId: PublicKey
+  /**
+   * NTT manager-as-transceiver program id. For the OnRe stack this is
+   * the same as `nttProgramId`; kept separate to match upstream NTT's
+   * "manager ≠ transceiver" generality and future-proof against a split.
+   */
+  transceiverProgramId?: PublicKey
+  /** Outbox item PDA created by the preceding `transfer_lock`. */
+  outboxItem: PublicKey
+  /** Per-outbox Wormhole message PDA — derivable; pass to override. */
+  wormholeMessage?: PublicKey
+  /** Transceiver-emitter PDA — derivable; pass to override. */
+  emitter?: PublicKey
+  /** Wormhole Core program id (cluster-specific). */
+  wormholeProgram: PublicKey
+  /** Wormhole Core `Bridge` config account. */
+  wormholeBridge: PublicKey
+  /** Wormhole Core fee-collector account. */
+  wormholeFeeCollector: PublicKey
+  /** Wormhole Core per-emitter sequence tracker. */
+  wormholeSequence: PublicKey
+  /**
+   * NTT v3 outbox-item signer PDA (per upstream NTT v3 release ABI).
+   * Caller derives via Wormhole NTT SDK.
+   */
+  outboxItemSigner: PublicKey
+}
+
+/**
+ * Build the 15-entry account list for NTT v3
+ * `release_wormhole_outbound`. Order matches mainnet tx `3NR6EEbk…`
+ * exactly — see `BuildNttReleaseWormholeOutboundAccountListParams`
+ * docs. Reordering silently breaks the CPI.
+ */
+export function buildNttReleaseWormholeOutboundAccountList(
+  params: BuildNttReleaseWormholeOutboundAccountListParams,
+): AccountMeta[] {
+  const transceiverProgramId = params.transceiverProgramId ?? params.nttProgramId
+  const [configPda] = findNttConfigPda(params.nttProgramId)
+  const [registeredTransceiverPda] = findRegisteredTransceiverPda(
+    transceiverProgramId,
+    params.nttProgramId,
+  )
+  const wormholeMessage
+    = params.wormholeMessage
+      ?? findNttWormholeMessagePda(params.outboxItem, transceiverProgramId)[0]
+  const emitter = params.emitter ?? findNttEmitterPda(transceiverProgramId)[0]
+
+  return [
+    { pubkey: params.payer, isSigner: true, isWritable: true }, //  0
+    { pubkey: configPda, isSigner: false, isWritable: false }, //  1
+    { pubkey: params.outboxItem, isSigner: false, isWritable: true }, //  2
+    { pubkey: wormholeMessage, isSigner: false, isWritable: true }, //  3
+    { pubkey: emitter, isSigner: false, isWritable: false }, //  4
+    { pubkey: registeredTransceiverPda, isSigner: false, isWritable: false }, //  5
+    { pubkey: params.wormholeBridge, isSigner: false, isWritable: true }, //  6
+    { pubkey: params.wormholeFeeCollector, isSigner: false, isWritable: true }, //  7
+    { pubkey: params.wormholeSequence, isSigner: false, isWritable: true }, //  8
+    { pubkey: params.wormholeProgram, isSigner: false, isWritable: false }, //  9
+    { pubkey: SystemProgram.programId, isSigner: false, isWritable: false }, // 10  wormhole.system_program
+    { pubkey: SYSVAR_CLOCK_PUBKEY, isSigner: false, isWritable: false }, // 11  wormhole.clock
+    { pubkey: SYSVAR_RENT_PUBKEY, isSigner: false, isWritable: false }, // 12  wormhole.rent
+    { pubkey: params.nttProgramId, isSigner: false, isWritable: false }, // 13  manager (v3)
+    { pubkey: params.outboxItemSigner, isSigner: false, isWritable: false }, // 14  outbox_item_signer (v3)
   ]
 }
