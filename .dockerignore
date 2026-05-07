@@ -1,0 +1,23 @@
+# Keep the Docker build context small.
+node_modules
+**/node_modules
+target
+.anchor
+.git
+.github
+dist
+**/dist
+test-ledger
+*.log
+.env
+.env.local
+docs
+deploy/cranker/secrets
+packages/webapp
+packages/cli/dist
+packages/sdk/dist
+packages/cranker/dist
+.pnpm-store
+coverage
+*.md
+!packages/cranker/README.md

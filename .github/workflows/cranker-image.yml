@@ -3,6 +3,7 @@ name: cranker-image
 on:
   push:
     branches: [main]
+    tags: ["v*"]
     paths:
       - "packages/cranker/**"
       - "packages/sdk/**"
@@ -10,8 +11,6 @@ on:
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"
       - ".github/workflows/cranker-image.yml"
-  push:
-    tags: ["v*"]
   workflow_dispatch:
 
 permissions:
@@ -43,9 +42,10 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository_owner }}/cranker
           tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=edge,enable={{is_default_branch}}
             type=sha,format=long
             type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
 
       - name: Build and push
         uses: docker/build-push-action@v6
@@ -59,7 +59,7 @@ jobs:
           cache-to: type=gha,mode=max
           provenance: false
 
-      - name: Trivy scan
+      - name: Trivy scan (CRITICAL gating)
         uses: aquasecurity/trivy-action@0.28.0
         with:
           image-ref: ghcr.io/${{ github.repository_owner }}/cranker:sha-${{ github.sha }}
@@ -67,4 +67,3 @@ jobs:
           severity: CRITICAL
           exit-code: '1'
           ignore-unfixed: true
-        continue-on-error: true

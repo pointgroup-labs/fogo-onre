@@ -104,14 +104,14 @@ export async function deriveLockOnycReleaseAccounts(
   payer: PublicKey,
   outboxItem: PublicKey,
 ): Promise<{
-    wormholeProgram: PublicKey
-    wormholeBridge: PublicKey
-    wormholeFeeCollector: PublicKey
-    wormholeSequence: PublicKey
-    outboxItemSigner: PublicKey
-    wormholeMessage: PublicKey
-    emitter: PublicKey
-  }> {
+  wormholeProgram: PublicKey
+  wormholeBridge: PublicKey
+  wormholeFeeCollector: PublicKey
+  wormholeSequence: PublicKey
+  outboxItemSigner: PublicKey
+  wormholeMessage: PublicKey
+  emitter: PublicKey
+}> {
   const xcvr = await ntt.getWormholeTransceiver()
   if (!xcvr) {
     throw new Error('SolanaNttWormholeTransceiver wiring failed.')

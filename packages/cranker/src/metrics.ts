@@ -1,6 +1,7 @@
-import { createServer, type Server } from 'node:http'
+import type { Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
-import { Counter, Gauge, Histogram, Registry, collectDefaultMetrics } from 'prom-client'
+import { createServer } from 'node:http'
+import { collectDefaultMetrics, Counter, Gauge, Histogram, Registry } from 'prom-client'
 
 export type MetricsOptions = {
   port: number
@@ -46,6 +47,12 @@ export function createMetrics(opts: MetricsOptions) {
     labelNames: ['leg', 'from_status', 'to_status'] as const,
     registers: [registry],
   })
+  const flowSkipped = new Counter({
+    name: 'cranker_flow_skipped_total',
+    help: 'Flows seen by the scanner with statuses the cranker cannot advance',
+    labelNames: ['reason'] as const,
+    registers: [registry],
+  })
   const solBalance = new Gauge({
     name: 'cranker_keypair_sol_balance',
     help: 'Cranker keypair SOL balance (lamports / 1e9)',
@@ -76,20 +83,25 @@ export function createMetrics(opts: MetricsOptions) {
     txSent,
     rpcErrors,
     flowAdvance,
+    flowSkipped,
     solBalance,
     wsAlive,
 
     actualPort: () => actualPort,
 
     async start() {
+      if (server) {
+        // Idempotent: a second start() is a no-op rather than orphaning the
+        // first listener.
+        return
+      }
       server = createServer(async (req, res) => {
         if (req.url === '/healthz') {
           const ageMs = heartbeat.ageMs()
           if (ageMs > opts.heartbeatStaleMs) {
             res.statusCode = 503
             res.end(JSON.stringify({ status: 'stale', ageMs }))
-          }
-          else {
+          } else {
             res.statusCode = 200
             res.end(JSON.stringify({ status: 'ok', ageMs }))
           }

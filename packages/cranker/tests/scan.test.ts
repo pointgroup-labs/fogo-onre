@@ -1,6 +1,6 @@
+import type { AdvanceContext } from '../src/advance/types'
 import { PublicKey } from '@solana/web3.js'
 import { describe, expect, it, vi } from 'vitest'
-import type { AdvanceContext } from '../src/advance/types'
 import { scanAndAdvance } from '../src/scan'
 
 // Minimal mock context — scanAndAdvance only reads abortSignal directly;

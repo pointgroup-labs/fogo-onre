@@ -108,10 +108,17 @@ The cranker key is grief-only — its theft costs at most a small amount of SOL 
    docker compose restart cranker
    docker compose logs --tail=50 cranker | grep "cranker started"  # verify new pubkey
    ```
-6. Sweep residual SOL from the old keypair to treasury:
+6. Sweep residual SOL from the old keypair to treasury. The Solana CLI has no `ALL` keyword — read the balance, subtract a fee buffer (10 000 lamports covers 1 signature with headroom), and transfer the difference:
    ```sh
-   solana transfer <treasury-pubkey> ALL --keypair secrets/cranker-old.json --allow-unfunded-recipient
+   OLD=secrets/cranker-old.json
+   LAMPORTS=$(solana balance --lamports --keypair "$OLD" | awk '{print $1}')
+   SEND=$((LAMPORTS - 10000))
+   if [ "$SEND" -gt 0 ]; then
+     solana transfer <treasury-pubkey> "$SEND" --lamports \
+       --keypair "$OLD" --allow-unfunded-recipient --fee-payer "$OLD"
+   fi
    ```
+   If the balance is below the fee buffer, skip the sweep — the residual cost is rounding error.
 7. Securely delete the old keypair: `shred -u secrets/cranker-old.json` and from the originating machine.
 
 ## 5. Incident response
@@ -139,3 +146,20 @@ The cranker has **no fund-redirect powers** — `ValidatedTransceiverMessage` in
 - **Weekly:** Open Grafana (`ssh -L 3000:127.0.0.1:3000 deploy@<host>`, then http://127.0.0.1:3000), review trends. Confirm SOL balance > 0.5.
 - **Monthly:** `apt upgrade && reboot` during a low-activity window. Cranker is idempotent; Docker brings it back. Verify `cranker_heartbeat_age_seconds` settles within 2 minutes post-reboot.
 - **Quarterly:** Test rollback procedure on staging. Rotate cranker keypair (§4).
+
+## 8. Watchtower threat model
+
+We mount `/var/run/docker.sock` into the watchtower container so it can pull new cranker images and restart containers without operator intervention. **This is equivalent to giving watchtower root on the host.** Anyone who can replace the watchtower image, or push a malicious tag to a registry path that watchtower polls, can run arbitrary code as root via the docker socket — they can mount `/`, read `secrets/cranker-keypair.json`, exfiltrate it, then clean up.
+
+We accept this trade-off because:
+
+- The cranker key is grief-only (see §5). Theft costs ≤ a few SOL of fee burn; it cannot redirect protocol funds. The blast radius from a docker-socket compromise is bounded by the cranker key's own bounded blast radius.
+- We pin the cranker image to a **specific semver tag** (not `:latest`) in `docker-compose.yml`. Watchtower only pulls when the digest behind that tag changes. A registry compromise that rewrites the digest would still need to also push a tag we read.
+- Watchtower itself comes from `containrrr/watchtower`, pinned to a sha digest in `docker-compose.yml`.
+
+**Mitigations that are NOT in the deploy:**
+
+- We do not run a docker-socket proxy (e.g. `tecnativa/docker-socket-proxy`) to restrict the API surface. Adding one would shrink the blast radius further; it's a worthwhile follow-up if the cranker ever co-locates with a higher-trust workload.
+- We do not run watchtower in `--monitor-only` mode. Monitor-only would notify but not act, removing the docker-socket-as-RCE path at the cost of manual restarts on every release. Reasonable choice for a stricter-than-default operator; flip `WATCHTOWER_MONITOR_ONLY=true` in the compose env to switch.
+
+**Operator action if the cranker host is suspected compromised:** treat the cranker keypair as burned (§4), audit recent on-chain tx from the cranker pubkey, and reprovision the host (§6 DR) rather than trying to clean it in place. Anything with docker socket access could have rooted the box.

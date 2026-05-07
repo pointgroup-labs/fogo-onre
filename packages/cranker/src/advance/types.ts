@@ -21,7 +21,7 @@ export type PlannedTx = {
   build: () => Promise<{ ixs: TransactionInstruction[], signers: Keypair[] }>
 }
 
-export type AdvanceResult =
-  | { kind: 'noop', reason: string }
-  | { kind: 'advanced', signatures: string[], fromStatus: string, toStatus: string }
-  | { kind: 'error', error: Error, partialSignatures: string[] }
+export type AdvanceResult
+  = | { kind: 'noop', reason: string }
+    | { kind: 'advanced', signatures: string[], fromStatus: string, toStatus: string }
+    | { kind: 'error', error: Error, partialSignatures: string[] }

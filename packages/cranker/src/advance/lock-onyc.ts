@@ -1,8 +1,8 @@
+import type { AdvanceContext, AdvanceResult } from './types'
 import { findAuthorityPda, findInboxRateLimitPda, findNttPeerPda, findSessionAuthorityPda, FOGO_WORMHOLE_CHAIN_ID, NTT_ONYC_PROGRAM_ID, NTT_USDC_PROGRAM_ID, nttTransferArgsHash } from '@fogo-onre/sdk'
 import { Keypair, PublicKey, SystemProgram } from '@solana/web3.js'
 import { resolveNttVaa } from '../vaa'
 import { DEFAULT_NTT_VERSION, deriveLockOnycReleaseAccounts, describeStatus, fetchVaaBytes, makeSolanaNtt, WORMHOLE_CORE_MAINNET } from './helpers'
-import type { AdvanceContext, AdvanceResult } from './types'
 
 export type LockOnycInput = {
   fogoTx: string
@@ -171,8 +171,7 @@ export async function lockOnyc(
       fromStatus: 'Swapped',
       toStatus: 'Closed',
     }
-  }
-  catch (err) {
+  } catch (err) {
     metrics.txSent.inc({ instruction: 'lock_onyc', result: 'error' })
     return {
       kind: 'error',

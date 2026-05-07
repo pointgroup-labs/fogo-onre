@@ -8,7 +8,7 @@ describe('withTimeout', () => {
   })
 
   it('rejects with timeout label when slower than budget', async () => {
-    const slow = new Promise(resolve => setTimeout(() => resolve('late'), 200))
+    const slow = new Promise(resolve => setTimeout(resolve, 200, 'late'))
     await expect(withTimeout(slow, 50, 'getSlot')).rejects.toThrow(/timeout.*getSlot/)
   })
 

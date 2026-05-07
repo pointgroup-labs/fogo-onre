@@ -12,8 +12,7 @@ export async function withTimeout<T>(
   })
   try {
     return await Promise.race([promise, timeout])
-  }
-  finally {
+  } finally {
     if (timer) {
       clearTimeout(timer)
     }

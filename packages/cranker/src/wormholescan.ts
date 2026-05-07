@@ -57,6 +57,39 @@ export class WormholescanClient {
     return decodeBase64(json.data.vaa)
   }
 
+  /**
+   * List recent VAAs for a (chain, emitter) pair, newest first. Used by
+   * the cranker scanner to discover Pending bridge messages that don't
+   * yet have an on-chain Flow account.
+   */
+  async listVaasByEmitter(
+    chain: number,
+    emitterHex: string,
+    opts: { pageSize?: number, page?: number, txHash?: boolean } = {},
+  ): Promise<Array<{ vaa: Uint8Array, sequence: bigint, txHash: string | null }>> {
+    const pageSize = opts.pageSize ?? 50
+    const page = opts.page ?? 0
+    const url = `${this.baseUrl}/api/v1/vaas/${chain}/${emitterHex}?pageSize=${pageSize}&page=${page}`
+    const json = await this.getJson<{
+      data?: Array<{ vaa?: string, sequence?: string | number, txHash?: string }>
+    }>(url)
+    if (!json.data) {
+      return []
+    }
+    const out: Array<{ vaa: Uint8Array, sequence: bigint, txHash: string | null }> = []
+    for (const item of json.data) {
+      if (!item.vaa) {
+        continue
+      }
+      out.push({
+        vaa: decodeBase64(item.vaa),
+        sequence: BigInt(item.sequence ?? 0),
+        txHash: item.txHash ?? null,
+      })
+    }
+    return out
+  }
+
   private async getJson<T>(url: string): Promise<T> {
     const res = await this.fetchImpl(url)
     if (!res.ok) {

@@ -40,7 +40,9 @@ describe('runDaemon', () => {
   it('triggers self-kill (process.exit) when heartbeat goes stale', async () => {
     const exit = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never)
     let scanResolve: () => void = () => {}
-    const scan = vi.fn().mockImplementation(() => new Promise<void>((r) => { scanResolve = r }))
+    const scan = vi.fn().mockImplementation(() => new Promise<void>((r) => {
+      scanResolve = r
+    }))
     const metrics = makeMockMetrics()
     const ctrl = new AbortController()
 

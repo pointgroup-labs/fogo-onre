@@ -1,6 +1,6 @@
 import type { PublicKey } from '@solana/web3.js'
-import * as advance from './advance'
 import type { AdvanceContext, AdvanceResult } from './advance/types'
+import * as advance from './advance'
 import { withTimeout } from './rpc'
 
 export type AdvanceFns = {
@@ -17,8 +17,10 @@ export type ScannedFlow = {
   pubkey: PublicKey
   /** Synthetic status: 'Pending' for VAAs without a Flow yet, else the Flow's on-chain status. */
   status: string
-  /** Source-chain tx signature used by advance fns to fetch the VAA. */
+  /** Source-chain tx signature; may be empty if unknown. */
   fogoTx: string
+  /** Pre-fetched VAA bytes hex-encoded — preferred over fogoTx to avoid a second Wormholescan round-trip. */
+  vaaHex?: string
 }
 
 export type EnumerateFlowsFn = (ctx: AdvanceContext) => Promise<ScannedFlow[]>
@@ -28,6 +30,8 @@ export type ScanOptions = {
   rpcTimeoutMs: number
   enumerateFlows?: EnumerateFlowsFn
   advanceFns?: AdvanceFns
+  /** Optional skip counter — incremented when a Flow has a status the cranker cannot currently advance (e.g. withdraw-leg statuses gated on ONyc deploy). */
+  skipCounter?: { inc: (labels: { reason: string }) => void }
 }
 
 const DEFAULT_ADVANCE_FNS: AdvanceFns = {
@@ -40,16 +44,6 @@ const DEFAULT_ADVANCE_FNS: AdvanceFns = {
   sendUsdcToUser: advance.sendUsdcToUser,
 }
 
-/**
- * Production enumerator stub. Real implementation will use
- * `getProgramAccounts` with discriminator + status memcmp filters
- * against the relayer program ID, plus a Wormholescan poll for VAAs
- * without on-chain Flow accounts yet (Pending state).
- *
- * TODO(scan): implement real PDA enumeration. Currently returns empty
- * so the daemon main loop can wire end-to-end and tests can inject
- * fake flow lists.
- */
 const defaultEnumerateFlows: EnumerateFlowsFn = async () => []
 
 export async function scanAndAdvance(
@@ -73,18 +67,21 @@ export async function scanAndAdvance(
   for (const flow of flows) {
     const dispatch = pickAdvanceForStatus(flow.status, fns)
     if (!dispatch) {
+      opts.skipCounter?.inc({ reason: flow.status || 'unknown' })
       continue
     }
-    tasks.push(() => dispatch(ctx, { fogoTx: flow.fogoTx }))
+    tasks.push(() => dispatch(ctx, { fogoTx: flow.fogoTx, vaaHex: flow.vaaHex }))
   }
 
   await runBounded(tasks, opts.maxConcurrentAdvances, ctx.abortSignal)
 }
 
-function pickAdvanceForStatus(
-  status: string,
-  fns: AdvanceFns,
-): ((ctx: AdvanceContext, input: { fogoTx: string }) => Promise<AdvanceResult>) | undefined {
+type DispatchFn = (
+  ctx: AdvanceContext,
+  input: { fogoTx: string, vaaHex?: string },
+) => Promise<AdvanceResult>
+
+function pickAdvanceForStatus(status: string, fns: AdvanceFns): DispatchFn | undefined {
   switch (status) {
     case 'Pending':
       return fns.claimUsdc

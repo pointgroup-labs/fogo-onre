@@ -37,7 +37,7 @@ FROM node:24-bookworm-slim AS runtime
 # `docker stop` waits 10s and SIGKILLs, skipping our shutdown handlers
 # entirely. ca-certificates so Node TLS can verify the RPC endpoints.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends dumb-init ca-certificates wget \
+ && apt-get install -y --no-install-recommends dumb-init ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 
 # UID 10001 is pinned so volume permissions are stable across rebuilds.
@@ -54,9 +54,10 @@ EXPOSE 9090
 
 # --start-period covers cold-start config validation + RelayerConfig
 # fetch (~5–30s on a healthy paid RPC). Healthcheck hits /healthz which
-# returns 503 when heartbeat is stale.
+# returns 503 when heartbeat is stale. Uses Node directly to avoid an
+# extra apt dependency (wget/curl).
 HEALTHCHECK --interval=15s --timeout=5s --start-period=120s --retries=3 \
-  CMD wget --quiet --spider http://localhost:9090/healthz || exit 1
+  CMD node -e "require('http').get('http://localhost:9090/healthz',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"
 
 ENTRYPOINT ["dumb-init", "--"]
 CMD ["node", "dist/bin.js"]

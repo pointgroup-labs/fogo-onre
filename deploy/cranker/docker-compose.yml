@@ -12,9 +12,13 @@ name: fogo-cranker
 
 services:
   cranker:
-    image: ghcr.io/fogo-onre/cranker:latest
+    # Production: pin to a semver tag (e.g. ghcr.io/fogo-onre/cranker:0.1.x).
+    # Staging: use :edge to track main. Watchtower follows whatever tag is
+    # configured here — it does NOT roll a pinned semver to a different one.
+    image: ghcr.io/fogo-onre/cranker:0.1
     container_name: cranker
     restart: unless-stopped
+    stop_grace_period: 30s
     env_file:
       - ./cranker.env
     volumes:

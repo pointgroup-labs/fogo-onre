@@ -1,8 +1,8 @@
-import { NTT_USDC_PROGRAM_ID, USDC_MINT } from '@fogo-onre/sdk'
-import { resolveNttVaa } from '../vaa'
-import { PublicKey } from '@solana/web3.js'
-import { describeStatus, fetchVaaBytes } from './helpers'
 import type { AdvanceContext, AdvanceResult } from './types'
+import { NTT_USDC_PROGRAM_ID, USDC_MINT } from '@fogo-onre/sdk'
+import { PublicKey } from '@solana/web3.js'
+import { resolveNttVaa } from '../vaa'
+import { describeStatus, fetchVaaBytes } from './helpers'
 
 export type SwapUsdcToOnycInput = {
   fogoTx: string
@@ -71,8 +71,7 @@ export async function swapUsdcToOnyc(
       fromStatus: 'Claimed',
       toStatus: 'Swapped',
     }
-  }
-  catch (err) {
+  } catch (err) {
     metrics.txSent.inc({ instruction: 'swap_usdc_to_onyc', result: 'error' })
     return {
       kind: 'error',

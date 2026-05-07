@@ -1,10 +1,10 @@
+import type { AdvanceContext, AdvanceResult } from './types'
 import { findUserInboxAuthorityPda, NTT_USDC_PROGRAM_ID, USDC_MINT } from '@fogo-onre/sdk'
-import { resolveNttVaa } from '../vaa'
 import { createAssociatedTokenAccountIdempotentInstruction, getAssociatedTokenAddressSync } from '@solana/spl-token'
 import { PublicKey } from '@solana/web3.js'
 import { withTimeout } from '../rpc'
+import { resolveNttVaa } from '../vaa'
 import { describeStatus, fetchVaaBytes } from './helpers'
-import type { AdvanceContext, AdvanceResult } from './types'
 
 export type ClaimUsdcInput = {
   fogoTx: string
@@ -51,14 +51,11 @@ export async function claimUsdc(
     let userWallet: PublicKey
     if (input.userWallet) {
       userWallet = input.userWallet
-    }
-    else if (deriveInboxAuthority(keypair.publicKey).equals(resolved.recipientOnSolana)) {
+    } else if (deriveInboxAuthority(keypair.publicKey).equals(resolved.recipientOnSolana)) {
       userWallet = keypair.publicKey
-    }
-    else if (deriveInboxAuthority(resolved.senderOnSource).equals(resolved.recipientOnSolana)) {
+    } else if (deriveInboxAuthority(resolved.senderOnSource).equals(resolved.recipientOnSolana)) {
       userWallet = resolved.senderOnSource
-    }
-    else {
+    } else {
       // Neither candidate matches — this VAA's recipient PDA cannot be
       // re-derived from any wallet the cranker can guess. The deposit was
       // either initiated by a Fogo Session keypair the cranker doesn't
@@ -140,8 +137,7 @@ export async function claimUsdc(
       fromStatus: 'Pending',
       toStatus: 'Claimed',
     }
-  }
-  catch (err) {
+  } catch (err) {
     metrics.txSent.inc({ instruction: 'claim_usdc', result: 'error' })
     return {
       kind: 'error',
