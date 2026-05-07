@@ -97,9 +97,11 @@ Same as upgrade authority? (Y/N):___________________________
 
 ## 3. External security audit
 
-The CPI flow into Wormhole Gateway / NTT / OnRe is the most novel surface
-and the highest-impact place for subtle bugs. An external audit MUST review
-at minimum:
+The CPI flow into Wormhole NTT (USDC.s + ONyc managers) and OnRe is the
+most novel surface and the highest-impact place for subtle bugs. The
+relayer does **not** CPI Wormhole Core or the legacy Token Bridge /
+Gateway — that path was removed in the NTT migration. An external audit
+MUST review at minimum:
 
 - [ ] CPI allowlist (`programs/relayer/src/constants.rs`) — every program
       ID and instruction discriminator verified against canonical sources.
@@ -135,23 +137,30 @@ Findings closed: ___________________________
 
 ## 4. Fixture / mainnet schema re-verification
 
-`tests/utils/` ships pinned mainnet account fixtures (TB Config, MintSigner,
-NTT Config, OnRe State, OnRe `RedemptionOffer`, etc.) captured during
-development. If an upstream program ships a state migration between
-fixture-capture and our deploy, the relayer's parsing offsets will silently
-drift.
+`tests/utils/` ships pinned mainnet account fixtures (NTT USDC.s Config /
+peer / rate limits, NTT ONyc Config, OnRe State, OnRe `RedemptionOffer`,
+etc.) captured during development. If an upstream program ships a state
+migration between fixture-capture and our deploy, the relayer's parsing
+offsets will silently drift.
 
 - [ ] Re-fetch each fixture from current mainnet (`solana account <pubkey>
       --output json`) and diff against `tests/utils/fixtures/*.json`.
       Layout changes require updating the parser AND re-running the LiteSVM
       e2e suite.
 - [x] CPI program IDs in `programs/relayer/src/constants.rs` match the
-      canonical mainnet addresses for: Wormhole Core (`worm2Zo…`),
-      Token Bridge / Gateway (`wormDTU…`), NTT (`nttu74…`), OnRe
-      (`onreuGh…`). FOGO Wormhole chain ID = 51. _(Auto-verified by
-      the `constants.rs` discriminator/sighash tests.)_
-- [ ] Confirm all four programs above still resolve to deployed
-      (non-frozen) programs on mainnet (`solana program show <pubkey>`).
+      canonical mainnet addresses for: NTT USDC.s manager (`nttu74…`,
+      `constants.rs:9`), NTT ONyc manager (`nttpna5vXW7…`,
+      `constants.rs:12`), OnRe (`onreuGh…`, `constants.rs:6`), FOGO
+      `intent_transfer` (`Xfry4d…`, `constants.rs:129`). FOGO Wormhole
+      chain ID = 51. Wormhole Core / Token Bridge / Gateway IDs are
+      deliberately absent — the relayer doesn't CPI them. _(Auto-verified
+      by the `constants.rs` discriminator/sighash tests; the
+      `RelayerConfig::INIT_SPACE` pin test guards layout drift.)_
+- [ ] Confirm each program above still resolves to a deployed
+      (non-frozen) program on mainnet (`solana program show <pubkey>`).
+      The ONyc NTT manager (`nttpna5vXW7…`) in particular may not be
+      live yet at the time of relayer deploy; if so, deploy-mainnet.md
+      §7.1 must run **before** the smoke test.
 - [ ] Confirm OnRe's `RedemptionOffer` PDA for the ONyc/USDC pair
       (`3pLK2vXD…`) still exists and is funded with USDC sufficient to
       cover expected withdraw volume. The withdraw chain depends on

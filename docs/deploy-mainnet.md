@@ -36,23 +36,26 @@ Source: `Anchor.toml` `[programs.mainnet]` and
 **External program IDs** (hardcoded in
 `programs/relayer/src/constants.rs`):
 
-| Program                | Address                                       |
-| ---------------------- | --------------------------------------------- |
+| Program                       | Address                                       |
+| ----------------------------- | --------------------------------------------- |
 | Wormhole NTT Manager (USDC.s) | `nttu74CdAmsErx5daJVCQNoDZujswFrskMzonoZSdGk` |
-| Wormhole NTT Manager (ONyc)   | _TBD — separate program; not yet deployed_   |
-| OnRe                   | `onreuGhHHgVzMWSkj2oQDLDtvvGvoepBPkqyaubFcwe` |
-| FOGO Wormhole chain ID | `51`                                          |
+| Wormhole NTT Manager (ONyc)   | `nttpna5vXW7BN2Aa4AfTbkCncJWTEoBsnWvjS87Xgsd` |
+| OnRe                          | `onreuGhHHgVzMWSkj2oQDLDtvvGvoepBPkqyaubFcwe` |
+| FOGO Wormhole chain ID        | `51`                                          |
 
 The relayer does **not** CPI Wormhole Core or the legacy Token Bridge /
 Gateway. The two bridge legs use **distinct NTT manager programs**:
-USDC.s ↔ USDC routes through `nttu74…` (above), and ONyc ↔ bONyc will
-route through its own NTT manager once deployed. The relayer pins each
-leg to the correct program at compile time via `NTT_USDC_PROGRAM_ID` /
-`NTT_ONYC_PROGRAM_ID` in `programs/relayer/src/constants.rs`; until the
-ONyc manager is live, that constant is aliased to the USDC.s manager
-and a follow-up PR will swap it on deploy. Verifying NTT setup (§7.1)
+USDC.s ↔ USDC routes through `nttu74…` (above), and ONyc ↔ bONyc routes
+through `nttpna5vXW7…`. The relayer pins each leg to the correct
+program at compile time via `NTT_USDC_PROGRAM_ID`
+(`programs/relayer/src/constants.rs:9`) and `NTT_ONYC_PROGRAM_ID`
+(`programs/relayer/src/constants.rs:12`). Verifying NTT setup (§7.1)
 is on the deploy critical path. Re-verify each ID against mainnet
-(`solana program show <id>`) before deploying — see deploy-checklist.md §4.
+(`solana program show <id>`) before deploying — the ONyc NTT manager
+in particular may not yet be live on Solana mainnet at the time of
+your deploy; if `solana program show` returns "Account not found",
+coordinate with the ONyc NTT manager admin to land the deploy at
+exactly `nttpna5vXW7…` before continuing. See deploy-checklist.md §4.
 
 ---
 
@@ -78,8 +81,11 @@ sidestep this.
   `onrenRKgX54qtWeK3cuaTBE71xx7dWMXn82ubH61vAp` — held in operator
   storage (HSM, sealed envelope, etc.).
 - **ONyc NTT vanity keypair** that produces
-  `nttu74CdAmsErx5daJVCQNoDZujswFrskMzonoZSdGk` — same handling. See
-  §7.1 for why the Solana-side NTT program ID is pinned.
+  `nttpna5vXW7BN2Aa4AfTbkCncJWTEoBsnWvjS87Xgsd` — same handling. See
+  §7.1 for why the Solana-side NTT program ID is pinned. Note this is
+  the **ONyc** manager (`NTT_ONYC_PROGRAM_ID`, `constants.rs:12`); the
+  USDC.s manager (`nttu74…`) is already live and is a third-party
+  artifact, not something you deploy.
 - **Upgrade authority** — multisig (≥3-of-5 hardware-key signers) or
   immutable (`--final`). Hot/warm single keys are forbidden by §2 of
   the checklist.
@@ -379,12 +385,12 @@ abuse. NTT tokens get a custom UI built with
 The relayer doesn't depend on any UI; it CPIs the on-chain manager
 directly.
 
-**The hardcoded-program-ID constraint.** `programs/relayer/src/constants.rs:9`
+**The hardcoded-program-ID constraint.** `programs/relayer/src/constants.rs:12`
 pins the ONyc NTT manager program ID to
-`nttu74CdAmsErx5daJVCQNoDZujswFrskMzonoZSdGk` (note the `nttu74…`
-vanity prefix — a specific keypair was generated for it). The
-Solana-side NTT deployment for ONyc **must land at exactly this
-address.** Two consequences:
+`nttpna5vXW7BN2Aa4AfTbkCncJWTEoBsnWvjS87Xgsd` (the `nttpna…` vanity
+prefix — a specific keypair was generated for it). The Solana-side NTT
+deployment for ONyc **must land at exactly this address.** Two
+consequences:
 
 1. The deployer must hold the program keypair that produces this
    pubkey. Treat it with the same care as the relayer program keypair
@@ -395,10 +401,15 @@ address.** Two consequences:
    unusable as-is — `constants.rs` must be updated and the relayer
    redeployed under a fresh audit.
 
+The USDC.s NTT manager (`nttu74CdAmsErx5daJVCQNoDZujswFrskMzonoZSdGk`,
+`constants.rs:9`) is already live on Solana mainnet and is referenced
+by the relayer; you don't redeploy it.
+
 **Prerequisites for NTT setup.**
 
 - ONyc SPL mint already exists on Solana (issued by OnRe).
-- ONyc NTT program keypair (the `nttu74…` vanity keypair).
+- ONyc NTT program keypair (the `nttpna…` vanity keypair that produces
+  `nttpna5vXW7BN2Aa4AfTbkCncJWTEoBsnWvjS87Xgsd`).
 - FOGO-side NTT program keypair (vanity not required, but document the
   resulting address).
 - bONyc representation: do **not** pre-create. NTT in Burning mode on
@@ -415,9 +426,9 @@ ntt new ntt-onyc
 cd ntt-onyc
 
 # 2. Solana side — LOCKING mode (ONyc is canonical here, locked not burned).
-#    --program-key MUST be the keypair that yields nttu74CdAmsErx5daJVCQNoDZujswFrskMzonoZSdGk.
+#    --program-key MUST be the keypair that yields nttpna5vXW7BN2Aa4AfTbkCncJWTEoBsnWvjS87Xgsd.
 solana-keygen pubkey <ONYC_NTT_VANITY_KEYPAIR>.json
-# expected: nttu74CdAmsErx5daJVCQNoDZujswFrskMzonoZSdGk
+# expected: nttpna5vXW7BN2Aa4AfTbkCncJWTEoBsnWvjS87Xgsd
 
 ntt add-chain Solana \
   --latest \
@@ -448,7 +459,7 @@ ntt push --payer <DEPLOY_KEYPAIR>.json
 
 ```bash
 # Solana NTT manager landed at the canonical pubkey
-solana program show nttu74CdAmsErx5daJVCQNoDZujswFrskMzonoZSdGk \
+solana program show nttpna5vXW7BN2Aa4AfTbkCncJWTEoBsnWvjS87Xgsd \
   --url <MAINNET_RPC>
 
 # Inspect the deployment + peer registration state

@@ -500,3 +500,48 @@ FOGO needs yield infrastructure. Instead of building one-off integrations per pr
 ### Composability
 
 Every vault share token is a standard SPL token. It plugs into any FOGO protocol: lending collateral, AMM liquidity, DAO treasuries, or as backing in another vault (vault-of-vaults).
+
+## Cross-Program Version Dependencies
+
+The relayer program holds compile-time constants that bind it to specific upstream programs. Drift in any of these requires a coordinated relayer redeploy.
+
+### `intent_transfer` (FOGO) — security keystone
+
+`programs/relayer/src/constants.rs` pins:
+
+- `INTENT_TRANSFER_PROGRAM_ID = Xfry4dW9m42ncAqm8LyEnyS5V6xu5DSJTMRQLiGkARD`
+- `INTENT_TRANSFER_SETTER_SEED = b"intent_transfer"`
+
+These together identify the singleton PDA that surfaces as `NttManagerMessage.sender` on every intent-driven inbound VAA. `claim_usdc` rejects any VAA whose sender is _not_ this PDA — that's how the relayer enforces "all USDC.s deposits must originate via intent_transfer," which in turn is what gives the deposit flow its fee-accounting and rate-limit guarantees.
+
+**Failure mode if drift goes unnoticed:** the relayer keeps refusing every legitimate deposit with `UnexpectedFogoSender` until a redeploy lands. Funds are not lost — VAAs sit in the inbox until someone reissues `claim_usdc` against the corrected relayer — but the deposit flow is fully halted.
+
+**Why it's compile-time, not runtime-rotatable via `RelayerConfig`:** a stolen `RelayerConfig.authority` key could otherwise redirect the entire deposit flow to an attacker-controlled program. Compile-time minimizes the trust surface to "whoever controls the upgrade authority", which is the same trust we already extend for bytecode replacement.
+
+### NTT manager binaries — `nttu74Cd…ZSdGk` (USDC.s) and `nttpna5vXW7…87Xgsd` (ONyc)
+
+`programs/relayer/src/constants.rs` pins:
+
+- `NTT_USDC_PROGRAM_ID`, `NTT_ONYC_PROGRAM_ID`
+- discriminators + offsets for `ValidatedTransceiverMessage` (TRANSCEIVER_MESSAGE_SENDER_OFFSET = 106)
+
+`programs/relayer/src/ntt.rs` additionally pins:
+
+- `INBOX_ITEM_DISC` — empirically captured byte sequence
+- vendored `InboxItem` and `ReleaseStatus` types — borsh-deserialize against the upstream layout
+
+**Failure mode if upstream changes layout:** typed deserialization fails with `InvalidInboxItem`. Funds remain in the user inbox ATA; no false-positive sweeps. The `pinBinaryFixtures()` sha256 check in `tests/utils/withdraw-scaffolding.ts` is the upstream-drift tripwire — it fails the test suite the moment a developer drops in a different `.so`.
+
+### `OnRe` program — `onreuGhHHgVzMWSkj2oQDLDtvvGvoepBPkqyaubFcwe`
+
+Similar pinning + discriminator/account-shape mirroring in `onre.rs`. Same drift discipline.
+
+### Refresh procedure
+
+When upstream drift is detected (sha256 mismatch in `pinBinaryFixtures()` OR `InvalidInboxItem` errors after a known upstream upgrade):
+
+1. Update the binary fixture under `tests/fixtures/programs/`.
+2. Refresh the sha256 pin in `pinBinaryFixtures()`.
+3. If layout/discriminator changed, update the mirrored types in `ntt.rs` (or `onre.rs`) and confirm with a debug `msg!` capture — do NOT trust upstream source comments to derive the discriminator (`sha256("account:InboxItem")[..8]` is not always what's actually written).
+4. Run full `pnpm test`; the `claim_usdc` e2e test will surface any remaining mismatches.
+5. Coordinate the relayer redeploy with the upstream binary deployment.
