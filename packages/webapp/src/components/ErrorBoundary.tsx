@@ -31,7 +31,18 @@ export default class ErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, info: { componentStack?: string | null }) {
-    console.error('[ErrorBoundary]', this.props.label ?? '', error, info.componentStack)
+    // Logging the raw error + componentStack is useful in dev for fast
+    // diagnosis but in production it can leak internals (file paths,
+    // unminified component names if sourcemaps are present, etc.) to the
+    // browser console where any user can copy them. We log a sanitized
+    // single-line breadcrumb in prod and the full payload in dev only.
+    if (process.env.NODE_ENV === 'production') {
+      console.warn(
+        `[ErrorBoundary]${this.props.label ? ` ${this.props.label}` : ''}: ${error.name}`,
+      )
+    } else {
+      console.error('[ErrorBoundary]', this.props.label ?? '', error, info.componentStack)
+    }
   }
 
   reset = () => {

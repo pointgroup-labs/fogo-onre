@@ -4,9 +4,26 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
 const FOGO_NETWORK_NAME = process.env.NEXT_PUBLIC_FOGO_NETWORK ?? 'mainnet'
+// FOGO RPC defaults to a first-party Fogo Labs endpoint per network — fine
+// to default. Solana RPC is a third-party JPool endpoint that can rate-limit
+// under load and isn't promised; in production we refuse to silently default
+// to it so an explicit choice is recorded in the deployment env.
 const FOGO_RPC_DEFAULT = process.env.NEXT_PUBLIC_FOGO_RPC_URL
   ?? (FOGO_NETWORK_NAME === 'testnet' ? 'https://testnet.fogo.io' : 'https://mainnet.fogo.io')
-const SOLANA_RPC_DEFAULT = process.env.NEXT_PUBLIC_SOLANA_RPC_URL ?? 'https://rpc.jpool.one'
+
+function resolveSolanaRpcDefault(): string {
+  const fromEnv = process.env.NEXT_PUBLIC_SOLANA_RPC_URL
+  if (fromEnv && fromEnv.length > 0) {
+    return fromEnv
+  }
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error(
+      'NEXT_PUBLIC_SOLANA_RPC_URL is required in production. Set it to a Solana mainnet RPC you trust to handle production traffic.',
+    )
+  }
+  return 'https://rpc.jpool.one'
+}
+const SOLANA_RPC_DEFAULT = resolveSolanaRpcDefault()
 
 export interface SettingsState {
   fogoRpcUrl: string | null

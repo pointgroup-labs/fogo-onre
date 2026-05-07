@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react'
 import { useDocumentVisible } from '@/hooks/useDocumentVisible'
 import { useOnycPrice } from '@/hooks/useOnycPrice'
 import { useSettings } from '@/store/settings'
+import { useToastsStore } from '@/store/toasts'
 import { getReadOnlyRelayerClient } from '@/utils/connections'
 
 /**
@@ -82,11 +83,24 @@ export function useProtocolState(): ProtocolState | null {
           withdraw: Number(config.withdrawFeeBps),
         })
         setFeeFetchError(null)
+        // Clear the visible error toast on recovery so a transient RPC
+        // hiccup doesn't leave the user staring at a stale banner.
+        useToastsStore.getState().dismiss('protocol-fee-fetch-error')
       } catch (err) {
         if (cancelled) {
           return
         }
-        setFeeFetchError(err instanceof Error ? err.message : 'Failed to fetch RelayerConfig')
+        const message = err instanceof Error ? err.message : 'Failed to fetch RelayerConfig'
+        setFeeFetchError(message)
+        // Surface the error explicitly. The hook itself returns `null` while
+        // fees are unavailable (which blocks quoting + submission downstream),
+        // so without this toast the UI would just look "stuck loading".
+        useToastsStore.getState().upsert({
+          id: 'protocol-fee-fetch-error',
+          kind: 'error',
+          title: 'Live fee fetch failed',
+          description: 'Quotes are blocked until RelayerConfig is reachable. Check your Solana RPC and reload.',
+        })
       }
     }
 
@@ -124,17 +138,19 @@ export function useProtocolState(): ProtocolState | null {
     ? livePrice.onycPrice
     : computeOnycPrice(PLACEHOLDER_PRICE, now)
 
-  // Until live fees arrive AND the call hasn't errored, render conservatively
-  // as `null` so the UI hides the quote rather than quoting against a stale
-  // assumption. If fees errored, fall through with 0 bps + the error so the
-  // user knows why "You receive" looks suspiciously round.
-  if (feeBps === null && feeFetchError === null) {
+  // Fee-fetch failure must HARD-FAIL the quote path, not silently quote at
+  // 0 bps. The previous behaviour (`feeBps === null && feeFetchError === null`)
+  // let the hook return a state with `depositFeeBps: 0` whenever fees errored,
+  // which would have shown the user an inflated "you receive" line during a
+  // RelayerConfig outage. We block rendering the quote entirely and surface
+  // the error via a toast (see `refreshFees`).
+  if (feeBps === null) {
     return null
   }
 
   return {
-    depositFeeBps: feeBps?.deposit ?? 0,
-    withdrawFeeBps: feeBps?.withdraw ?? 0,
+    depositFeeBps: feeBps.deposit,
+    withdrawFeeBps: feeBps.withdraw,
     price: priceSnapshot,
     onycPrice,
     priceIsPreview,

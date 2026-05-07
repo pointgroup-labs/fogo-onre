@@ -64,3 +64,19 @@ export function formatAmount(value: bigint, decimals: number): string {
   const fraction = s.slice(s.length - decimals).replace(/0+$/, '')
   return fraction ? `${whole}.${fraction}` : whole
 }
+
+/**
+ * Render `amount` as a fixed-precision decimal string with exactly
+ * `decimals` fractional digits — trailing zeros preserved. The
+ * intent-message parser and Wormhole route validator both compare the
+ * amount field by string equality, so the canonical form is required.
+ */
+export function formatBaseUnitsExact(amount: bigint, decimals: number): string {
+  const base = 10n ** BigInt(decimals)
+  const whole = amount / base
+  const frac = amount % base
+  if (decimals === 0) {
+    return whole.toString()
+  }
+  return `${whole.toString()}.${frac.toString().padStart(decimals, '0')}`
+}

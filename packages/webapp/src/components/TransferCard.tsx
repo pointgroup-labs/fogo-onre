@@ -2,14 +2,16 @@
 
 import type { TransferKind } from '@/hooks/useFogoNttTransfer'
 import { isEstablished, useSession } from '@fogo/sessions-sdk-react'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import AmountInput from '@/components/AmountInput'
 import ReceiveField from '@/components/ReceiveField'
 import { BONYC_DECIMALS, BONYC_DEPLOYMENT_READY, USDC_DECIMALS } from '@/constants'
 import { useBalances } from '@/hooks/useBalances'
+import { useBridgeFee } from '@/hooks/useBridgeFee'
 import { useFlowStatus } from '@/hooks/useFlowStatus'
 import { useFogoNttTransfer } from '@/hooks/useFogoNttTransfer'
 import { useProtocolState } from '@/hooks/useProtocolState'
+import { createDepositBridgeContextProvider } from '@/lib/bridge/depositContext'
 import { usePendingTxsStore } from '@/store/pending-txs'
 import { useToastsStore } from '@/store/toasts'
 import { fogoTxUrl, shortSig, wormholeTxUrl } from '@/utils/explorers'
@@ -24,7 +26,7 @@ import { formatAmount, parseAmount } from '@/utils/transfer'
  * tabs — never re-triggers it.
  *
  * Why this exists: standard `useEffect(fn, [a, b, c])` re-runs whenever
- * *any* dep changes, even if the value the effect actually cares about
+ * any* dep changes, even if the value the effect actually cares about
  * (`a`) hasn't moved. That caused duplicate toasts on tab switch — the
  * status was still `error` from a previous submit, but the effect
  * re-fired because `kind`/labels changed and pushed another toast.
@@ -101,7 +103,20 @@ const KIND_UI: Record<TransferKind, KindUi> = {
 
 export default function TransferCard({ kind }: TransferCardProps) {
   const sessionState = useSession()
-  const { status, submit, lastSubmission } = useFogoNttTransfer(kind, sessionState)
+  // Build the deposit-side bridge-context provider once per mount. The
+  // factory closes over env-driven config (executor URL, fee accounts,
+  // etc.); see `lib/bridge/depositContext.ts` for the full list of
+  // values it needs and how they're resolved. Withdraw branch passes
+  // `null` because that path doesn't go through `bridge_ntt_tokens`.
+  const bridgeContextProvider = useMemo(
+    () => kind === 'deposit' ? createDepositBridgeContextProvider() : null,
+    [kind],
+  )
+  const { status, submit, lastSubmission } = useFogoNttTransfer(
+    kind,
+    sessionState,
+    { bridgeContextProvider },
+  )
   const protocol = useProtocolState()
   const { snapshot: balances, refresh: refreshBalances } = useBalances(sessionState)
   const appendPendingTx = usePendingTxsStore(s => s.append)
@@ -115,11 +130,20 @@ export default function TransferCard({ kind }: TransferCardProps) {
   const owner = sessionEstablished ? sessionState.walletPublicKey : null
   const sourceBalance = kind === 'deposit' ? balances.usdc : balances.bonyc
 
+  // Pulled here (not just inside BridgeFeeRow) because the deposit
+  // Submit gate has to refuse when the user can't cover the bridged
+  // amount + bridge fee out of the same USDC.s balance — fee_mint is
+  // USDC.s, so feeSource = sourceAta and the on-chain SPL transfer
+  // pulls `amount + fee` out of one ATA. The gate is folded into the
+  // existing `insufficient` calc below.
+  const bridgeFee = useBridgeFee()
+
   const flow = useFlowStatus({
     signature: lastSubmission?.signature ?? null,
     owner,
     kind,
     startedAt: lastSubmission?.startedAt ?? null,
+    baselineBalance: lastSubmission?.baselineBalance ?? null,
   })
 
   // Persist on submission. Only fires on a *new* `lastSubmission`
@@ -214,10 +238,19 @@ export default function TransferCard({ kind }: TransferCardProps) {
 
   const parsed = parseAmount(input, ui.inputDecimals, ui.inputSymbol)
   const submitting = status.kind === 'pending'
-  const insufficient
+  // Deposit fee_mint = USDC.s, so the user's USDC.s balance funds both
+  // `amount` and `fee` from the same ATA — fold the fee into the gate.
+  // For withdraw, no bridge fee applies (fee in withdraw is deducted
+  // Solana-side from the redemption output), so the fee component is
+  // 0 there.
+  const totalRequired
     = parsed.value !== null
+      ? parsed.value + (kind === 'deposit' ? (bridgeFee.feeRaw ?? 0n) : 0n)
+      : null
+  const insufficient
+    = totalRequired !== null
       && sourceBalance !== null
-      && parsed.value > sourceBalance
+      && totalRequired > sourceBalance
   const ready
     = sessionEstablished
       && ui.ready
@@ -265,13 +298,20 @@ export default function TransferCard({ kind }: TransferCardProps) {
                   protocol={protocol}
                 />
               </div>
+              {kind === 'deposit' && (
+                <BridgeFeeRow fee={bridgeFee} />
+              )}
               <button
                 type="button"
                 onClick={onSubmit}
                 disabled={!ready || submitting}
                 className="w-full rounded-xl bg-neutral-100 py-3 text-sm font-semibold text-black transition-colors hover:bg-white disabled:cursor-not-allowed disabled:bg-neutral-800 disabled:text-neutral-500"
               >
-                {submitting ? ui.submittingLabel : insufficient ? ui.insufficientLabel : ui.submitLabel}
+                {submitting
+                  ? ui.submittingLabel
+                  : insufficient
+                    ? ui.insufficientLabel
+                    : ui.submitLabel}
               </button>
             </>
           )}
@@ -296,6 +336,31 @@ function DownConnector() {
           </svg>
         </div>
       </div>
+    </div>
+  )
+}
+
+/**
+ * Pre-submit display of the deposit bridge fee. The fee is paid in
+ * USDC.s (same token as the bridged amount) — intent_transfer pulls
+ * `amount + fee` from the user's USDC.s ATA in a single SPL transfer.
+ * The number comes from the on-chain `FeeConfig.bridge_transfer_fee`
+ * for USDC.s — see `useBridgeFee`. Native-FOGO gas is sponsored by
+ * Fogo Labs' generic `sessions` paymaster, so we don't surface a
+ * FOGO-balance line here.
+ */
+function BridgeFeeRow({ fee }: {
+  fee: ReturnType<typeof useBridgeFee>
+}) {
+  const display = fee.feeRaw === null
+    ? '—'
+    : `${formatAmount(fee.feeRaw, fee.feeDecimals)} ${fee.feeSymbol}`
+  return (
+    <div className="flex items-center justify-between rounded-lg border border-neutral-800/60 bg-neutral-900/40 px-3 py-2 text-xs">
+      <span className="text-neutral-400">Bridge fee</span>
+      <span className={fee.error ? 'text-amber-500/80' : 'text-neutral-200'}>
+        {fee.error ? 'unavailable' : display}
+      </span>
     </div>
   )
 }

@@ -36,7 +36,18 @@ export interface FlowStatus {
 }
 
 const POLL_MS = 10_000
-const EXPIRE_MS = 30 * 60 * 1_000
+// Bridge round-trip timing differs by kind:
+//   - Deposit: NTT FOGO→Solana → relayer cranks → return-leg NTT Solana→FOGO
+//     bONyc mint. Typically minutes; 30 min is a generous expiry.
+//   - Withdraw: same NTT round-trip PLUS OnRe redemption fulfilment, which
+//     is permissioned/queued and can take many hours. A 30 min expiry would
+//     surface "expired" while the redemption is still legitimately pending,
+//     panicking the user. 24 h is the conservative upper bound for the
+//     current OnRe ops cadence.
+const EXPIRE_MS_BY_KIND: Record<'deposit' | 'withdraw', number> = {
+  deposit: 30 * 60 * 1_000,
+  withdraw: 24 * 60 * 60 * 1_000,
+}
 
 async function readBalance(connection: Connection, ata: PublicKey): Promise<bigint | null> {
   try {
@@ -52,6 +63,19 @@ export interface FlowWatchInput {
   owner: PublicKey | null
   kind: 'deposit' | 'withdraw'
   startedAt: number | null
+  /**
+   * Destination-ATA balance captured **before** the user signed the
+   * submission. Required for correctness: capturing the baseline on the
+   * first poll (after the user signed) opens a race where a concurrent
+   * delivery — from another tab, a stale prior bridge, or a generous
+   * external transfer — looks like *this* flow's delivery, producing a
+   * false positive "delivered" toast for a flow that is in fact still
+   * mid-bridge.
+   *
+   * Falls back to "capture on first tick" when null, preserving legacy
+   * behaviour for callers that haven't been updated to snapshot upstream.
+   */
+  baselineBalance: bigint | null
 }
 
 export function useFlowStatus(input: FlowWatchInput): FlowStatus | null {
@@ -67,6 +91,7 @@ export function useFlowStatus(input: FlowWatchInput): FlowStatus | null {
     // can use them without `!` non-null assertions.
     const signature = input.signature
     const startedAt = input.startedAt
+    const presetBaseline = input.baselineBalance
     if (signature === null || ownerKey === null || startedAt === null) {
       setStatus(null)
       return
@@ -79,8 +104,15 @@ export function useFlowStatus(input: FlowWatchInput): FlowStatus | null {
     // Deposit: user receives bONyc on FOGO. Withdraw: user receives USDC.s.
     const destinationMint = input.kind === 'deposit' ? BONYC_MINT : USDC_S_MINT
     const destAta = getAssociatedTokenAddressSync(destinationMint, ownerPk)
-    let baseline: bigint | null = null
+    let baseline: bigint | null = presetBaseline
     let delivered = false
+    const expireMs = EXPIRE_MS_BY_KIND[input.kind]
+
+    // Caller-provided baseline → emit `submitted` immediately so the UI
+    // doesn't render a 1-tick gap before the watcher publishes state.
+    if (presetBaseline !== null) {
+      setStatus({ phase: 'submitted', signature, startedAt, baselineBalance: presetBaseline })
+    }
 
     const stop = () => {
       cancelled = true
@@ -111,7 +143,7 @@ export function useFlowStatus(input: FlowWatchInput): FlowStatus | null {
       }
       const elapsed = Date.now() - startedAt
       setStatus({
-        phase: elapsed > EXPIRE_MS ? 'expired' : 'bridging',
+        phase: elapsed > expireMs ? 'expired' : 'bridging',
         signature,
         startedAt,
         baselineBalance: baseline,
@@ -123,7 +155,7 @@ export function useFlowStatus(input: FlowWatchInput): FlowStatus | null {
       intervalId = setInterval(tick, POLL_MS)
     }
     return stop
-  }, [input.signature, ownerKey, input.kind, input.startedAt, visible, fogoRpcUrl])
+  }, [input.signature, ownerKey, input.kind, input.startedAt, input.baselineBalance, visible, fogoRpcUrl])
 
   return status
 }
