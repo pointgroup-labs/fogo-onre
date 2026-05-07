@@ -1,0 +1,13 @@
+[[domains]]
+domain = "https://fogo-onre.xyz"
+enable_session_management = true
+enable_preflight_simulation = true
+
+# Bridge tx variations live on Fogo Labs' generic `sessions` paymaster
+# domain (sponsor `47aX6R…`), under the `Intent NTT Bridge` variation.
+# The webapp routes the bridge tx there via per-call paymasterDomain +
+# variation overrides (see FOGO_BRIDGE_PAYMASTER_DOMAIN /
+# FOGO_BRIDGE_VARIATION in `packages/webapp/src/constants.ts`), so this
+# domain only needs the bare session-management entry above. Previous
+# `OnReDeposit` and `OnReDepositWrap` blocks were removed when the fee
+# token flipped from wFOGO to USDC.s and the wrap pre-tx was retired.
