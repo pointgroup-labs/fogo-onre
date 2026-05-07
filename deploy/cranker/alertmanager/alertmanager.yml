@@ -1,0 +1,43 @@
+global:
+  resolve_timeout: 5m
+
+route:
+  group_by: [alertname]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  receiver: default
+  routes:
+    - matchers:
+        - severity = page
+      receiver: pager
+    - matchers:
+        - severity = warn
+      receiver: warn
+
+receivers:
+  - name: default
+    # Replace with a real webhook (Slack/Discord) or remove and let
+    # alerts route to `pager` / `warn` only.
+    webhook_configs:
+      - url: http://example.invalid/webhook
+
+  - name: pager
+    # Replace with PagerDuty integration_key or equivalent.
+    webhook_configs:
+      - url: http://example.invalid/pager
+        send_resolved: true
+
+  - name: warn
+    webhook_configs:
+      - url: http://example.invalid/warn
+        send_resolved: true
+
+inhibit_rules:
+  # If the cranker is down, suppress secondary alerts that would
+  # cascade from the same root cause.
+  - source_matchers:
+      - alertname = CrankerDown
+    target_matchers:
+      - severity =~ page|warn
+    equal: [job]

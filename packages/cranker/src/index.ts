@@ -8,6 +8,9 @@ import { runDaemon } from './daemon'
 import { createMetrics } from './metrics'
 import { scanAndAdvance } from './scan'
 
+export * from './vaa'
+export * from './wormholescan'
+
 /**
  * Throws if the cranker pubkey equals RelayerConfig.authority.
  *

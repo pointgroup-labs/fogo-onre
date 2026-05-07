@@ -1,0 +1,103 @@
+# Cranker production stack.
+# - cranker:      the daemon
+# - watchtower:   auto-pull & restart on new :latest image
+# - prometheus:   metrics scrape + alert evaluation
+# - alertmanager: paging
+# - grafana:      visualization
+#
+# All host-bound ports are 127.0.0.1 only. Public access goes through
+# SSH tunnel; there is no reverse proxy in this stack.
+
+name: fogo-cranker
+
+services:
+  cranker:
+    image: ghcr.io/fogo-onre/cranker:latest
+    container_name: cranker
+    restart: unless-stopped
+    env_file:
+      - ./cranker.env
+    volumes:
+      - ./secrets/cranker-keypair.json:/secrets/cranker-keypair.json:ro
+    ports:
+      - "127.0.0.1:9090:9090"
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+    networks:
+      - cranker-net
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  watchtower:
+    image: containrrr/watchtower:1.7.1
+    container_name: watchtower
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ${HOME}/.docker/config.json:/config.json:ro
+    command:
+      - --label-enable
+      - --interval
+      - "60"
+      - --cleanup
+      - --rolling-restart
+    networks:
+      - cranker-net
+
+  prometheus:
+    image: prom/prometheus:v2.55.0
+    container_name: prometheus
+    restart: unless-stopped
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/rules.yml:/etc/prometheus/rules.yml:ro
+      - prom-data:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=30d
+      - --web.enable-lifecycle
+    ports:
+      - "127.0.0.1:9091:9090"
+    networks:
+      - cranker-net
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: alertmanager
+    restart: unless-stopped
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager-data:/alertmanager
+    ports:
+      - "127.0.0.1:9093:9093"
+    networks:
+      - cranker-net
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    container_name: grafana
+    restart: unless-stopped
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-changeme}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_AUTH_ANONYMOUS_ENABLED=false
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "127.0.0.1:3000:3000"
+    networks:
+      - cranker-net
+
+networks:
+  cranker-net:
+    driver: bridge
+
+volumes:
+  prom-data:
+  alertmanager-data:
+  grafana-data:

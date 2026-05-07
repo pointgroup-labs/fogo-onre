@@ -12,6 +12,14 @@
     "./advance": {
       "types": "./dist/advance/index.d.ts",
       "import": "./dist/advance/index.js"
+    },
+    "./vaa": {
+      "types": "./dist/vaa.d.ts",
+      "import": "./dist/vaa.js"
+    },
+    "./wormholescan": {
+      "types": "./dist/wormholescan.d.ts",
+      "import": "./dist/wormholescan.js"
     }
   },
   "main": "dist/index.js",

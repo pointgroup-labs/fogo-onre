@@ -72,6 +72,9 @@ importers:
       '@anchor-lang/core':
         specifier: ^1.0.0
         version: 1.0.2(bufferutil@4.1.0)(typescript@6.0.3)(utf-8-validate@5.0.10)
+      '@fogo-onre/cranker':
+        specifier: workspace:*
+        version: link:../cranker
       '@fogo-onre/sdk':
         specifier: workspace:*
         version: link:../sdk
