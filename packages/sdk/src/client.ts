@@ -1,7 +1,6 @@
 import type { Provider } from '@anchor-lang/core'
 import type { PublicKey } from '@solana/web3.js'
-import type { NttRedeemContext } from './builders/ntt'
-import type { OnreSwapContext } from './builders/onre'
+import type { NttRedeemContext, OnreSwapContext } from './builders'
 import type { FogoOnreRelayer } from './types/fogo_onre_relayer'
 import { BN, Program } from '@anchor-lang/core'
 
@@ -19,13 +18,11 @@ import {
   buildNttRedeemReleaseAccounts,
   buildNttReleaseWormholeOutboundAccountList,
   buildNttTransferLockAccountList,
-  NTT_TRANSFER_LOCK_ACCOUNT_COUNT,
-} from './builders/ntt'
-import {
   buildOnreCancelRedemptionRequestRemainingAccounts,
   buildOnreCreateRedemptionRequestRemainingAccounts,
   buildOnreSwapRemainingAccounts,
-} from './builders/onre'
+  NTT_TRANSFER_LOCK_ACCOUNT_COUNT,
+} from './builders'
 import {
   findAuthorityPda,
   findConfigPda,
