@@ -28,14 +28,14 @@ export function safeQuoteDeposit(params: {
 }
 
 export function safeQuoteWithdraw(params: {
-  inputBonyc: bigint
+  inputFogoOnyc: bigint
   withdrawFeeBps: number
   price: OnycPriceSnapshot
   onycPrice: bigint
 }): WithdrawQuote | null {
   try {
     return quoteWithdraw({
-      inputBonyc: params.inputBonyc,
+      inputFogoOnyc: params.inputFogoOnyc,
       withdrawFeeBps: params.withdrawFeeBps,
       onycPrice: params.onycPrice,
       priceScale: params.price.priceScale,

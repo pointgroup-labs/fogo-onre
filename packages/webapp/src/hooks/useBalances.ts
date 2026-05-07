@@ -5,13 +5,13 @@ import { isEstablished } from '@fogo/sessions-sdk-react'
 import { getAssociatedTokenAddressSync } from '@solana/spl-token'
 import { Connection, PublicKey } from '@solana/web3.js'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { BONYC_MINT, USDC_S_MINT } from '@/constants'
+import { FOGO_ONYC_MINT, USDC_S_MINT } from '@/constants'
 import { useDocumentVisible } from '@/hooks/useDocumentVisible'
 import { useSettings } from '@/store/settings'
 import { getFogoConnection } from '@/utils/connections'
 
 /**
- * Polled balance snapshot for the user's USDC.s and bONyc on FOGO.
+ * Polled balance snapshot for the user's USDC.s and ONyc on FOGO.
  *
  * Fields are `null` until the first fetch resolves; absent ATAs (user
  * has never received the token) report `0n`, not `null` — that maps to
@@ -19,7 +19,7 @@ import { getFogoConnection } from '@/utils/connections'
  */
 export interface BalanceSnapshot {
   usdc: bigint | null
-  bonyc: bigint | null
+  fogoOnyc: bigint | null
 }
 
 const REFRESH_MS = 15_000
@@ -46,7 +46,7 @@ export interface UseBalancesResult {
 export function useBalances(sessionState: SessionState): UseBalancesResult {
   const owner = isEstablished(sessionState) ? sessionState.walletPublicKey : null
   const ownerKey = owner?.toBase58() ?? null
-  const [snapshot, setSnapshot] = useState<BalanceSnapshot>({ usdc: null, bonyc: null })
+  const [snapshot, setSnapshot] = useState<BalanceSnapshot>({ usdc: null, fogoOnyc: null })
   const visible = useDocumentVisible()
   // Subscribe to the resolved RPC URL so a settings change re-runs the
   // effect against the new endpoint immediately.
@@ -61,7 +61,7 @@ export function useBalances(sessionState: SessionState): UseBalancesResult {
 
   useEffect(() => {
     if (ownerKey === null) {
-      setSnapshot({ usdc: null, bonyc: null })
+      setSnapshot({ usdc: null, fogoOnyc: null })
       refetchRef.current = null
       return
     }
@@ -70,15 +70,15 @@ export function useBalances(sessionState: SessionState): UseBalancesResult {
     const ownerPk = new PublicKey(ownerKey)
     const connection = getFogoConnection(fogoRpcUrl)
     const usdcAta = getAssociatedTokenAddressSync(USDC_S_MINT, ownerPk)
-    const bonycAta = getAssociatedTokenAddressSync(BONYC_MINT, ownerPk)
+    const fogoOnycAta = getAssociatedTokenAddressSync(FOGO_ONYC_MINT, ownerPk)
 
     const refetch = async () => {
-      const [usdc, bonyc] = await Promise.all([
+      const [usdc, fogoOnyc] = await Promise.all([
         fetchTokenBalance(connection, usdcAta),
-        fetchTokenBalance(connection, bonycAta),
+        fetchTokenBalance(connection, fogoOnycAta),
       ])
       if (!cancelled) {
-        setSnapshot({ usdc, bonyc })
+        setSnapshot({ usdc, fogoOnyc })
       }
     }
     refetchRef.current = refetch

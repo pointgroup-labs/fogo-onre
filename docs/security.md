@@ -73,7 +73,7 @@ inherited from Wormhole.
 Trusted to honestly attest source-chain events. Compromise of ≥13 guardian
 keys would let an attacker forge a `claim_usdc` VAA and direct minted USDC
 
-- associated bONyc to an attacker-controlled FOGO address. Outside the
+- associated ONyc to an attacker-controlled FOGO address. Outside the
   relayer's control; mitigated by Wormhole's own operational security.
 
 ### Wormhole Token Bridge / Gateway program
@@ -355,7 +355,7 @@ runtime check.
 
 - **The FOGO-side OnRe vault program.** Its security model is documented
   separately. The relayer assumes the vault correctly accounts for
-  reserve + bONyc backing and computes NAV defensively.
+  reserve + ONyc backing and computes NAV defensively.
 - **The bridge programs themselves.** Wormhole Gateway, NTT, and OnRe
   are external dependencies; the relayer trusts their published
   semantics.

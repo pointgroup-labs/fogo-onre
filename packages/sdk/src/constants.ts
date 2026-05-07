@@ -40,7 +40,7 @@ export const INTENT_TRANSFER_SETTER_SEED = Buffer.from('intent_transfer')
 
 export const USDC_DECIMALS = 6
 export const ONYC_DECIMALS = 9
-export const BONYC_DECIMALS = ONYC_DECIMALS
+export const FOGO_ONYC_DECIMALS = ONYC_DECIMALS
 
 /** Denominator used by `applyFeeBps`. Matches the relayer's `10_000`. */
 export const FEE_DENOMINATOR_BPS = 10_000n

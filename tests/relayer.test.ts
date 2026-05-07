@@ -679,7 +679,7 @@ describe('relayer', () => {
       // is skipped. Without an explicit re-derivation in the handler,
       // the sender check passes (borrowed real VTM), the recipient
       // check passes (attacker InboxItem really does target their PDA),
-      // and the sweep happens — minting bONyc on FOGO without paying
+      // and the sweep happens — minting ONyc on FOGO without paying
       // intent_transfer fees.
       //
       // The fix re-derives the InboxItem PDA from the supplied VTM and

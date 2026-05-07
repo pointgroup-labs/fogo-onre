@@ -18,7 +18,7 @@ discount in exchange.
 
 The withdraw chain has three latency contributors:
 
-1. **NTT attestation** (bONyc → ONyc on Solana) — guardian quorum,
+1. **NTT attestation** (ONyc → ONyc on Solana) — guardian quorum,
    ~minutes, _unavoidable_
 2. **OnRe redemption fulfillment** (ONyc → USDC) — async, gated on
    `redemption_admin`, hours to days, **this is the only piece a DEX

@@ -122,19 +122,19 @@ export interface DepositQuote {
   grossOnyc: bigint
   /** ONyc skimmed to `fee_vault` (decimals = ONYC_DECIMALS). */
   feeOnyc: bigint
-  /** Net ONyc the user receives — bridged 1:1 as bONyc on FOGO. */
-  outputBonyc: bigint
+  /** Net ONyc the user receives — bridged 1:1 as ONyc on FOGO. */
+  outputFogoOnyc: bigint
 }
 
 /**
- * Quote a deposit (USDC.s on FOGO → bONyc on FOGO).
+ * Quote a deposit (USDC.s on FOGO → ONyc on FOGO).
  *
  * Steps mirror the on-chain deposit chain:
  *   1. relayer swaps `inputUsdc` to ONyc at OnRe at the current price
  *      → `grossOnyc = inputUsdc * priceScale / onycPrice`
  *   2. `apply_deposit_fee` skims `feeOnyc` to `fee_vault`
- *      → `(outputBonyc, feeOnyc) = applyFeeBps(grossOnyc, depositFeeBps)`
- *   3. NTT locks `outputBonyc` ONyc and mints bONyc 1:1 to the user.
+ *      → `(outputFogoOnyc, feeOnyc) = applyFeeBps(grossOnyc, depositFeeBps)`
+ *   3. NTT locks `outputFogoOnyc` ONyc and mints ONyc 1:1 to the user.
  */
 export function quoteDeposit(params: {
   inputUsdc: bigint
@@ -148,12 +148,12 @@ export function quoteDeposit(params: {
   }
   const grossOnyc = (inputUsdc * priceScale) / onycPrice
   const { net, fee } = applyFeeBps(grossOnyc, depositFeeBps)
-  return { inputUsdc, grossOnyc, feeOnyc: fee, outputBonyc: net }
+  return { inputUsdc, grossOnyc, feeOnyc: fee, outputFogoOnyc: net }
 }
 
 export interface WithdrawQuote {
-  /** bONyc the user supplies. NTT-burns 1:1 into ONyc on Solana. */
-  inputBonyc: bigint
+  /** ONyc the user supplies. NTT-burns 1:1 into ONyc on Solana. */
+  inputFogoOnyc: bigint
   /** ONyc skimmed to `fee_vault`. */
   feeOnyc: bigint
   /** Net ONyc forwarded to OnRe for redemption. */
@@ -163,10 +163,10 @@ export interface WithdrawQuote {
 }
 
 /**
- * Quote a withdraw (bONyc on FOGO → USDC.s on FOGO).
+ * Quote a withdraw (ONyc on FOGO → USDC.s on FOGO).
  *
  * Steps mirror the on-chain withdraw chain:
- *   1. NTT burns `inputBonyc` bONyc on FOGO; releases `inputBonyc` ONyc to the relayer.
+ *   1. NTT burns `inputFogoOnyc` ONyc on FOGO; releases `inputFogoOnyc` ONyc to the relayer.
  *   2. `apply_withdraw_fee` skims `feeOnyc` to `fee_vault`.
  *   3. relayer requests redemption of `netOnyc` from OnRe.
  *      → `outputUsdc = netOnyc * onycPrice / priceScale`
@@ -177,16 +177,16 @@ export interface WithdrawQuote {
  * the snapshot price the caller passes in. Display it as approximate.
  */
 export function quoteWithdraw(params: {
-  inputBonyc: bigint
+  inputFogoOnyc: bigint
   withdrawFeeBps: number
   onycPrice: bigint
   priceScale: bigint
 }): WithdrawQuote {
-  const { inputBonyc, withdrawFeeBps, onycPrice, priceScale } = params
+  const { inputFogoOnyc, withdrawFeeBps, onycPrice, priceScale } = params
   if (onycPrice <= 0n) {
     throw new RangeError('onycPrice must be > 0')
   }
-  const { net, fee } = applyFeeBps(inputBonyc, withdrawFeeBps)
+  const { net, fee } = applyFeeBps(inputFogoOnyc, withdrawFeeBps)
   const outputUsdc = (net * onycPrice) / priceScale
-  return { inputBonyc, feeOnyc: fee, netOnyc: net, outputUsdc }
+  return { inputFogoOnyc, feeOnyc: fee, netOnyc: net, outputUsdc }
 }

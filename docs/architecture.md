@@ -24,7 +24,7 @@
 > the FOGO-side capital flow as Wormhole Gateway-based; that
 > reflects the original design. The deployed relayer (Solana side)
 > uses **Wormhole NTT for both legs** — USDC.s ↔ USDC and ONyc ↔
-> bONyc. `constants.rs` pins only `ONRE_PROGRAM_ID` and
+> ONyc. `constants.rs` pins only `ONRE_PROGRAM_ID` and
 > `NTT_PROGRAM_ID`; no Wormhole Core/Gateway IDs remain. The
 > "Solana Relayer Program — Instruction Set" section below is
 > accurate; the FOGO-vault flow descriptions earlier in this doc
@@ -42,21 +42,21 @@ Users receive a share token (wONyc) representing their proportional claim on the
 | USDC.s | FOGO   | Stablecoin (Wormhole-bridged USDC)                | Users, vault reserve PDA             |
 | USDC   | Solana | Native USDC                                       | Relayer PDA (in-transit only)        |
 | ONyc   | Solana | OnRe yield-bearing reinsurance token              | Relayer PDA (in-transit), NTT locker |
-| bONyc  | FOGO   | NTT-bridged ONyc (1:1 with locked ONyc on Solana) | Vault backing PDA                    |
+| ONyc  | FOGO   | NTT-bridged ONyc (1:1 with locked ONyc on Solana) | Vault backing PDA                    |
 | wONyc  | FOGO   | Vault share token — user's receipt                | Users                                |
 
-wONyc (share token) and bONyc (bridged ONyc backing) are separate mints. The vault holds bONyc as backing and mints/burns wONyc for users. wONyc price appreciates as the underlying bONyc value grows.
+wONyc (share token) and ONyc (bridged ONyc backing) are separate mints. The vault holds ONyc as backing and mints/burns wONyc for users. wONyc price appreciates as the underlying ONyc value grows.
 
 ### System Components
 
 Two custom programs:
 
-- **OnRe Vault Program** (FOGO) — user-facing vault that holds USDC.s reserve and bONyc backing, mints/burns wONyc share tokens
-- **Relayer Program** (Solana) — upgradeable-by-default Anchor program with PDA custody that relays tokens between Wormhole NTT (both USDC.s ↔ USDC and ONyc ↔ bONyc) and OnRe
+- **OnRe Vault Program** (FOGO) — user-facing vault that holds USDC.s reserve and ONyc backing, mints/burns wONyc share tokens
+- **Relayer Program** (Solana) — upgradeable-by-default Anchor program with PDA custody that relays tokens between Wormhole NTT (both USDC.s ↔ USDC and ONyc ↔ ONyc) and OnRe
 
 Two existing Wormhole products:
 
-- **Wormhole NTT** — bridges USDC.s ↔ USDC and ONyc ↔ bONyc between FOGO and Solana
+- **Wormhole NTT** — bridges USDC.s ↔ USDC and ONyc ↔ ONyc between FOGO and Solana
 - **Wormhole Queries** — guardian-attested reads of OnRe price vector parameters (rare, only when APR changes)
 
 ## Architecture
@@ -69,13 +69,13 @@ FOGO                                    Solana
 |                          |           |  (immutable, no admin) |
 |  PDA accounts:           | Gateway   |                        |
 |  +- USDC.s reserve       |<==(USDC)==>  PDA accounts:         |
-|  +- bONyc backing        |           |  +- USDC ATA           |
+|  +- ONyc backing        |           |  +- USDC ATA           |
 |                          | NTT       |  +- ONyc ATA           |
 |  Share token: wONyc      |<==(ONyc)=>|                        |
 |                          |           |  CPI into:             |
 |  NAV (on-chain):         | Queries   |  +- OnRe (both dirs)   |
 |  = reserve_usdc +        |<==(rare)==|  +- Wormhole Gateway    |
-|    bonyc_bal * price     |           |  +- Wormhole NTT       |
+|    fogoOnyc_bal * price     |           |  +- Wormhole NTT       |
 |                          |           |                        |
 |  Governance: multisig    |           |  Hardcoded destinations:|
 |  (fees, pause, params)   |           |  +- OnRe program ID    |
@@ -92,9 +92,9 @@ FOGO                                    Solana
 
 | Component           | Chain           | Role                                                                                                                                                                                                                                                          |
 | ------------------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| OnRe Vault Program  | FOGO            | User-facing vault: deposit/withdraw USDC.s, mint/burn wONyc, hold reserve + bONyc backing                                                                                                                                                                     |
+| OnRe Vault Program  | FOGO            | User-facing vault: deposit/withdraw USDC.s, mint/burn wONyc, hold reserve + ONyc backing                                                                                                                                                                     |
 | Relayer Program     | Solana          | CPI relayer: NTT (USDC + ONyc) → OnRe → NTT. PDA custody, hardcoded destinations, upgradeable until `set-upgrade-authority --final`                                                                                                                           |
-| Wormhole NTT        | FOGO <-> Solana | Bridges both USDC.s ↔ USDC (wrap mode) and ONyc ↔ bONyc (Solana-locking / FOGO-burning)                                                                                                                                                                       |
+| Wormhole NTT        | FOGO <-> Solana | Bridges both USDC.s ↔ USDC (wrap mode) and ONyc ↔ ONyc (Solana-locking / FOGO-burning)                                                                                                                                                                       |
 | Wormhole Queries    | Solana -> FOGO  | Guardian-attested reads of OnRe price vector parameters                                                                                                                                                                                                       |
 | OnRe Program        | Solana          | Yield source. USDC → ONyc via permissionless `take_offer_permissionless`. Reverse direction is asymmetric: a separate `RedemptionOffer` with `create_redemption_request` → admin-fulfilled `fulfill_redemption_request` (gated by OnRe's `redemption_admin`). |
 | Curator             | Off-chain       | Authorized caller that triggers deploy/withdraw operations. Never holds tokens.                                                                                                                                                                               |
@@ -118,7 +118,7 @@ FOGO                                    Solana
 ```
 price_per_share = total_vault_value / total_shares_outstanding
 shares_minted = deposit_amount / price_per_share
-total_vault_value = usdc_reserve + (bonyc_balance * onyc_price)
+total_vault_value = usdc_reserve + (fogoOnyc_balance * onyc_price)
 ```
 
 On first deposit (`total_shares_outstanding = 0`),
@@ -126,7 +126,7 @@ On first deposit (`total_shares_outstanding = 0`),
 `initialize` instruction mints a small amount of dead shares to a burn address.
 
 - `usdc_reserve`: read from vault's USDC.s token account (on FOGO)
-- `bonyc_balance`: read from vault's bONyc token account (on FOGO)
+- `fogoOnyc_balance`: read from vault's ONyc token account (on FOGO)
 - `onyc_price`: computed deterministically from cached price vector:
   `price = base_price * (1 + apr * effective_time / 31_536_000)`
 
@@ -155,7 +155,7 @@ USDC.s owed is locked at the NAV at queue time. This is safe because ONyc price 
 
 Because OnRe's redemption side is async (no permissionless ONyc→USDC swap exists), the curator runs a multi-block, multi-tx pipeline. The relayer's withdraw chain is gated by a singleton `RedemptionTracker` PDA acting as a global mutex — at most one redemption is in-flight at a time, and deposit-side traffic is paused for the duration to keep balance-delta math correct.
 
-5. Curator initiates bONyc burn on FOGO via NTT (bONyc burned, guardian message sent)
+5. Curator initiates ONyc burn on FOGO via NTT (ONyc burned, guardian message sent)
 6. On Solana: relayer `unlock_onyc(VAA)` releases ONyc from NTT into the relayer PDA's ONyc ATA
 7. Relayer `request_redemption_onyc` opens an OnRe `RedemptionRequest` PDA, takes the withdraw-leg fee from the ONyc input, and initialises the `RedemptionTracker` (mutex now held)
 8. **Wait for OnRe.** OnRe's `redemption_admin` calls `fulfill_redemption_request` off-band (typically minutes to hours), depositing USDC into the relayer's USDC ATA and closing the `RedemptionRequest` PDA. If the admin is stuck/down, the authority can call `cancel_redemption_onyc` to abort and roll the flow back to `Claimed`.
@@ -178,8 +178,8 @@ When vault reserve exceeds the target (e.g., >30% of TVL), the curator deploys e
 - If all three CPIs don't fit in one tx (~50 accounts, <1.4M CU), split into separate txs — tokens sit safely in relayer PDA between txs
 
 5. Guardian attestation for NTT (~1-2 min)
-6. NTT mints bONyc directly to vault's bONyc PDA token account on FOGO (recipient specified in the NTT transfer)
-7. Vault NAV increases automatically (vault holds more bONyc)
+6. NTT mints ONyc directly to vault's ONyc PDA token account on FOGO (recipient specified in the NTT transfer)
+7. Vault NAV increases automatically (vault holds more ONyc)
 
 ## NAV and Price
 
@@ -188,11 +188,11 @@ When vault reserve exceeds the target (e.g., >30% of TVL), the curator deploys e
 The vault's NAV is fully verifiable on-chain on FOGO:
 
 ```
-NAV = usdc_reserve + (bonyc_balance * onyc_price)
+NAV = usdc_reserve + (fogoOnyc_balance * onyc_price)
 ```
 
 Both `usdc_reserve` and
-`bonyc_balance` are token account balances on FOGO — anyone can read them. No trusted reporting needed for balances.
+`fogoOnyc_balance` are token account balances on FOGO — anyone can read them. No trusted reporting needed for balances.
 
 ### ONyc Price Vector
 
@@ -233,7 +233,7 @@ No human or key ever holds user funds:
 | Location                     | Custodian           | Can steal?    |
 | ---------------------------- | ------------------- | ------------- |
 | USDC.s reserve (FOGO)        | Vault program PDA   | No            |
-| bONyc backing (FOGO)         | Vault program PDA   | No            |
+| ONyc backing (FOGO)         | Vault program PDA   | No            |
 | USDC in-transit (Solana)     | Relayer program PDA | No            |
 | ONyc in-transit (Solana)     | Relayer program PDA | No            |
 | ONyc locked for NTT (Solana) | NTT contract        | No            |
@@ -263,7 +263,7 @@ No instruction exists to send tokens to an arbitrary address. Outbound recipient
 ** If OnRe upgrades their program ID, or Wormhole upgrades the NTT manager, the relayer is bricked. Mitigation: deploy a new relayer and update any downstream reference (e.g. the eventual FOGO vault's `set_relayer` slot) via governance. The old relayer's PDA funds (if any in-transit) would need to be drained via the old program's existing instructions first.
 
 **Risk: relayer bug.
-** A bug could strand funds in the PDA. Mitigated by: thorough audit before immutable deployment, small blast radius (only in-transit amounts at risk, typically one batch worth), FOGO vault reserve + bONyc unaffected.
+** A bug could strand funds in the PDA. Mitigated by: thorough audit before immutable deployment, small blast radius (only in-transit amounts at risk, typically one batch worth), FOGO vault reserve + ONyc unaffected.
 
 ### Vault Program
 
@@ -282,13 +282,13 @@ Governance **cannot
 
 | Dependency                | If it fails                          | Impact                                                                                                                                                                                            |
 | ------------------------- | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Wormhole Guardians        | Compromised or offline               | If offline: reserve-only mode, no fund loss. If compromised: could forge NTT attestation to mint unbacked bONyc, inflating vault NAV. Systemic risk shared with all Wormhole-dependent protocols. |
+| Wormhole Guardians        | Compromised or offline               | If offline: reserve-only mode, no fund loss. If compromised: could forge NTT attestation to mint unbacked ONyc, inflating vault NAV. Systemic risk shared with all Wormhole-dependent protocols. |
 | Wormhole NTT (USDC.s leg) | Can't bridge USDC                    | New deposits and withdraw payouts pause. Existing in-flight flows can still close once attestations land. No fund loss.                                                                           |
-| Wormhole NTT              | Can't move ONyc cross-chain          | Can't deploy new capital or return ONyc. Reserve still works. Existing bONyc in vault is safe.                                                                                                    |
+| Wormhole NTT              | Can't move ONyc cross-chain          | Can't deploy new capital or return ONyc. Reserve still works. Existing ONyc in vault is safe.                                                                                                    |
 | OnRe protocol             | Yield stops, redemptions may fail    | Share price stops appreciating. Queued withdrawals delayed. **Investment risk — users bear ONyc devaluation.**                                                                                    |
 | OnRe redemption cap       | Vault needs to redeem more than cap  | OnRe enforces ~2.5% NAV/week redemption limit. Large queued withdrawals may take multiple weeks to fulfill. Reserve pool absorbs short-term demand.                                               |
 | OnRe offer liquidity      | Can't swap in one or both directions | Deploy delayed until liquidity returns; reserve covers instant withdrawals.                                                                                                                       |
-| Curator goes offline      | No deploys, no queue fulfillment     | Reserve accumulates. Existing bONyc appreciates. No fund loss. Degraded yield on new deposits.                                                                                                    |
+| Curator goes offline      | No deploys, no queue fulfillment     | Reserve accumulates. Existing ONyc appreciates. No fund loss. Degraded yield on new deposits.                                                                                                    |
 
 The system **degrades gracefully**. Each external failure reduces functionality but never causes fund loss.
 
@@ -298,7 +298,7 @@ The system **degrades gracefully**. Each external failure reduces functionality 
 
 | Instruction                                          | Accounts                                                                                         | Description                                                                                                                   |
 | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
-| `initialize(fees, reserve_target_bps, price_vector)` | authority, vault_pda, share_mint, reserve_ata, bonyc_ata, curator, system_program, token_program | Create vault state, initialize share mint (wONyc) with vault PDA as mint authority, create reserve and backing token accounts |
+| `initialize(fees, reserve_target_bps, price_vector)` | authority, vault_pda, share_mint, reserve_ata, fogoOnyc_ata, curator, system_program, token_program | Create vault state, initialize share mint (wONyc) with vault PDA as mint authority, create reserve and backing token accounts |
 
 ### User Instructions
 
@@ -313,9 +313,9 @@ The system **degrades gracefully**. Each external failure reduces functionality 
 | Instruction                    | Accounts                                             | Description                                                                                                                                                                                                       |
 | ------------------------------ | ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `deploy_capital(amount: u64)`  | curator, vault, reserve_ata, gateway_accounts        | CPI into Wormhole Gateway FOGO-side contract. Sends USDC.s from reserve, recipient = relayer PDA on Solana. Only callable when reserve > target. Enforces minimum batch size to ensure economic bridge crossings. |
-| `receive_backing()`            | curator, vault, bonyc_ata                            | No-op if bONyc balance hasn't changed. Otherwise captures the new bONyc balance into vault accounting and triggers performance fee capture if `price_per_share` increased.                                        |
+| `receive_backing()`            | curator, vault, fogoOnyc_ata                            | No-op if ONyc balance hasn't changed. Otherwise captures the new ONyc balance into vault accounting and triggers performance fee capture if `price_per_share` increased.                                        |
 | `fulfill_withdrawals()`        | curator, vault, reserve_ata, withdrawal_request_pdas | Pay queued withdrawal requests from reserve. Processes FIFO.                                                                                                                                                      |
-| `initiate_return(amount: u64)` | curator, vault, bonyc_ata, ntt_accounts              | Burns bONyc via NTT to unlock ONyc on Solana (sent to relayer PDA). Used to replenish reserve.                                                                                                                    |
+| `initiate_return(amount: u64)` | curator, vault, fogoOnyc_ata, ntt_accounts              | Burns ONyc via NTT to unlock ONyc on Solana (sent to relayer PDA). Used to replenish reserve.                                                                                                                    |
 
 ### Governance Instructions
 
@@ -339,7 +339,7 @@ curator: Pubkey             // authorized curator
 relayer: Pubkey             // Solana relayer program address (updatable for upgrades)
 share_mint: Pubkey          // wONyc token mint
 reserve_ata: Pubkey         // USDC.s reserve token account
-bonyc_ata: Pubkey           // bONyc backing token account
+fogoOnyc_ata: Pubkey           // ONyc backing token account
 total_shares: u64           // outstanding wONyc supply
 deposit_fee: Fee            // basis points
 withdrawal_fee: Fee         // basis points
@@ -371,7 +371,7 @@ created_at: i64             // timestamp
 
 ## Solana Relayer Program — Instruction Set
 
-The relayer's 11 instructions implement two flows: a synchronous deposit chain (FOGO USDC.s → ONyc on Solana → bONyc on FOGO) and an asynchronous withdraw chain (bONyc on FOGO → OnRe redemption → USDC back on FOGO). State is held in `Flow` PDAs (one per in-flight bridge crossing) and a singleton `RedemptionTracker` PDA that acts as the withdraw-chain mutex.
+The relayer's 11 instructions implement two flows: a synchronous deposit chain (FOGO USDC.s → ONyc on Solana → ONyc on FOGO) and an asynchronous withdraw chain (ONyc on FOGO → OnRe redemption → USDC back on FOGO). State is held in `Flow` PDAs (one per in-flight bridge crossing) and a singleton `RedemptionTracker` PDA that acts as the withdraw-chain mutex.
 
 **Deposit chain (permissionless)**
 
@@ -379,7 +379,7 @@ The relayer's 11 instructions implement two flows: a synchronous deposit chain (
 | ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `claim_usdc`        | CPI Wormhole NTT `redeem` + `release_inbound_unlock` to receive USDC from FOGO into the relayer's USDC ATA. Creates the inbound `Flow` receipt bound to the originating FOGO sender (parsed from the NTT `ValidatedTransceiverMessage`). |
 | `swap_usdc_to_onyc` | CPI OnRe `take_offer_permissionless` (USDC → ONyc), then take the deposit-leg fee from the ONyc output and route to `fee_vault`.                                                                                                         |
-| `lock_onyc`         | CPI Wormhole NTT `transfer_lock` (ONyc locked on Solana, bONyc minted to the originating FOGO wallet). Closes the inbound `Flow`.                                                                                                        |
+| `lock_onyc`         | CPI Wormhole NTT `transfer_lock` (ONyc locked on Solana, ONyc minted to the originating FOGO wallet). Closes the inbound `Flow`.                                                                                                        |
 
 **Withdraw chain (permissionless except `cancel_redemption_onyc`)**
 
@@ -405,7 +405,7 @@ No instruction can send tokens to an arbitrary address. All CPI destinations (On
 
 | # | Assumption                                                     | Validation                                                            | Blocks                                                                                                                                                                      |
 | - | -------------------------------------------------------------- | --------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1 | OnRe will coordinate on NTT deployment for ONyc                | Confirm with OnRe. Required for bONyc on FOGO.                        | Entire design                                                                                                                                                               |
+| 1 | OnRe will coordinate on NTT deployment for ONyc                | Confirm with OnRe. Required for ONyc on FOGO.                        | Entire design                                                                                                                                                               |
 | 2 | OnRe has a permissionless ONyc->USDC offer (reverse direction) | Query offer PDA for the ONyc/USDC pair. Confirm with OnRe.            | Withdrawal flow — **resolved via redesign**: no symmetric `Offer` exists; relayer drives `request_redemption_onyc` → wait for `redemption_admin` → `claim_redemption_usdc`. |
 | 3 | OnRe's permissionless offers work with PDA callers (no KYC)    | Test with PDA signer via CPI on devnet. Confirm with OnRe.            | Relayer program — deposit-side `take_offer_permissionless` exercised by `tests/deposit-flow-e2e.test.ts`; withdraw-side replaced by request/fulfill flow per #2.            |
 | 4 | Gateway + OnRe + NTT CPIs fit in one Solana tx                 | Prototype on devnet. Measure accounts and CU.                         | Relayer instruction design (atomic vs split) — current design splits each leg into its own ix, with `Flow` PDAs as the inter-leg state.                                     |
@@ -460,7 +460,7 @@ We evaluated five architectures before arriving at the current design. The table
 | **Custom programs**                 | 0                                              | 1 (relayer on Solana)                | 1 (FOGO vault)                                                           | 2 (FOGO vault + Solana agent)           | **2 (FOGO vault + small relayer)**                                          |
 | **Custody risk**                    | None (user holds wONyc directly)               | High (relayer holds funds mid-flow)  | Medium (multisig signers can collude)                                    | None (PDA on both chains)               | **None (PDA + NTT locker)**                                                 |
 | **Stolen key impact**               | N/A                                            | Full fund loss                       | Full fund loss if signers collude                                        | Zero fund loss                          | **Zero fund loss**                                                          |
-| **NAV trust**                       | N/A (user holds token directly)                | Trusted relayer reports              | Trusted multisig reports; Queries mitigate but attest point-in-time only | Queries (guardian-attested, continuous) | **On-chain on FOGO (vault reads own bONyc balance)**                        |
+| **NAV trust**                       | N/A (user holds token directly)                | Trusted relayer reports              | Trusted multisig reports; Queries mitigate but attest point-in-time only | Queries (guardian-attested, continuous) | **On-chain on FOGO (vault reads own ONyc balance)**                        |
 | **Oracle dependency**               | None                                           | Continuous                           | Continuous (Queries or trusted report)                                   | Continuous (Queries for NAV)            | **Rare (price vector sync only, ~monthly)**                                 |
 | **Bridge products used**            | Gateway + NTT                                  | Gateway + NTT                        | Gateway only                                                             | Gateway only                            | **Gateway + NTT**                                                           |
 | **OnRe coordination needed**        | Yes (NTT for ONyc)                             | No (permissionless)                  | No (permissionless)                                                      | No (permissionless)                     | **Yes (NTT for ONyc)**                                                      |
@@ -484,10 +484,10 @@ We evaluated five architectures before arriving at the current design. The table
 ** Eliminates the Solana program, but the multisig holding ONyc is a custodial arrangement. Multisig signers can collude and steal. Operations require manual human approval, preventing automation. Wormhole Queries can attest balances, but only at a point in time — between attestations the multisig can move funds.
 
 **FOGO Vault + Solana Agent + Queries:
-** Close to the chosen design — PDA custody on both chains, zero-custody curator, automated operations. But without NTT, the vault can't hold the backing asset on FOGO. NAV depends on continuous Wormhole Queries attestations (guardian-attested Solana state), which is operationally heavier than holding bONyc directly and computing price from a rarely-changing vector. Also requires a more substantial Solana agent program that holds ONyc long-term.
+** Close to the chosen design — PDA custody on both chains, zero-custody curator, automated operations. But without NTT, the vault can't hold the backing asset on FOGO. NAV depends on continuous Wormhole Queries attestations (guardian-attested Solana state), which is operationally heavier than holding ONyc directly and computing price from a rarely-changing vector. Also requires a more substantial Solana agent program that holds ONyc long-term.
 
 **FOGO Vault + NTT + Relayer:
-** Combines the best properties: instant UX (FOGO vault with reserve), zero custody (PDA + NTT locker), on-chain verifiable NAV (vault holds bONyc directly), minimal oracle dependency (rare price vector sync), small Solana footprint (stateless immutable relayer), and full product control (fees, reserve, pause, strategy upgrades).
+** Combines the best properties: instant UX (FOGO vault with reserve), zero custody (PDA + NTT locker), on-chain verifiable NAV (vault holds ONyc directly), minimal oracle dependency (rare price vector sync), small Solana footprint (stateless immutable relayer), and full product control (fees, reserve, pause, strategy upgrades).
 
 ## Future: Curated Vault Standard for FOGO
 

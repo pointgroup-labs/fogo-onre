@@ -498,7 +498,7 @@ export type FogoOnreRelayer = {
       "name": "claimUsdc",
       "docs": [
         "Redeem bridged USDC.s from FOGO via NTT and create an inflight `Flow`",
-        "receipt binding the eventual bONyc return to the originator's FOGO",
+        "receipt binding the eventual ONyc return to the originator's FOGO",
         "wallet."
       ],
       "discriminator": [
@@ -1218,7 +1218,7 @@ export type FogoOnreRelayer = {
       "name": "lockOnyc",
       "docs": [
         "Lock ONyc via NTT and atomically publish the outbound Wormhole VAA,",
-        "sending bONyc to `flow.fogo_sender`. Closes the PDA.",
+        "sending ONyc to `flow.fogo_sender`. Closes the PDA.",
         "",
         "`transfer_lock_account_count` is the boundary index in",
         "`remaining_accounts` between the `transfer_lock` (14 entries) and",

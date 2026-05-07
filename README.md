@@ -1,15 +1,15 @@
 # Fogo OnRe
 
 A cross-chain yield bridge. Users deposit **USDC.s on FOGO** and receive
-**bONyc on FOGO** — a token that earns yield from
+**ONyc on FOGO** — a token that earns yield from
 [OnRe](https://github.com/onre-finance/onre-sol)'s tokenized reinsurance
-product (ONyc) on Solana. To withdraw, users send bONyc back and
+product (ONyc) on Solana. To withdraw, users send ONyc back and
 receive USDC.s.
 
 The on-chain bridge is a single immutable Solana program (the
 **relayer**) that holds no funds at rest and routes capital between
 [Wormhole NTT](https://wormhole.com/products/native-token-transfers)
-(both USDC.s ↔ USDC and ONyc ↔ bONyc) and
+(both USDC.s ↔ USDC and ONyc ↔ ONyc) and
 [OnRe](https://github.com/onre-finance/onre-sol) (USDC ↔ ONyc on
 Solana).
 
@@ -18,24 +18,24 @@ Solana).
 ```
               FOGO                              Solana
               ────                              ──────
-deposit:   USDC.s ──NTT──> USDC ──swap──> ONyc ──NTT──> bONyc
-withdraw:  bONyc  ──NTT──> ONyc ──redeem──> USDC ──NTT──> USDC.s
+deposit:   USDC.s ──NTT──> USDC ──swap──> ONyc ──NTT──> ONyc
+withdraw:  ONyc  ──NTT──> ONyc ──redeem──> USDC ──NTT──> USDC.s
 ```
 
 **Deposit** (one user transaction on FOGO; the rest is permissionless cranking):
 
 1. User NTT-sends USDC.s → relayer receives USDC on Solana
 2. Relayer swaps USDC → ONyc on OnRe
-3. Relayer NTT-locks ONyc → bONyc minted to user on FOGO
+3. Relayer NTT-locks ONyc → ONyc minted to user on FOGO
 
 **Withdraw** (one user transaction on FOGO; OnRe asynchronously fulfills):
 
-1. User NTT-sends bONyc → relayer receives ONyc on Solana
+1. User NTT-sends ONyc → relayer receives ONyc on Solana
 2. Relayer requests redemption from OnRe (`request_redemption_onyc`)
 3. OnRe's `redemption_admin` fulfills the request, paying out USDC
 4. Relayer claims the USDC and NTT-sends USDC.s back to the user
 
-Yield accrues automatically: bONyc represents a claim on ONyc, whose
+Yield accrues automatically: ONyc represents a claim on ONyc, whose
 on-chain price advances as OnRe's reinsurance positions earn.
 
 ## Trust model in one paragraph

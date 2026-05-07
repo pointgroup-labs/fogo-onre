@@ -3,7 +3,7 @@
 import { getAssociatedTokenAddressSync } from '@solana/spl-token'
 import { Connection, PublicKey } from '@solana/web3.js'
 import { useEffect, useState } from 'react'
-import { BONYC_MINT, USDC_S_MINT } from '@/constants'
+import { FOGO_ONYC_MINT, USDC_S_MINT } from '@/constants'
 import { useDocumentVisible } from '@/hooks/useDocumentVisible'
 import { useSettings } from '@/store/settings'
 import { getFogoConnection } from '@/utils/connections'
@@ -38,7 +38,7 @@ export interface FlowStatus {
 const POLL_MS = 10_000
 // Bridge round-trip timing differs by kind:
 //   - Deposit: NTT FOGO→Solana → relayer cranks → return-leg NTT Solana→FOGO
-//     bONyc mint. Typically minutes; 30 min is a generous expiry.
+//     ONyc mint. Typically minutes; 30 min is a generous expiry.
 //   - Withdraw: same NTT round-trip PLUS OnRe redemption fulfilment, which
 //     is permissioned/queued and can take many hours. A 30 min expiry would
 //     surface "expired" while the redemption is still legitimately pending,
@@ -101,8 +101,8 @@ export function useFlowStatus(input: FlowWatchInput): FlowStatus | null {
     let intervalId: ReturnType<typeof setInterval> | null = null
     const ownerPk = new PublicKey(ownerKey)
     const connection = getFogoConnection(fogoRpcUrl)
-    // Deposit: user receives bONyc on FOGO. Withdraw: user receives USDC.s.
-    const destinationMint = input.kind === 'deposit' ? BONYC_MINT : USDC_S_MINT
+    // Deposit: user receives ONyc on FOGO. Withdraw: user receives USDC.s.
+    const destinationMint = input.kind === 'deposit' ? FOGO_ONYC_MINT : USDC_S_MINT
     const destAta = getAssociatedTokenAddressSync(destinationMint, ownerPk)
     let baseline: bigint | null = presetBaseline
     let delivered = false

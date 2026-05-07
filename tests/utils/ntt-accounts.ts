@@ -6,7 +6,7 @@
  * `nttu74CdAmsErx5daJVCQNoDZujswFrskMzonoZSdGk`.
  *
  * For ONyc, this program runs in **Locking mode** on Solana (ONyc is
- * canonical here — issued by OnRe). The wrapped representation `bONyc`
+ * canonical here — issued by OnRe). The wrapped representation `ONyc`
  * lives on FOGO and runs in Burning mode there.
  *
  * Reference: https://github.com/wormhole-foundation/native-token-transfers

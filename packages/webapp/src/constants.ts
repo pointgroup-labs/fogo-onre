@@ -1,4 +1,4 @@
-import { BONYC_DECIMALS, USDC_DECIMALS } from '@fogo-onre/sdk'
+import { FOGO_ONYC_DECIMALS, USDC_DECIMALS } from '@fogo-onre/sdk'
 import { Network } from '@fogo/sessions-sdk-react'
 import { PublicKey } from '@solana/web3.js'
 
@@ -50,7 +50,7 @@ export const USDC_S_MINT = new PublicKey('uSd2czE61Evaf76RNbq4KPpXnkiL3irdzgLFUM
 export const SOLANA_USDC_MINT = new PublicKey('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v')
 
 // NTT-bridged ONyc on FOGO. The user receives this on deposit, burns it on withdraw.
-export const BONYC_MINT = new PublicKey('oNyCm1QsAatj3ckaEwZjtAPWvstPn3Zm5MAYPtkjEfa')
+export const FOGO_ONYC_MINT = new PublicKey('oNyCm1QsAatj3ckaEwZjtAPWvstPn3Zm5MAYPtkjEfa')
 
 // Per-call paymaster routing for the deposit bridge tx. We point the
 // bridge tx at Fogo Labs' generic `sessions` paymaster (sponsor
@@ -78,8 +78,8 @@ export const FOGO_BRIDGE_VARIATION = 'Intent NTT Bridge'
 // chain=Fogo). Identical address to the Solana-side USDC NTT manager —
 // same program deployed at the same key on both chains.
 export const FOGO_USDC_S_NTT_MANAGER_ID = new PublicKey('nttu74CdAmsErx5daJVCQNoDZujswFrskMzonoZSdGk')
-// bONyc: same program ID deployed on both Solana (locking) and FOGO (burning).
-export const FOGO_BONYC_NTT_MANAGER_ID = new PublicKey('nttpna5vXW7BN2Aa4AfTbkCncJWTEoBsnWvjS87Xgsd')
+// ONyc: same program ID deployed on both Solana (locking) and FOGO (burning).
+export const FOGO_ONYC_NTT_MANAGER_ID = new PublicKey('nttpna5vXW7BN2Aa4AfTbkCncJWTEoBsnWvjS87Xgsd')
 
 // Custom LUT deployed via `scripts/deploy-fogo-deposit-lut.mjs`. Strict
 // superset of the Sessions-SDK bridging LUT (`7hmMz3…`) plus the 7
@@ -101,9 +101,9 @@ export const FOGO_DEPOSIT_LUT_OVERRIDE: string | null
     ?? null
 
 // Token decimals are protocol invariants and live in the SDK.
-export { BONYC_DECIMALS, USDC_DECIMALS }
+export { FOGO_ONYC_DECIMALS, USDC_DECIMALS }
 
-// True iff the bONyc mint and FOGO-side bONyc NTT manager have both been
+// True iff the ONyc mint and FOGO-side ONyc NTT manager have both been
 // replaced with their real deployment addresses AND the
 // `NEXT_PUBLIC_WITHDRAW_ENABLED` env gate is not explicitly disabled.
 // Until both conditions hold, the withdraw flow surfaces an explicit
@@ -115,8 +115,8 @@ export { BONYC_DECIMALS, USDC_DECIMALS }
 // Default is enabled — set `NEXT_PUBLIC_WITHDRAW_ENABLED=false` to hide.
 const PLACEHOLDER_PUBKEY = '11111111111111111111111111111111'
 const ADDRESSES_REAL
-  = BONYC_MINT.toBase58() !== PLACEHOLDER_PUBKEY
-    && FOGO_BONYC_NTT_MANAGER_ID.toBase58() !== PLACEHOLDER_PUBKEY
+  = FOGO_ONYC_MINT.toBase58() !== PLACEHOLDER_PUBKEY
+    && FOGO_ONYC_NTT_MANAGER_ID.toBase58() !== PLACEHOLDER_PUBKEY
 const WITHDRAW_ENABLED_ENV = process.env.NEXT_PUBLIC_WITHDRAW_ENABLED
 const WITHDRAW_ENABLED = WITHDRAW_ENABLED_ENV !== 'false'
-export const BONYC_DEPLOYMENT_READY = ADDRESSES_REAL && WITHDRAW_ENABLED
+export const FOGO_ONYC_DEPLOYMENT_READY = ADDRESSES_REAL && WITHDRAW_ENABLED

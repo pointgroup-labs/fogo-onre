@@ -2,7 +2,7 @@
 
 import type { PendingTx } from '@/store/pending-txs'
 import { useEffect, useState } from 'react'
-import { BONYC_DECIMALS, USDC_DECIMALS } from '@/constants'
+import { FOGO_ONYC_DECIMALS, USDC_DECIMALS } from '@/constants'
 import { usePendingTxsStore } from '@/store/pending-txs'
 import { fogoTxUrl, shortSig, wormholeTxUrl } from '@/utils/explorers'
 import { formatAmount } from '@/utils/transfer'
@@ -47,9 +47,9 @@ function PendingTxRow({
   now: number
   onDismiss: (sig: string) => void
 }) {
-  // Deposit burns USDC.s (6 dp). Withdraw burns bONyc (9 dp).
-  const decimals = tx.kind === 'deposit' ? USDC_DECIMALS : BONYC_DECIMALS
-  const symbol = tx.kind === 'deposit' ? 'USDC.s' : 'bONyc'
+  // Deposit burns USDC.s (6 dp). Withdraw burns ONyc (9 dp).
+  const decimals = tx.kind === 'deposit' ? USDC_DECIMALS : FOGO_ONYC_DECIMALS
+  const symbol = tx.kind === 'deposit' ? 'USDC.s' : 'ONyc'
   const amount = (() => {
     try {
       return formatAmount(BigInt(tx.amount), decimals)

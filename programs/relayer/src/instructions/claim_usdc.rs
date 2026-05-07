@@ -32,7 +32,7 @@ const RELEASE_IDX_INBOX_ITEM: usize = 2;
 const RELEASE_IDX_RECIPIENT_ATA: usize = 3;
 
 /// Redeem inbound USDC.s from FOGO via NTT and create the inbound `Flow`
-/// receipt binding the eventual ONyc → bONyc return to the originating
+/// receipt binding the eventual ONyc → ONyc return to the originating
 /// FOGO wallet.
 ///
 /// Permissionless. Safety chain (cranker-controlled `user_wallet`):
@@ -58,7 +58,7 @@ const RELEASE_IDX_RECIPIENT_ATA: usize = 3;
 ///   same user — the next `claim_usdc` sees the delta from *its* VAA's
 ///   release, not full balance.
 /// - `flow.fogo_sender = user_wallet` so the return-leg `lock_onyc`
-///   bridges bONyc back to the originating wallet.
+///   bridges ONyc back to the originating wallet.
 ///
 /// `remaining_accounts` = redeem accounts ++ release accounts;
 /// `redeem_accounts_len` is the split point.

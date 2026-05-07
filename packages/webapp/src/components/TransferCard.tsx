@@ -5,7 +5,7 @@ import { isEstablished, useSession } from '@fogo/sessions-sdk-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import AmountInput from '@/components/AmountInput'
 import ReceiveField from '@/components/ReceiveField'
-import { BONYC_DECIMALS, BONYC_DEPLOYMENT_READY, USDC_DECIMALS } from '@/constants'
+import { FOGO_ONYC_DECIMALS, FOGO_ONYC_DEPLOYMENT_READY, USDC_DECIMALS } from '@/constants'
 import { useBalances } from '@/hooks/useBalances'
 import { useBridgeFee } from '@/hooks/useBridgeFee'
 import { useFlowStatus } from '@/hooks/useFlowStatus'
@@ -75,8 +75,8 @@ const KIND_UI: Record<TransferKind, KindUi> = {
   deposit: {
     inputSymbol: 'USDC.s',
     inputDecimals: USDC_DECIMALS,
-    outputSymbol: 'bONyc',
-    outputDecimals: BONYC_DECIMALS,
+    outputSymbol: 'ONyc',
+    outputDecimals: FOGO_ONYC_DECIMALS,
     submitLabel: 'Deposit',
     submittingLabel: 'Depositing…',
     insufficientLabel: 'Insufficient USDC.s',
@@ -84,19 +84,19 @@ const KIND_UI: Record<TransferKind, KindUi> = {
     unavailable: null,
   },
   withdraw: {
-    inputSymbol: 'bONyc',
-    inputDecimals: BONYC_DECIMALS,
+    inputSymbol: 'ONyc',
+    inputDecimals: FOGO_ONYC_DECIMALS,
     outputSymbol: 'USDC.s',
     outputDecimals: USDC_DECIMALS,
     submitLabel: 'Withdraw',
     submittingLabel: 'Withdrawing…',
-    insufficientLabel: 'Insufficient bONyc',
-    ready: BONYC_DEPLOYMENT_READY,
-    unavailable: BONYC_DEPLOYMENT_READY
+    insufficientLabel: 'Insufficient ONyc',
+    ready: FOGO_ONYC_DEPLOYMENT_READY,
+    unavailable: FOGO_ONYC_DEPLOYMENT_READY
       ? null
       : {
           title: 'Withdrawals coming soon',
-          description: 'The FOGO-side bONyc bridge isn\'t live yet. Deposits work today; you\'ll be able to redeem here once it ships.',
+          description: 'The FOGO-side ONyc bridge isn\'t live yet. Deposits work today; you\'ll be able to redeem here once it ships.',
         },
   },
 }
@@ -128,7 +128,7 @@ export default function TransferCard({ kind }: TransferCardProps) {
   const ui = KIND_UI[kind]
   const sessionEstablished = isEstablished(sessionState)
   const owner = sessionEstablished ? sessionState.walletPublicKey : null
-  const sourceBalance = kind === 'deposit' ? balances.usdc : balances.bonyc
+  const sourceBalance = kind === 'deposit' ? balances.usdc : balances.fogoOnyc
 
   // Pulled here (not just inside BridgeFeeRow) because the deposit
   // Submit gate has to refuse when the user can't cover the bridged
@@ -222,7 +222,7 @@ export default function TransferCard({ kind }: TransferCardProps) {
       upsertToast({
         id,
         kind: 'success',
-        title: kind === 'deposit' ? 'bONyc credited' : 'USDC.s credited',
+        title: kind === 'deposit' ? 'ONyc credited' : 'USDC.s credited',
         href: fogoTxUrl(flow.signature),
       })
     } else if (flow.phase === 'expired') {
@@ -408,7 +408,7 @@ function Receive({ kind, parsed, outputSymbol, outputDecimals, protocol }: Recei
     : null
   const withdrawQuote = haveAmount && protocol && kind === 'withdraw'
     ? safeQuoteWithdraw({
-        inputBonyc: parsed,
+        inputFogoOnyc: parsed,
         withdrawFeeBps: protocol.withdrawFeeBps,
         price: protocol.price,
         onycPrice: protocol.onycPrice,
@@ -416,7 +416,7 @@ function Receive({ kind, parsed, outputSymbol, outputDecimals, protocol }: Recei
     : null
 
   const outputAmount = kind === 'deposit'
-    ? depositQuote?.outputBonyc ?? null
+    ? depositQuote?.outputFogoOnyc ?? null
     : withdrawQuote?.outputUsdc ?? null
   const haveQuote = outputAmount !== null
 

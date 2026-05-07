@@ -8,7 +8,7 @@ import './polyfills'
 import type { ReactNode } from 'react'
 
 import { FogoSessionProvider } from '@fogo/sessions-sdk-react'
-import { APP_DOMAIN, BONYC_MINT, FOGO_NETWORK, USDC_S_MINT } from '@/constants'
+import { APP_DOMAIN, FOGO_ONYC_MINT, FOGO_NETWORK, USDC_S_MINT } from '@/constants'
 import { useSettings } from '@/store/settings'
 
 /* eslint-enable perfectionist/sort-imports */
@@ -25,7 +25,7 @@ export default function Providers({ children }: { children: ReactNode }) {
       network={FOGO_NETWORK}
       rpc={fogoRpcUrl}
       domain={APP_DOMAIN}
-      tokens={[USDC_S_MINT, BONYC_MINT]}
+      tokens={[USDC_S_MINT, FOGO_ONYC_MINT]}
       enableUnlimited
     >
       {children}

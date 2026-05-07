@@ -101,7 +101,7 @@ describe('quoteDeposit', () => {
     })
     expect(q.grossOnyc).toBe(ONE_ONYC)
     expect(q.feeOnyc).toBe(2_500_000n)
-    expect(q.outputBonyc).toBe(997_500_000n)
+    expect(q.outputFogoOnyc).toBe(997_500_000n)
   })
 
   it('handles non-unit ONyc price (1.10 USDC per ONyc)', () => {
@@ -113,7 +113,7 @@ describe('quoteDeposit', () => {
       priceScale: PRICE_SCALE,
     })
     expect(q.grossOnyc).toBe(909_090_909n)
-    expect(q.outputBonyc).toBe(909_090_909n)
+    expect(q.outputFogoOnyc).toBe(909_090_909n)
   })
 
   it('rejects zero price', () => {
@@ -129,7 +129,7 @@ describe('quoteDeposit', () => {
 describe('quoteWithdraw', () => {
   it('1 ONyc at unit price, 0 fee -> 1 USDC out', () => {
     const q = quoteWithdraw({
-      inputBonyc: ONE_ONYC,
+      inputFogoOnyc: ONE_ONYC,
       withdrawFeeBps: 0,
       onycPrice: UNIT_RATIO,
       priceScale: PRICE_SCALE,
@@ -142,7 +142,7 @@ describe('quoteWithdraw', () => {
     // fee = 2_500_000 ONyc base, net = 997_500_000
     // usdc = 997_500_000 * 1_100_000 / 1e9 = 1_097_250
     const q = quoteWithdraw({
-      inputBonyc: ONE_ONYC,
+      inputFogoOnyc: ONE_ONYC,
       withdrawFeeBps: 25,
       onycPrice: 1_100_000n,
       priceScale: PRICE_SCALE,

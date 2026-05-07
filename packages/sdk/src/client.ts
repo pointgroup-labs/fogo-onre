@@ -251,7 +251,7 @@ export class RelayerClient {
   /**
    * Lock ONyc via NTT and atomically publish the outbound Wormhole VAA
    * (transfer_lock + release_wormhole_outbound, both PDA-signed). Sends
-   * bONyc to `flow.fogo_sender`. Closes the inflight Flow PDA.
+   * ONyc to `flow.fogo_sender`. Closes the inflight Flow PDA.
    *
    * Caller MUST fetch the flow first to obtain `flowAmount` /
    * `flowFogoSender` (needed for the NTT `session_authority` derivation),

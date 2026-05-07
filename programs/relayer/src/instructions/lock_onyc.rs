@@ -14,7 +14,7 @@ use crate::ntt::{derive_session_authority, NttReleaseOutboundArgs, NttTransferAr
 use crate::state::{Flow, FlowStatus, RelayerConfig};
 
 /// Lock the flow's ONyc via Wormhole NTT and atomically publish the
-/// outbound Wormhole VAA, sending bONyc back to `flow.fogo_sender`.
+/// outbound Wormhole VAA, sending ONyc back to `flow.fogo_sender`.
 /// Permissionless; closing the PDA returns rent and blocks replay.
 ///
 /// `transfer_lock_account_count` partitions `remaining_accounts` between

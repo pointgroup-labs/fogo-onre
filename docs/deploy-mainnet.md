@@ -17,14 +17,14 @@ follow it end to end.
 | -------------------------------------------- | -------------------------- | ---------------------------------------- |
 | `relayer` Anchor program                     | Solana mainnet-beta        | ✅                                       |
 | Solana-side NTT manager (ONyc, locking mode) | Solana mainnet-beta        | ✅ — deployed via `ntt` CLI, see §7.1    |
-| FOGO-side NTT manager (bONyc, burning mode)  | FOGO chain                 | ✅ — deployed via `ntt` CLI, see §7.1    |
+| FOGO-side NTT manager (ONyc, burning mode)  | FOGO chain                 | ✅ — deployed via `ntt` CLI, see §7.1    |
 | Solana-side NTT manager (USDC.s, wrap mode)  | Solana mainnet-beta        | ❌ — already live, you only reference it |
 | FOGO-side NTT manager (USDC.s, native mode)  | FOGO chain                 | ❌ — already live, you only reference it |
 | `@fogo-onre/sdk` (TS client)                 | npm (or internal registry) | ✅                                       |
 | OnRe program                                 | Solana                     | ❌ — already live, you only reference it |
 
 There is **no FOGO-side smart contract written by us** beyond the NTT
-manager scaffold. Users hold bONyc directly on FOGO (it's the
+manager scaffold. Users hold ONyc directly on FOGO (it's the
 NTT-bridged representation of the ONyc held in NTT custody on Solana).
 All custom program logic lives in the Solana relayer.
 
@@ -45,7 +45,7 @@ Source: `Anchor.toml` `[programs.mainnet]` and
 
 The relayer does **not** CPI Wormhole Core or the legacy Token Bridge /
 Gateway. The two bridge legs use **distinct NTT manager programs**:
-USDC.s ↔ USDC routes through `nttu74…` (above), and ONyc ↔ bONyc routes
+USDC.s ↔ USDC routes through `nttu74…` (above), and ONyc ↔ ONyc routes
 through `nttpna5vXW7…`. The relayer pins each leg to the correct
 program at compile time via `NTT_USDC_PROGRAM_ID`
 (`programs/relayer/src/constants.rs:9`) and `NTT_ONYC_PROGRAM_ID`
@@ -139,14 +139,14 @@ Assuming FOGO uses Solana-identical rent parameters:
 | Bucket                                                   | FOGO           | Notes                                                |
 | -------------------------------------------------------- | -------------- | ---------------------------------------------------- |
 | FOGO-side NTT manager program rent (Burning mode)        | **4–6**        | Comparable to Solana NTT manager size                |
-| NTT init + bONyc mint creation                           | ~0.01          | NTT manager creates the bONyc mint and pays its rent |
+| NTT init + ONyc mint creation                           | ~0.01          | NTT manager creates the ONyc mint and pays its rent |
 | Peer registration + rate limit PDAs                      | ~0.005         | One-time                                             |
 | Per-inbound-message account rent (refundable, but float) | ~0.001 each    | NTT inbox items                                      |
 | Buffer for failed deploys                                | **2**          |                                                      |
 | **Recommended total**                                    | **10–14 FOGO** | (or ~1–3 FOGO if rent is subsidized)                 |
 
 The relayer itself does **not** run on FOGO — the entire FOGO budget
-is for the NTT manager + bONyc setup. End users need their own FOGO
+is for the NTT manager + ONyc setup. End users need their own FOGO
 for NTT-send gas, but that's a UX concern, not a deploy budget.
 
 ---
@@ -369,10 +369,10 @@ failures.
 | **USDC.s NTT manager (FOGO ↔ Solana USDC)** | The USDC.s NTT deployment must already be live and the relayer's expected peers / rate limits configured. `claim_usdc` and `send_usdc_to_user` CPI it directly.                 | USDC.s NTT manager admin (third party) |
 | **OnRe price-vector update authority**      | Documented per deploy-checklist.md §6. Governs ONyc price evolution, which is what generates user yield.                                                                        | OnRe operator                          |
 
-### 7.1. NTT setup for ONyc ↔ bONyc (one-time, before any deposit can land)
+### 7.1. NTT setup for ONyc ↔ ONyc (one-time, before any deposit can land)
 
 This is the most involved step. Skip nothing here — without NTT, the
-deposit chain stops at `lock_onyc` and bONyc never reaches the FOGO
+deposit chain stops at `lock_onyc` and ONyc never reaches the FOGO
 user, and the withdraw chain stops at `unlock_onyc` because there is
 no inbound NTT message to consume.
 
@@ -412,8 +412,8 @@ by the relayer; you don't redeploy it.
   `nttpna5vXW7BN2Aa4AfTbkCncJWTEoBsnWvjS87Xgsd`).
 - FOGO-side NTT program keypair (vanity not required, but document the
   resulting address).
-- bONyc representation: do **not** pre-create. NTT in Burning mode on
-  FOGO creates the bONyc mint and holds mint authority itself.
+- ONyc representation: do **not** pre-create. NTT in Burning mode on
+  FOGO creates the ONyc mint and holds mint authority itself.
 - `ntt` CLI installed. See
   [github.com/wormhole-foundation/native-token-transfers](https://github.com/wormhole-foundation/native-token-transfers)
   for the current install instructions; they change across versions.
@@ -437,7 +437,7 @@ ntt add-chain Solana \
   --payer <DEPLOY_KEYPAIR>.json \
   --program-key <ONYC_NTT_VANITY_KEYPAIR>.json
 
-# 3. FOGO side — BURNING mode. The NTT manager will create the bONyc
+# 3. FOGO side — BURNING mode. The NTT manager will create the ONyc
 #    mint and hold mint authority. If FOGO is not yet a known chain to
 #    your CLI version, you'll need a CLI fork that knows chain ID 51 or
 #    hand-edit deployment.json.
@@ -473,7 +473,7 @@ ntt token-transfer --network Mainnet \
   --deployment-path ./deployment.json
 ```
 
-If the test transfer delivers bONyc to your FOGO test wallet, NTT is
+If the test transfer delivers ONyc to your FOGO test wallet, NTT is
 ready and the relayer's `lock_onyc` / `unlock_onyc` will resolve the
 peer and custody accounts.
 
@@ -493,7 +493,7 @@ Before announcing the deploy, run **one** low-value end-to-end deposit
 **and** one withdraw on mainnet. Both legs must succeed before opening
 to users.
 
-### 8.1. Deposit cycle (FOGO → bONyc on FOGO)
+### 8.1. Deposit cycle (FOGO → ONyc on FOGO)
 
 1. From a test FOGO wallet, NTT-send a small amount of USDC.s to
    Solana, addressed to the relayer's payload destination.
@@ -504,13 +504,13 @@ to users.
    increases.
 5. Crank `lock_onyc`. Confirm:
 
-- bONyc lands on the test FOGO wallet
+- ONyc lands on the test FOGO wallet
 - The Flow PDA is closed (rent returned to the cranker)
 - The fee vault balance increased by the expected amount
 
-### 8.2. Withdraw cycle (bONyc on FOGO → USDC.s on FOGO)
+### 8.2. Withdraw cycle (ONyc on FOGO → USDC.s on FOGO)
 
-1. From the test FOGO wallet, NTT-send a small amount of bONyc back to
+1. From the test FOGO wallet, NTT-send a small amount of ONyc back to
    Solana, addressed to the relayer's redeemer payload.
 2. Wait for the NTT attestation.
 3. Crank `unlock_onyc`. Confirm a Flow PDA appears in `Unlocked` state
@@ -630,9 +630,9 @@ Anyone with SOL for tx fees can crank them.
 - **USDC.s** — the NTT-bridged USDC on FOGO. What users deposit
   and what they receive on withdraw.
 - **ONyc** — OnRe's yield-bearing token, native on Solana. Held in NTT
-  custody on Solana while users hold its bONyc representation on FOGO.
+  custody on Solana while users hold its ONyc representation on FOGO.
   Yield accrues as the OnRe price vector advances.
-- **bONyc** — the NTT-bridged representation of ONyc on FOGO. What
+- **ONyc** — the NTT-bridged representation of ONyc on FOGO. What
   users hold directly after a deposit. There is no vault wrapper and
   no separate share token.
 - **Curator / Cranker** — any wallet that calls a permissionless

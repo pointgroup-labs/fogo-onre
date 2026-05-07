@@ -1,6 +1,6 @@
 'use client'
 
-import { BONYC_DECIMALS, USDC_DECIMALS } from '@/constants'
+import { FOGO_ONYC_DECIMALS, USDC_DECIMALS } from '@/constants'
 import { useProtocolState } from '@/hooks/useProtocolState'
 
 /**
@@ -10,7 +10,7 @@ import { useProtocolState } from '@/hooks/useProtocolState'
  *   - APY  — yield rate, derived from the OnRe price snapshot's `aprBps`
  *   - AUM  — total value locked across the vault (not yet on-chain;
  *            placeholder until the FOGO vault program ships)
- *   - NAV  — current bONyc price in USDC, derived from the live ONyc
+ *   - NAV  — current ONyc price in USDC, derived from the live ONyc
  *            price feed scaled to its `priceScale`
  *
  * Values that aren't computable yet render as a muted "—". We intentionally
@@ -62,11 +62,11 @@ function formatNav(onycPrice: bigint | null, priceScale: bigint | null): string 
   // `onycPrice / priceScale` is "USDC base per ONyc base". To convert to
   // USDC-per-ONyc (the human price) we multiply by 10^(ONyc decimals -
   // USDC decimals), which lifts the small base ratio (~1e-3 for ONyc≈$1)
-  // up into a familiar dollar magnitude. With BONYC=9, USDC=6, the
+  // up into a familiar dollar magnitude. With FOGO_ONYC=9, USDC=6, the
   // multiplier is 10^3 = 1000, so a 1.07 USDC/ONyc price decodes from
   // basePrice=1_069_802_350 / 1e12 = 0.00107, ×1000 = 1.07.
-  const decimalAdjust = 10n ** BigInt(BONYC_DECIMALS - USDC_DECIMALS)
-  // 4 fractional digits — bONyc trades close to par, so two decimals
+  const decimalAdjust = 10n ** BigInt(FOGO_ONYC_DECIMALS - USDC_DECIMALS)
+  // 4 fractional digits — ONyc trades close to par, so two decimals
   // would erase all signal.
   const fractionDigits = 4
   const factor = 10n ** BigInt(fractionDigits)

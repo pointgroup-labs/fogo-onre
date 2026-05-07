@@ -9,7 +9,7 @@ import usdcIcon from '@/assets/tokens/usdc.svg'
  * Per-symbol artwork. Static imports so Next can hash + optimize each
  * file at build time and we don't pay an extra request per token icon.
  *
- * Project tokens (bONyc / ONyc / wONyc) all reuse the OnRe artwork —
+ * Project tokens (ONyc / ONyc / wONyc) all reuse the OnRe artwork —
  * they're the same underlying yield asset wrapped at different stages
  * of the bridge. USDC.s reuses Circle's USDC mark for the same reason
  * (s-suffix is the FOGO-side wrapped variant, not a different brand).
@@ -17,7 +17,7 @@ import usdcIcon from '@/assets/tokens/usdc.svg'
 const TOKENS: Record<string, StaticImageData> = {
   'USDC.s': usdcIcon,
   'USDC': usdcIcon,
-  'bONyc': onycIcon,
+  'ONyc': onycIcon,
   'ONyc': onycIcon,
   'wONyc': onycIcon,
 }

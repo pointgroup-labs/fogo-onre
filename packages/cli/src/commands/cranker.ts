@@ -11,7 +11,7 @@
  *                                                  the relayer's ONyc ATA.
  *                                                  Advances Flow to Swapped.
  *   - `cranker lock-onyc        --fogo-tx <SIG>` — step 3: NTT `transfer_lock`
- *                                                 ONyc back to FOGO as bONyc,
+ *                                                 ONyc back to FOGO as ONyc,
  *                                                 closes the inflight Flow.
  *
  * Withdraw-leg commands (`unlock-onyc`, `request-redemption`,
@@ -63,12 +63,12 @@ const DEFAULT_NTT_VERSION = '3.0.0'
 
 const DEFAULT_WORMHOLESCAN_URL = 'https://api.wormholescan.io'
 
-// FOGO-side constants for the cross-chain redeem step. The bONyc NTT
+// FOGO-side constants for the cross-chain redeem step. The ONyc NTT
 // manager and mint are mirrored from the webapp (`packages/webapp/src/constants.ts`).
 // FOGO mainnet Wormhole core program id is published in
 // `@wormhole-foundation/sdk-base` (constants/contracts/core.js).
-const FOGO_BONYC_NTT_MANAGER_ID = 'nttpna5vXW7BN2Aa4AfTbkCncJWTEoBsnWvjS87Xgsd'
-const BONYC_MINT = 'oNyCm1QsAatj3ckaEwZjtAPWvstPn3Zm5MAYPtkjEfa'
+const FOGO_ONYC_NTT_MANAGER_ID = 'nttpna5vXW7BN2Aa4AfTbkCncJWTEoBsnWvjS87Xgsd'
+const FOGO_ONYC_MINT = 'oNyCm1QsAatj3ckaEwZjtAPWvstPn3Zm5MAYPtkjEfa'
 const FOGO_WORMHOLE_CORE_MAINNET = 'worm2mrQkG1B1KTz37erMfWN8anHkSK24nzca7UD8BB'
 // First-party Fogo Labs RPC, matching the webapp default in
 // `packages/webapp/src/store/settings.ts`.
@@ -399,7 +399,7 @@ export function crankerCommands(): Command {
 
   cranker
     .command('lock-onyc')
-    .description('Lock ONyc via NTT, sending bONyc back to FOGO sender (deposit leg, step 3)')
+    .description('Lock ONyc via NTT, sending ONyc back to FOGO sender (deposit leg, step 3)')
     .requiredOption('--fogo-tx <signature>', 'FOGO tx signature that emitted the bridge VAA')
     .option('--vaa <hex>', 'Override Wormholescan lookup with raw signed VAA bytes (hex)')
     .option('--onyc-mint <pubkey>', `ONyc mint (default from on-chain RelayerConfig, fallback ${ONYC_MINT.toBase58()})`)
@@ -452,7 +452,7 @@ export function crankerCommands(): Command {
         ? new PublicKey(opts.onycMint)
         : (cfg.onycMint as PublicKey)
 
-      // The FOGO destination for the bONyc mint comes from the Flow
+      // The FOGO destination for the ONyc mint comes from the Flow
       // PDA, set by `claim_usdc` from the VAA's NTT-message `sender`
       // field. lock_onyc uses it as the recipient on FOGO.
       const flowFogoSender = Uint8Array.from(flow.fogoSender as ArrayLike<number>)
@@ -471,10 +471,10 @@ export function crankerCommands(): Command {
       // either is missing, the CPI reverts with bare `Custom(1)` — no
       // helpful logs — and the cranker loses gas + a fresh outbox
       // keypair. Probe both client-side and bail early with a clear
-      // diagnostic. This is the documented bONyc-deploy gate from
-      // CLAUDE.md ("FOGO bONyc NTT manager not yet published"); the
+      // diagnostic. This is the documented ONyc-deploy gate from
+      // CLAUDE.md ("FOGO ONyc NTT manager not yet published"); the
       // gate applies to the deposit leg too because both legs traverse
-      // the same ONyc↔bONyc corridor.
+      // the same ONyc↔ONyc corridor.
       const [fogoPeerPda] = findNttPeerPda(FOGO_WORMHOLE_CHAIN_ID, NTT_ONYC_PROGRAM_ID)
       const [fogoInboxRateLimitPda] = findInboxRateLimitPda(FOGO_WORMHOLE_CHAIN_ID, NTT_ONYC_PROGRAM_ID)
       const [peerInfo, inboxRateLimitInfo] = await Promise.all([
@@ -492,7 +492,7 @@ export function crankerCommands(): Command {
         throw new Error(
           `FOGO chain (id=${FOGO_WORMHOLE_CHAIN_ID}) is not registered on the ONyc NTT manager `
           + `(${NTT_ONYC_PROGRAM_ID.toBase58()}): missing ${missing.join(' and ')}. `
-          + `lock_onyc cannot dispatch until the FOGO bONyc NTT manager is deployed and the `
+          + `lock_onyc cannot dispatch until the FOGO ONyc NTT manager is deployed and the `
           + `relayer authority calls 'set_peer' on the Solana ONyc NTT manager. Your Flow PDA `
           + `is safe in status=Swapped — re-run this command once the peer is registered.`,
         )
@@ -620,7 +620,7 @@ export function crankerCommands(): Command {
           .rpc(),
       )
 
-      console.log(chalk.green('lock-onyc landed — bONyc en route to FOGO'))
+      console.log(chalk.green('lock-onyc landed — ONyc en route to FOGO'))
       console.log(chalk.dim(`  tx: ${sig}`))
       console.log(chalk.dim(`  outbox: ${outboxItem.publicKey.toBase58()}`))
     })
@@ -761,7 +761,7 @@ export function crankerCommands(): Command {
   // VAA is emitted yet (NTT v1 splits queue from attestation). The
   // operator must still run a `release-outbound` step (TODO: not yet
   // implemented in CLI v1) to emit the Wormhole message, and then a
-  // FOGO-side redeem (TODO) to mint bONyc. Both deferred steps will
+  // FOGO-side redeem (TODO) to mint ONyc. Both deferred steps will
   // slot into this orchestrator behind the same `--no-wait-vaa` /
   // `--vaa-timeout` flags once their builders exist.
   //
@@ -1122,13 +1122,13 @@ export function crankerCommands(): Command {
         console.log(chalk.green('\nadvance complete — Wormhole VAA emitted (lock_onyc atomically published it).'))
         console.log()
         console.log(chalk.yellow('Next step (not yet automated):'))
-        console.log(chalk.dim('  FOGO redeem — submit signed VAA to FOGO bONyc NTT manager once guardians sign it.'))
+        console.log(chalk.dim('  FOGO redeem — submit signed VAA to FOGO ONyc NTT manager once guardians sign it.'))
         process.exit(0)
       }
       console.log(chalk.green('\nadvance complete — Solana relayer side done for this VAA'))
       console.log()
       console.log(chalk.yellow('Next steps (not yet automated):'))
-      console.log(chalk.dim('  FOGO redeem — submit signed VAA to FOGO bONyc NTT manager.'))
+      console.log(chalk.dim('  FOGO redeem — submit signed VAA to FOGO ONyc NTT manager.'))
       // Exit 2: relayer-side done, but the cross-chain delivery isn't.
       process.exit(2)
     })
@@ -1136,21 +1136,21 @@ export function crankerCommands(): Command {
   cranker
     .command('redeem-fogo')
     .description(
-      'Submit the NTT redeem on FOGO so bONyc is minted to the user '
+      'Submit the NTT redeem on FOGO so ONyc is minted to the user '
       + '(deposit leg, step 5 — runs after release-outbound emits the VAA).',
     )
     .requiredOption('--vaa <hex>', 'Signed Wormhole VAA bytes (hex, optional 0x prefix)')
     .option('--fogo-rpc <url>', `FOGO RPC URL [env: FOGO_RPC_URL, default: ${FOGO_RPC_DEFAULT}]`)
-    .option('--ntt-manager <pubkey>', `FOGO bONyc NTT manager program id [default: ${FOGO_BONYC_NTT_MANAGER_ID}]`)
-    .option('--bonyc-mint <pubkey>', `bONyc mint on FOGO [default: ${BONYC_MINT}]`)
+    .option('--ntt-manager <pubkey>', `FOGO ONyc NTT manager program id [default: ${FOGO_ONYC_NTT_MANAGER_ID}]`)
+    .option('--fogoOnyc-mint <pubkey>', `ONyc mint on FOGO [default: ${FOGO_ONYC_MINT}]`)
     .option('--wormhole-core <pubkey>', `FOGO Wormhole core program id [default: ${FOGO_WORMHOLE_CORE_MAINNET}]`)
-    .option('--ntt-version <ver>', `NTT IDL version for the FOGO bONyc manager [default: ${DEFAULT_NTT_VERSION}]`)
+    .option('--ntt-version <ver>', `NTT IDL version for the FOGO ONyc manager [default: ${DEFAULT_NTT_VERSION}]`)
     .option('--confirm', 'Actually broadcast the transaction(s) (default: dry-run)')
     .action(async (opts: {
       vaa: string
       fogoRpc?: string
       nttManager?: string
-      bonycMint?: string
+      fogoOnycMint?: string
       wormholeCore?: string
       nttVersion?: string
       confirm?: boolean
@@ -1166,8 +1166,8 @@ export function crankerCommands(): Command {
         new Wallet(keypair),
         { commitment: 'confirmed' },
       )
-      const nttManagerId = opts.nttManager ?? FOGO_BONYC_NTT_MANAGER_ID
-      const bonycMint = opts.bonycMint ?? BONYC_MINT
+      const nttManagerId = opts.nttManager ?? FOGO_ONYC_NTT_MANAGER_ID
+      const fogoOnycMint = opts.fogoOnycMint ?? FOGO_ONYC_MINT
       const wormholeCore = opts.wormholeCore ?? FOGO_WORMHOLE_CORE_MAINNET
       const nttVersion = opts.nttVersion ?? DEFAULT_NTT_VERSION
 
@@ -1189,7 +1189,7 @@ export function crankerCommands(): Command {
         nttProgramId: new PublicKey(nttManagerId),
       })
       const recipientAta = getAssociatedTokenAddressSync(
-        new PublicKey(bonycMint),
+        new PublicKey(fogoOnycMint),
         resolved.recipientOnSolana,
       )
 
@@ -1204,7 +1204,7 @@ export function crankerCommands(): Command {
           coreBridge: wormholeCore,
           ntt: {
             manager: nttManagerId,
-            token: bonycMint,
+            token: fogoOnycMint,
             // Same compiled-in-the-manager pattern as the Solana side.
             transceiver: { wormhole: nttManagerId },
           },
@@ -1231,7 +1231,7 @@ export function crankerCommands(): Command {
       console.log(chalk.dim(`  fogoRpc:                ${fogoRpcUrl}`))
       console.log(chalk.dim(`  payer (signer):         ${keypair.publicKey.toBase58()}`))
       console.log(chalk.dim(`  nttManager (FOGO):      ${nttManagerId}`))
-      console.log(chalk.dim(`  bonycMint:              ${bonycMint}`))
+      console.log(chalk.dim(`  fogoOnycMint:              ${fogoOnycMint}`))
       console.log(chalk.dim(`  wormholeCore (FOGO):    ${wormholeCore}`))
       console.log(chalk.dim(`  nttVersion:             ${nttVersion}`))
       console.log(chalk.dim(`  emitterChain:           ${resolved.fromChain}`))
@@ -1298,7 +1298,7 @@ export function crankerCommands(): Command {
 
       // Post-mint balance read. If the recipient ATA didn't exist
       // pre-redeem, the unlock/mint ix created it; either way it should
-      // hold trimmedAmount * 10^(mintDecimals - trimmedDecimals) bONyc
+      // hold trimmedAmount * 10^(mintDecimals - trimmedDecimals) ONyc
       // by the time the last tx confirms. A failure here is informational
       // only — the redeem already landed.
       let mintedAmount: string | null = null
@@ -1313,7 +1313,7 @@ export function crankerCommands(): Command {
       void fogoProvider
 
       console.log()
-      console.log(chalk.green('redeem-fogo landed — bONyc minted on FOGO'))
+      console.log(chalk.green('redeem-fogo landed — ONyc minted on FOGO'))
       console.log(chalk.dim(`  recipientAta:   ${recipientAta.toBase58()}`))
       if (mintedAmount !== null) {
         console.log(chalk.dim(`  ataBalance:     ${mintedAmount}`))

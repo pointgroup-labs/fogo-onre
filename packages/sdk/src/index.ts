@@ -1,6 +1,6 @@
 export { RelayerClient } from './client'
 export {
-  BONYC_DECIMALS,
+  FOGO_ONYC_DECIMALS,
   CONFIG_SEED,
   FEE_DENOMINATOR_BPS,
   FEE_TIMELOCK_SLOTS,

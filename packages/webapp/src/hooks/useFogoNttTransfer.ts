@@ -21,8 +21,8 @@ import { getAssociatedTokenAddressSync } from '@solana/spl-token'
 import { ComputeBudgetProgram, Keypair, PublicKey } from '@solana/web3.js'
 import { useState } from 'react'
 import {
-  BONYC_MINT,
-  FOGO_BONYC_NTT_MANAGER_ID,
+  FOGO_ONYC_MINT,
+  FOGO_ONYC_NTT_MANAGER_ID,
   FOGO_BRIDGE_PAYMASTER_DOMAIN,
   FOGO_BRIDGE_VARIATION,
   USDC_S_MINT,
@@ -33,7 +33,7 @@ import { error, idle, pending, success } from '@/utils/transfer'
 
 /**
  * FOGO-side bridge hook covering both deposit (USDC.s → Solana relayer)
- * and withdraw (bONyc → Solana relayer authority PDA).
+ * and withdraw (ONyc → Solana relayer authority PDA).
  *
  * The two branches use *structurally different* on-chain entry points:
  *
@@ -48,10 +48,10 @@ import { error, idle, pending, success } from '@/utils/transfer'
  * VAA's amount from the inbox ATA into relayer custody. Originator
  * attribution rides as `flow.fogo_sender = userWallet` (NOT as the
  * NTT sender field) so the return-leg `lock_onyc` knows where to bridge
- * bONyc back.
+ * ONyc back.
  *
  * **Withdraw** uses the unchanged FOGO NTT `transfer_burn` path against
- * the bONyc manager — no intent layer required because the relayer
+ * the ONyc manager — no intent layer required because the relayer
  * doesn't need per-user attribution on the withdraw side (the inflight
  * Flow PDA already binds the originating wallet from the deposit-side
  * `claim_usdc` that opened the position).
@@ -341,8 +341,8 @@ function buildWithdrawIx(args: {
   const outboxItemKp = Keypair.generate()
   const ix = buildFogoNttWithdrawIx({
     payer: sessionState.walletPublicKey,
-    nttManagerProgramId: FOGO_BONYC_NTT_MANAGER_ID,
-    mint: BONYC_MINT,
+    nttManagerProgramId: FOGO_ONYC_NTT_MANAGER_ID,
+    mint: FOGO_ONYC_MINT,
     outboxItem: outboxItemKp.publicKey,
     amount,
     recipientOnSolana,
@@ -370,7 +370,7 @@ function getSessionSignMessage(
 }
 
 // Pre-send destination-balance snapshot. The mint depends on `kind`:
-// deposit credits bONyc back, withdraw credits USDC.s. Returning `null`
+// deposit credits ONyc back, withdraw credits USDC.s. Returning `null`
 // on RPC failure is intentional — the watcher falls back to its
 // capture-on-first-tick path so a transient outage doesn't block the
 // submit entirely.
@@ -380,7 +380,7 @@ async function readDestinationBalance(
   fogoRpcUrl: string,
 ): Promise<bigint | null> {
   try {
-    const mint = kind === 'deposit' ? BONYC_MINT : USDC_S_MINT
+    const mint = kind === 'deposit' ? FOGO_ONYC_MINT : USDC_S_MINT
     const ata = getAssociatedTokenAddressSync(mint, walletPublicKey)
     const result = await getFogoConnection(fogoRpcUrl).getTokenAccountBalance(ata, 'confirmed')
     return BigInt(result.value.amount)

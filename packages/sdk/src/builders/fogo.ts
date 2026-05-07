@@ -28,9 +28,9 @@ const TRANSFER_BURN_DISCRIMINATOR = sha256(
 export interface BuildFogoNttTransferParams {
   /** User's FOGO wallet — signer; encoded as `NttManagerMessage.sender`. */
   payer: PublicKey
-  /** FOGO-side NTT manager program ID for this mint (USDC.s or bONyc). */
+  /** FOGO-side NTT manager program ID for this mint (USDC.s or ONyc). */
   nttManagerProgramId: PublicKey
-  /** Bridged mint on FOGO (USDC.s for deposit, bONyc for withdraw). */
+  /** Bridged mint on FOGO (USDC.s for deposit, ONyc for withdraw). */
   mint: PublicKey
   /**
    * Fresh ephemeral keypair pubkey used as the `outbox_item`. The caller
@@ -38,7 +38,7 @@ export interface BuildFogoNttTransferParams {
    * NTT `init`s the account, so it must sign at submission.
    */
   outboxItem: PublicKey
-  /** Amount in mint base units (USDC.s = 6 decimals, bONyc = 9). */
+  /** Amount in mint base units (USDC.s = 6 decimals, ONyc = 9). */
   amount: bigint
   /**
    * Solana-side recipient — the relayer authority PDA for both legs (see
@@ -116,7 +116,7 @@ function buildFogoNttTransferBurnIx(
  * FOGO NTT `transfer_burn` initiating a deposit (USDC.s burned on FOGO →
  * Solana USDC custody released to the relayer authority PDA). The relayer
  * cranks `claim_usdc` → `swap_usdc_to_onyc` → `lock_onyc`, ultimately
- * delivering bONyc back to `payer` via the bONyc NTT manager.
+ * delivering ONyc back to `payer` via the ONyc NTT manager.
  */
 export function buildFogoNttDepositIx(
   params: BuildFogoNttTransferParams,
@@ -125,7 +125,7 @@ export function buildFogoNttDepositIx(
 }
 
 /**
- * FOGO NTT `transfer_burn` initiating a withdraw (bONyc burned on FOGO →
+ * FOGO NTT `transfer_burn` initiating a withdraw (ONyc burned on FOGO →
  * Solana ONyc custody released to the relayer authority PDA). The relayer
  * cranks `unlock_onyc` → `request_redemption_onyc` →
  * `claim_redemption_usdc` → `send_usdc_to_user`, returning USDC.s to
