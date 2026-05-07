@@ -16,6 +16,9 @@
   },
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "bin": {
+    "cranker": "dist/bin.js"
+  },
   "files": [
     "dist"
   ],
@@ -28,7 +31,12 @@
   "dependencies": {
     "@anchor-lang/core": "^1.0.2",
     "@fogo-onre/sdk": "workspace:*",
+    "@noble/hashes": "^1.8.0",
+    "@solana/spl-token": "^0.4.13",
     "@solana/web3.js": "^1.98.4",
+    "@wormhole-foundation/sdk-definitions": "^4.18.0",
+    "@wormhole-foundation/sdk-definitions-ntt": "^4.0.17",
+    "@wormhole-foundation/sdk-solana-ntt": "^4.0.17",
     "prom-client": "^15.1.3",
     "zod": "^3.23.8"
   },
