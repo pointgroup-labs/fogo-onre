@@ -16,9 +16,9 @@
     "src"
   ],
   "scripts": {
-    "prebuild": "mkdir -p src/idl && cp ../../target/idl/fogo_onre_relayer.json src/idl/fogo_onre_relayer.json",
+    "prebuild": "mkdir -p src/idl src/types && cp ../../target/idl/fogo_onre_relayer.json src/idl/fogo_onre_relayer.json && cp ../../target/types/fogo_onre_relayer.ts src/types/fogo_onre_relayer.ts",
     "build": "tsc",
-    "clean": "rm -rf dist src/idl/fogo_onre_relayer.json"
+    "clean": "rm -rf dist src/idl/fogo_onre_relayer.json src/types/fogo_onre_relayer.ts"
   },
   "dependencies": {
     "@anchor-lang/core": "^1.0.0",

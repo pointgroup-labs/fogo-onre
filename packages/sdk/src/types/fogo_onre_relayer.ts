@@ -8,21 +8,17 @@ export type FogoOnreRelayer = {
   "address": "onrenRKgX54qtWeK3cuaTBE71xx7dWMXn82ubH61vAp",
   "metadata": {
     "name": "fogoOnreRelayer",
-    "version": "0.1.0",
+    "version": "0.1.2",
     "spec": "0.1.0",
-    "description": "Fogo OnRe relayer — stateless PDA-custody relay between Wormhole Gateway, OnRe, and Wormhole NTT on Solana"
+    "description": "Fogo OnRe relayer — stateless PDA-custody bridge between OnRe and Wormhole NTT on Solana",
+    "repository": "https://github.com/pointgroup-labs/fogo-onre"
   },
   "docs": [
-    "Stateless cross-chain relayer between FOGO and Solana.",
+    "On-chain relayer for OnRe's cross-chain yield product.",
     "",
-    "All operational instructions are permissionless. Safety comes from the",
-    "Flow PDA design: each inbound NTT message carries the originating FOGO",
-    "user's wallet as `NttManagerMessage.sender`. `claim_usdc` /",
-    "`unlock_onyc` persist that wallet in a one-shot `Flow` PDA keyed by",
-    "the per-VAA NTT `inbox_item` PDA; `lock_onyc` / `send_usdc_to_user`",
-    "consume the PDA to choose the outbound recipient. A stolen operator",
-    "key cannot redirect outbound transfers — the inbox-item PDA is",
-    "CPI-created by the NTT program and unforgeable."
+    "OnRe issues ONyc, a tokenized reinsurance position on Solana. This",
+    "program lets FOGO users hold that yield exposure without leaving",
+    "FOGO: USDC.s on FOGO ↔ ONyc on Solana, both legs over Wormhole NTT."
   ],
   "instructions": [
     {
@@ -574,6 +570,9 @@ export type FogoOnreRelayer = {
         },
         {
           "name": "usdcAta",
+          "docs": [
+            "Sweep destination — long-lived relayer-authority USDC ATA."
+          ],
           "writable": true,
           "pda": {
             "seeds": [
@@ -630,15 +629,123 @@ export type FogoOnreRelayer = {
           }
         },
         {
+          "name": "userWallet",
+          "docs": [
+            "Originating FOGO wallet (same pubkey on Solana — keys are chain-agnostic).",
+            "Cranker-supplied; pinned by the `user_inbox_authority` PDA derivation",
+            "below + the NTT release ATA-authority check chain. See handler doc."
+          ]
+        },
+        {
+          "name": "userInboxAuthority",
+          "docs": [
+            "Per-user inbox PDA. Owns `user_inbox_ata`; signs the sweep."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  117,
+                  115,
+                  101,
+                  114,
+                  95,
+                  105,
+                  110,
+                  98,
+                  111,
+                  120
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "userWallet"
+              }
+            ]
+          }
+        },
+        {
+          "name": "userInboxAta",
+          "docs": [
+            "Per-user inbox USDC ATA. NTT release_inbound deposits here; the",
+            "sweep transfers exactly `flow.amount` out into `usdc_ata`.",
+            "`init_if_needed` is NOT used here — the FOGO `bridge_ntt_tokens`",
+            "arg `pay_destination_ata_rent: true` causes the Wormhole",
+            "executor to create the ATA on first delivery."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "userInboxAuthority"
+              },
+              {
+                "kind": "account",
+                "path": "tokenProgram"
+              },
+              {
+                "kind": "account",
+                "path": "usdcMint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
           "name": "nttInboxItem",
           "docs": [
-            "Per-VAA NTT inbox-item PDA — its pubkey seeds the flow PDA."
+            "Per-VAA NTT inbox-item PDA — its pubkey seeds the flow PDA.",
+            "We deliberately do NOT put `#[account(owner = NTT_USDC_PROGRAM_ID)]`",
+            "here: on a fresh claim the account doesn't exist yet (the NTT",
+            "redeem CPI inside the handler creates it), so Anchor's",
+            "pre-handler owner constraint would fail every first-time claim.",
+            "The owner check is enforced inside the handler's",
+            "`inbox_already_released` skip branch — the *only* path where",
+            "no NTT CPI runs and forgery is therefore possible."
           ]
         },
         {
           "name": "nttTransceiverMessage",
           "docs": [
-            "`owner = NTT_PROGRAM_ID` pins the writer; nothing outside NTT can",
+            "`owner = NTT_USDC_PROGRAM_ID` pins the writer; nothing outside NTT can",
             "have crafted this data."
           ]
         },
@@ -1110,7 +1217,12 @@ export type FogoOnreRelayer = {
     {
       "name": "lockOnyc",
       "docs": [
-        "Lock ONyc via NTT, sending bONyc to `flow.fogo_sender`. Closes the PDA."
+        "Lock ONyc via NTT and atomically publish the outbound Wormhole VAA,",
+        "sending bONyc to `flow.fogo_sender`. Closes the PDA.",
+        "",
+        "`transfer_lock_account_count` is the boundary index in",
+        "`remaining_accounts` between the `transfer_lock` (14 entries) and",
+        "`release_wormhole_outbound` (15 entries) account lists."
       ],
       "discriminator": [
         4,
@@ -1272,7 +1384,12 @@ export type FogoOnreRelayer = {
           "name": "tokenProgram"
         }
       ],
-      "args": []
+      "args": [
+        {
+          "name": "transferLockAccountCount",
+          "type": "u8"
+        }
+      ]
     },
     {
       "name": "requestRedemptionOnyc",
@@ -2162,7 +2279,7 @@ export type FogoOnreRelayer = {
         {
           "name": "nttTransceiverMessage",
           "docs": [
-            "`owner = NTT_PROGRAM_ID` pins the writer; nothing outside NTT can",
+            "`owner = NTT_ONYC_PROGRAM_ID` pins the writer; nothing outside NTT can",
             "have crafted this data."
           ]
         },
@@ -2465,18 +2582,46 @@ export type FogoOnreRelayer = {
       "code": 6021,
       "name": "wrongOriginChain",
       "msg": "Inbound NTT message did not originate from the FOGO peer chain"
+    },
+    {
+      "code": 6022,
+      "name": "unexpectedOnycConsumed",
+      "msg": "Post-CPI ONyc balance dropped — OnRe consumed ONyc unexpectedly"
+    },
+    {
+      "code": 6023,
+      "name": "userInboxAuthorityMismatch",
+      "msg": "user_inbox_ata's authority does not match the [user_inbox, user_wallet] PDA"
+    },
+    {
+      "code": 6024,
+      "name": "unexpectedFogoSender",
+      "msg": "NTT VAA's NttManagerMessage.sender is not the intent_transfer setter PDA — deposit must originate via intent_transfer"
+    },
+    {
+      "code": 6025,
+      "name": "invalidInboxItem",
+      "msg": "ntt_inbox_item account is missing, too short, or has the wrong discriminator"
+    },
+    {
+      "code": 6026,
+      "name": "insufficientInboxBalance",
+      "msg": "user_inbox_ata balance is below the NTT-recorded inbox_item.amount — inbox was not credited as expected"
+    },
+    {
+      "code": 6027,
+      "name": "pendingAuthorityIsCurrent",
+      "msg": "Proposed pending_authority equals the current authority — self-rotate is rejected"
     }
   ],
   "types": [
     {
       "name": "flow",
       "docs": [
-        "One-shot receipt binding an inbound bridge message to a FOGO user wallet.",
-        "PDA seeds: `[FLOW_*_SEED, bridge_claim_pda.key()]`. Replay protection is",
-        "delegated to the per-VAA claim account created by Wormhole Gateway / NTT.",
-        "",
-        "**Field set is byte-stable** — already-allocated `Flow` PDAs from prior",
-        "deploys must continue to load."
+        "One-shot receipt binding an inbound bridge message to a FOGO wallet.",
+        "Seeds: `[FLOW_*_SEED, bridge_claim_pda.key()]`. Replay protection",
+        "lives in the per-VAA claim account from NTT. Field set is",
+        "byte-stable — older PDAs must keep deserializing."
       ],
       "type": {
         "kind": "struct",
@@ -2635,8 +2780,8 @@ export type FogoOnreRelayer = {
           {
             "name": "readySlot",
             "docs": [
-              "`now + FEE_TIMELOCK_SLOTS` at proposal time, MAX-extended by any",
-              "subsequent raise so a follow-up never shortens the window."
+              "`now + FEE_TIMELOCK_SLOTS` at proposal time, MAX-extended on any",
+              "later raise so a follow-up never shortens the window."
             ],
             "type": "u64"
           }
@@ -2727,10 +2872,9 @@ export type FogoOnreRelayer = {
     {
       "name": "redemptionTracker",
       "docs": [
-        "Singleton sidecar PDA tracking the in-flight withdraw-chain redemption.",
-        "PDA seeds: `[REDEMPTION_TRACKER_SEED]`. The PDA's existence is the",
-        "in-flight mutex — `init` in `request_redemption_onyc` fails if another",
-        "redemption is mid-flight, preventing the USDC-delta race."
+        "Singleton mutex for the in-flight withdraw-chain redemption.",
+        "Seeds: `[REDEMPTION_TRACKER_SEED]`. `init` here fails if another",
+        "redemption is mid-flight, blocking the USDC-delta race."
       ],
       "type": {
         "kind": "struct",
@@ -2745,23 +2889,23 @@ export type FogoOnreRelayer = {
           {
             "name": "redemptionRequest",
             "docs": [
-              "OnRe `RedemptionRequest` PDA we created. Polled for closure as the",
-              "fulfillment signal."
+              "OnRe `RedemptionRequest` PDA we created. Polled for closure as",
+              "the fulfillment signal."
             ],
             "type": "pubkey"
           },
           {
             "name": "usdcAtaPreBalance",
             "docs": [
-              "Snapshot of relayer's USDC ATA balance *before* `create_redemption_request`.",
-              "`claim_redemption_usdc` computes the post-fulfillment delta against this."
+              "Relayer USDC ATA balance *before* `create_redemption_request`.",
+              "`claim_redemption_usdc` uses the post-fulfillment delta vs this."
             ],
             "type": "u64"
           },
           {
             "name": "onycAmountIn",
             "docs": [
-              "Audit-trail field — net-of-fee ONyc sent to OnRe."
+              "Audit-trail only — net-of-fee ONyc sent to OnRe."
             ],
             "type": "u64"
           },
@@ -2782,13 +2926,8 @@ export type FogoOnreRelayer = {
     {
       "name": "relayerConfig",
       "docs": [
-        "The only long-lived state in this program. `authority` is a cold/admin",
-        "key used only for governance; operational instructions are permissionless.",
-        "",
-        "**Layout-change hazard.** `pending_fee` was appended, growing",
-        "`INIT_SPACE`. Any pre-existing `RelayerConfig` PDA from a prior build",
-        "is now under-sized and must be reallocated/zero-filled before any",
-        "instruction can deserialize it. No migration ix ships in this build."
+        "Long-lived program state. `authority` gates governance only; flow",
+        "instructions are permissionless."
       ],
       "type": {
         "kind": "struct",
@@ -2828,9 +2967,8 @@ export type FogoOnreRelayer = {
           {
             "name": "pendingAuthority",
             "docs": [
-              "Two-step rotation accommodates multisig→multisig handoffs where the",
-              "two parties cannot atomically co-sign. Promoted to `authority` by",
-              "`accept_authority` from this key."
+              "Two-step rotation lets multisig→multisig handoffs work without",
+              "atomic co-sign. Promoted to `authority` by `accept_authority`."
             ],
             "type": {
               "option": "pubkey"
@@ -2839,10 +2977,9 @@ export type FogoOnreRelayer = {
           {
             "name": "pendingFee",
             "docs": [
-              "Staged fee *increase*, auto-promoted on the next `configure` call",
-              "once `pending_fee.ready_slot` has elapsed. `None` ⟺ no proposal.",
-              "Invariant when `Some`: at least one inner leg is `Some` (collapsed",
-              "to `None` on empty). Decreases never use this field."
+              "Staged fee *increase*, auto-promoted on the next `configure` once",
+              "`ready_slot` elapses. Decreases bypass this. `Some` ⟹ at least one",
+              "inner leg is `Some` (collapsed otherwise)."
             ],
             "type": {
               "option": {
@@ -2912,6 +3049,50 @@ export type FogoOnreRelayer = {
           }
         ]
       }
+    }
+  ],
+  "constants": [
+    {
+      "name": "intentTransferProgramId",
+      "docs": [
+        "FOGO `intent_transfer` program ID. Pinned so `claim_usdc` can require",
+        "that any incoming VAA was originated by intent_transfer (its singleton",
+        "`intent_transfer_setter` PDA is the NTT message sender for every",
+        "intent-driven bridge). Without this pin, a direct NTT bridge that",
+        "happens to target a user's inbox PDA would also satisfy the deposit",
+        "flow — annoying rather than dangerous, but the pin enforces the",
+        "intended deposit path."
+      ],
+      "type": "pubkey",
+      "value": "Xfry4dW9m42ncAqm8LyEnyS5V6xu5DSJTMRQLiGkARD"
+    },
+    {
+      "name": "nttOnycProgramId",
+      "type": "pubkey",
+      "value": "nttpna5vXW7BN2Aa4AfTbkCncJWTEoBsnWvjS87Xgsd"
+    },
+    {
+      "name": "nttUsdcProgramId",
+      "type": "pubkey",
+      "value": "nttu74CdAmsErx5daJVCQNoDZujswFrskMzonoZSdGk"
+    },
+    {
+      "name": "onreProgramId",
+      "type": "pubkey",
+      "value": "onreuGhHHgVzMWSkj2oQDLDtvvGvoepBPkqyaubFcwe"
+    },
+    {
+      "name": "wormholeCoreProgramId",
+      "docs": [
+        "Wormhole Core Bridge program id (mainnet). Pinned for documentation /",
+        "future use by handlers that need to assert the wormhole-program account",
+        "the release CPI receives. The release CPI itself is dispatched via",
+        "`remaining_accounts`, so this constant isn't directly read by `lock_onyc`",
+        "— it exists so off-chain tooling and any future on-chain assertion share",
+        "one source of truth."
+      ],
+      "type": "pubkey",
+      "value": "worm2ZoG2kUd4vFXhvjh93UUH596ayRfgQ2MgjNMTth"
     }
   ]
 };

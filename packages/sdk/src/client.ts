@@ -16,6 +16,7 @@ import {
 import { FOGO_WORMHOLE_CHAIN_ID, NTT_ONYC_PROGRAM_ID, NTT_USDC_PROGRAM_ID } from './constants'
 import IDL from './idl/fogo_onre_relayer.json' with { type: 'json' }
 import {
+  buildNttReleaseWormholeOutboundAccountList,
   buildNttTransferLockAccountList,
   findInboxRateLimitPda,
   findNttConfigPda,
@@ -36,6 +37,7 @@ import {
   findInflightFlowPda,
   findOutflightFlowPda,
   findRedemptionTrackerPda,
+  findUserInboxAuthorityPda,
 } from './pda'
 
 /** Coerce a BN | bigint amount into a bigint without losing precision. */
@@ -72,7 +74,7 @@ export class RelayerClient {
   }) {
     return this.program.methods
       .initialize(params.depositFeeBps, params.withdrawFeeBps)
-      .accounts({
+      .accountsPartial({
         authority: params.authority,
         relayerConfig: this.configPda,
         relayerAuthority: this.authorityPda,
@@ -84,7 +86,7 @@ export class RelayerClient {
         tokenProgram: TOKEN_PROGRAM_ID,
         associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
         systemProgram: SystemProgram.programId,
-      } as any)
+      })
   }
 
   /**
@@ -112,7 +114,7 @@ export class RelayerClient {
         params.withdrawFeeBps ?? null,
         params.newAuthority ?? null,
       )
-      .accounts({
+      .accountsPartial({
         authority,
         relayerConfig: this.configPda,
         relayerAuthority: this.authorityPda,
@@ -120,7 +122,7 @@ export class RelayerClient {
         onycAta: this.ata(onycMint),
         feeVault: params.feeVault ?? null,
         tokenProgram: TOKEN_PROGRAM_ID,
-      } as any)
+      })
   }
 
   async acceptAuthority(params: {
@@ -132,10 +134,10 @@ export class RelayerClient {
     }
     return this.program.methods
       .acceptAuthority()
-      .accounts({
+      .accountsPartial({
         pendingAuthority: pending,
         relayerConfig: this.configPda,
-      } as any)
+      })
   }
 
   /**
@@ -145,6 +147,13 @@ export class RelayerClient {
    */
   claimUsdc(params: {
     payer: PublicKey
+    /**
+     * Originating FOGO wallet (= same pubkey on Solana). Drives the
+     * `[user_inbox, user_wallet]` PDA derivation that scopes the
+     * release_inbound destination ATA + sweep authority. Must match the
+     * wallet that signed the FOGO bridge intent.
+     */
+    userWallet: PublicKey
     usdcMint: PublicKey
     nttInboxItem: PublicKey
     nttTransceiverMessage: PublicKey
@@ -158,6 +167,15 @@ export class RelayerClient {
   }) {
     const [inflightFlow] = findInflightFlowPda(params.nttInboxItem, this.program.programId)
     const [redemptionTracker] = findRedemptionTrackerPda(this.program.programId)
+    const [userInboxAuthority] = findUserInboxAuthorityPda(
+      params.userWallet,
+      this.program.programId,
+    )
+    const userInboxAta = getAssociatedTokenAddressSync(
+      params.usdcMint,
+      userInboxAuthority,
+      true, // allow PDA-owner ATA
+    )
     const built = params.ntt
       ? this.buildNttRedeemReleaseAccounts({
           mint: params.usdcMint,
@@ -165,24 +183,31 @@ export class RelayerClient {
           nttTransceiverMessage: params.nttTransceiverMessage,
           ntt: params.ntt,
           programId: NTT_USDC_PROGRAM_ID,
+          // The release destination is the per-user inbox ATA, not the
+          // long-lived relayer-authority ATA. The handler sweeps the
+          // delta into custody after release.
+          recipientAtaOverride: userInboxAta,
         })
       : null
 
     const builder = this.program.methods
       .claimUsdc(built ? built.redeemAccountsLen : (params.redeemAccountsLen ?? 0))
-      .accounts({
+      .accountsPartial({
         payer: params.payer,
         relayerConfig: this.configPda,
         relayerAuthority: this.authorityPda,
         usdcMint: params.usdcMint,
         usdcAta: this.ata(params.usdcMint),
+        userWallet: params.userWallet,
+        userInboxAuthority,
+        userInboxAta,
         nttInboxItem: params.nttInboxItem,
         nttTransceiverMessage: params.nttTransceiverMessage,
         inflightFlow,
         redemptionTracker,
         tokenProgram: TOKEN_PROGRAM_ID,
         systemProgram: SystemProgram.programId,
-      } as any)
+      })
 
     return built ? builder.remainingAccounts(built.remainingAccounts) : builder
   }
@@ -190,27 +215,37 @@ export class RelayerClient {
   /**
    * Swap USDC to ONyc via OnRe (deposit leg). The SDK assembles OnRe's
    * 22-entry `remainingAccounts` list when `onre` is supplied.
+   *
+   * `feeVault` and `redemptionTracker` are explicit even though Anchor's
+   * relation resolver could derive them from `relayerConfig.has_one` and
+   * the singleton tracker PDA respectively — silent resolution depends
+   * on Anchor version + IDL metadata staying intact across regenerations.
+   * Pass them in to make instruction construction stable across upgrades.
    */
   swapUsdcToOnyc(params: {
     usdcMint: PublicKey
     onycMint: PublicKey
     nttInboxItem: PublicKey
+    feeVault: PublicKey
     onre?: OnreSwapContext
   }) {
     const [inflightFlow] = findInflightFlowPda(params.nttInboxItem, this.program.programId)
+    const [redemptionTracker] = findRedemptionTrackerPda(this.program.programId)
     const builder = this.program.methods
       .swapUsdcToOnyc()
-      .accounts({
+      .accountsPartial({
         relayerConfig: this.configPda,
         relayerAuthority: this.authorityPda,
         usdcMint: params.usdcMint,
         onycMint: params.onycMint,
         usdcAta: this.ata(params.usdcMint),
         onycAta: this.ata(params.onycMint),
+        feeVault: params.feeVault,
         nttInboxItem: params.nttInboxItem,
         inflightFlow,
+        redemptionTracker,
         tokenProgram: TOKEN_PROGRAM_ID,
-      } as any)
+      })
 
     if (!params.onre) {
       return builder
@@ -228,14 +263,25 @@ export class RelayerClient {
   }
 
   /**
-   * Lock ONyc via NTT, sending bONyc to `flow.fogo_sender`. Closes the
-   * inflight Flow PDA. Caller MUST fetch the flow first to obtain
-   * `flowAmount`/`flowFogoSender` (needed for `session_authority` derivation),
-   * and supply a fresh `outboxItem` keypair (also via `.signers([])`).
+   * Lock ONyc via NTT and atomically publish the outbound Wormhole VAA
+   * (transfer_lock + release_wormhole_outbound, both PDA-signed). Sends
+   * bONyc to `flow.fogo_sender`. Closes the inflight Flow PDA.
    *
-   * The NTT `transfer_lock` remaining-accounts list is appended automatically
-   * when all three of `flowAmount`, `flowFogoSender`, and `outboxItem` are
-   * supplied; failure-path tests omit them to assert on the bare instruction.
+   * Caller MUST fetch the flow first to obtain `flowAmount` /
+   * `flowFogoSender` (needed for the NTT `session_authority` derivation),
+   * supply a fresh `outboxItem` keypair (also via `.signers([])`), and
+   * supply the NTT v3 `release` accounts. After this PR there is no
+   * "lock without release" path — every successful `lock_onyc` emits the
+   * Wormhole VAA atomically.
+   *
+   * The remaining-accounts layout is `[...transferLock(14), ...release(15)]`
+   * for a total of 29; the on-chain handler uses
+   * `transferLockAccountCount: 14` to split.
+   *
+   * Failure-path callers (deliberately broken `remainingAccounts` for
+   * negative tests) MUST omit `flowAmount` / `flowFogoSender` / `outboxItem`
+   * — the SDK returns the bare builder so they can attach their own
+   * `remainingAccounts` to exercise pre-CPI guards.
    */
   lockOnyc(params: {
     payer: PublicKey
@@ -245,10 +291,26 @@ export class RelayerClient {
     flowAmount?: BN | bigint
     flowFogoSender?: Uint8Array
     outboxItem?: PublicKey
+    /**
+     * NTT v3 release-publish accounts. REQUIRED whenever `flowAmount` /
+     * `flowFogoSender` / `outboxItem` are all supplied — there is no
+     * "lock-only" code path post-merge.
+     */
+    release?: {
+      wormholeProgram: PublicKey
+      wormholeBridge: PublicKey
+      wormholeFeeCollector: PublicKey
+      wormholeSequence: PublicKey
+      outboxItemSigner: PublicKey
+      /** Optional override; defaults to the manager-as-transceiver PDA. */
+      wormholeMessage?: PublicKey
+      emitter?: PublicKey
+    }
   }) {
+    const transferLockAccountCount = 14
     const builder = this.program.methods
-      .lockOnyc()
-      .accounts({
+      .lockOnyc(transferLockAccountCount)
+      .accountsPartial({
         payer: params.payer,
         relayerConfig: this.configPda,
         relayerAuthority: this.authorityPda,
@@ -258,25 +320,46 @@ export class RelayerClient {
         inflightFlow: findInflightFlowPda(params.nttInboxItem, this.program.programId)[0],
         rentDestination: params.rentDestination,
         tokenProgram: TOKEN_PROGRAM_ID,
-      } as any)
+      })
 
     if (!params.flowAmount || !params.flowFogoSender || !params.outboxItem) {
       return builder
     }
 
-    return builder.remainingAccounts(
-      buildNttTransferLockAccountList({
-        nttProgramId: NTT_ONYC_PROGRAM_ID,
-        fromOwner: this.authorityPda,
-        fromOwnerIsSigner: false,
-        fromTokenAccount: this.ata(params.onycMint),
-        mint: params.onycMint,
-        outboxItem: params.outboxItem,
-        recipientChain: FOGO_WORMHOLE_CHAIN_ID,
-        recipientAddress: params.flowFogoSender,
-        amount: toBigInt(params.flowAmount),
-      }),
-    )
+    if (!params.release) {
+      throw new Error(
+        'lockOnyc: `release` is required whenever flowAmount/flowFogoSender/outboxItem '
+        + 'are supplied. The on-chain handler now CPIs into NTT release_wormhole_outbound '
+        + 'in the same ix as transfer_lock — there is no lock-only path.',
+      )
+    }
+
+    const transferLock = buildNttTransferLockAccountList({
+      nttProgramId: NTT_ONYC_PROGRAM_ID,
+      fromOwner: this.authorityPda,
+      fromOwnerIsSigner: false,
+      fromTokenAccount: this.ata(params.onycMint),
+      mint: params.onycMint,
+      outboxItem: params.outboxItem,
+      recipientChain: FOGO_WORMHOLE_CHAIN_ID,
+      recipientAddress: params.flowFogoSender,
+      amount: toBigInt(params.flowAmount),
+    })
+
+    const releaseAccts = buildNttReleaseWormholeOutboundAccountList({
+      payer: params.payer,
+      nttProgramId: NTT_ONYC_PROGRAM_ID,
+      outboxItem: params.outboxItem,
+      wormholeProgram: params.release.wormholeProgram,
+      wormholeBridge: params.release.wormholeBridge,
+      wormholeFeeCollector: params.release.wormholeFeeCollector,
+      wormholeSequence: params.release.wormholeSequence,
+      outboxItemSigner: params.release.outboxItemSigner,
+      wormholeMessage: params.release.wormholeMessage,
+      emitter: params.release.emitter,
+    })
+
+    return builder.remainingAccounts([...transferLock, ...releaseAccts])
   }
 
   /**
@@ -304,7 +387,7 @@ export class RelayerClient {
 
     const builder = this.program.methods
       .unlockOnyc(built ? built.redeemAccountsLen : (params.redeemAccountsLen ?? 0))
-      .accounts({
+      .accountsPartial({
         payer: params.payer,
         relayerConfig: this.configPda,
         relayerAuthority: this.authorityPda,
@@ -315,7 +398,7 @@ export class RelayerClient {
         outflightFlow,
         tokenProgram: TOKEN_PROGRAM_ID,
         systemProgram: SystemProgram.programId,
-      } as any)
+      })
 
     return built ? builder.remainingAccounts(built.remainingAccounts) : builder
   }
@@ -339,7 +422,7 @@ export class RelayerClient {
     const [redemptionTracker] = findRedemptionTrackerPda(this.program.programId)
     const builder = this.program.methods
       .sendUsdcToUser()
-      .accounts({
+      .accountsPartial({
         payer: params.payer,
         relayerConfig: this.configPda,
         relayerAuthority: this.authorityPda,
@@ -350,7 +433,7 @@ export class RelayerClient {
         rentDestination: params.rentDestination,
         redemptionTracker,
         tokenProgram: TOKEN_PROGRAM_ID,
-      } as any)
+      })
 
     if (!params.flowAmount || !params.flowFogoSender || !params.outboxItem) {
       return builder
@@ -389,9 +472,16 @@ export class RelayerClient {
     nttTransceiverMessage: PublicKey
     ntt: NttRedeemContext
     programId: PublicKey
+    /**
+     * Override the destination ATA on the release leg. Used by `claim_usdc`
+     * to route NTT release into the per-user inbox ATA (not the long-lived
+     * relayer custody ATA — the handler sweeps after release). Defaults to
+     * `this.ata(mint)` when omitted (`unlock_onyc`'s ONyc release).
+     */
+    recipientAtaOverride?: PublicKey
   }) {
     const fromChain = FOGO_WORMHOLE_CHAIN_ID
-    const mintAta = this.ata(params.mint)
+    const recipientAta = params.recipientAtaOverride ?? this.ata(params.mint)
     const [configPda] = findNttConfigPda(params.programId)
     const [peerPda] = findNttPeerPda(fromChain, params.programId)
     const [registeredTransceiverPda] = findRegisteredTransceiverPda(
@@ -420,7 +510,7 @@ export class RelayerClient {
       { pubkey: this.authorityPda, isSigner: false, isWritable: true },
       { pubkey: configPda, isSigner: false, isWritable: false },
       { pubkey: params.nttInboxItem, isSigner: false, isWritable: true },
-      { pubkey: mintAta, isSigner: false, isWritable: true },
+      { pubkey: recipientAta, isSigner: false, isWritable: true },
       { pubkey: tokenAuthorityPda, isSigner: false, isWritable: false },
       { pubkey: params.mint, isSigner: false, isWritable: true },
       { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
@@ -444,6 +534,7 @@ export class RelayerClient {
     usdcMint: PublicKey
     onycMint: PublicKey
     nttInboxItem: PublicKey
+    feeVault: PublicKey
     onre?: {
       redemptionRequest: PublicKey
       tokenProgram?: PublicKey
@@ -455,7 +546,7 @@ export class RelayerClient {
     const [redemptionTracker] = findRedemptionTrackerPda(this.program.programId)
     const builder = this.program.methods
       .requestRedemptionOnyc()
-      .accounts({
+      .accountsPartial({
         payer: params.payer,
         relayerConfig: this.configPda,
         relayerAuthority: this.authorityPda,
@@ -463,11 +554,13 @@ export class RelayerClient {
         onycMint: params.onycMint,
         usdcAta: this.ata(params.usdcMint),
         onycAta: this.ata(params.onycMint),
+        feeVault: params.feeVault,
         nttInboxItem: params.nttInboxItem,
         outflightFlow,
         redemptionTracker,
         tokenProgram: TOKEN_PROGRAM_ID,
-      } as any)
+        systemProgram: SystemProgram.programId,
+      })
 
     if (!params.onre) {
       return builder
@@ -497,7 +590,7 @@ export class RelayerClient {
     const [redemptionTracker] = findRedemptionTrackerPda(this.program.programId)
     return this.program.methods
       .claimRedemptionUsdc()
-      .accounts({
+      .accountsPartial({
         cranker: params.cranker,
         relayerConfig: this.configPda,
         relayerAuthority: this.authorityPda,
@@ -509,7 +602,7 @@ export class RelayerClient {
         payerForClose: params.payerForClose,
         redemptionRequest: params.redemptionRequest,
         tokenProgram: TOKEN_PROGRAM_ID,
-      } as any)
+      })
   }
 
   cancelRedemptionOnyc(params: {
@@ -530,7 +623,7 @@ export class RelayerClient {
     const [redemptionTracker] = findRedemptionTrackerPda(this.program.programId)
     const builder = this.program.methods
       .cancelRedemptionOnyc()
-      .accounts({
+      .accountsPartial({
         authority: params.authority,
         relayerConfig: this.configPda,
         relayerAuthority: this.authorityPda,
@@ -541,7 +634,7 @@ export class RelayerClient {
         redemptionTracker,
         payerForClose: params.payerForClose,
         tokenProgram: TOKEN_PROGRAM_ID,
-      } as any)
+      })
 
     if (!params.onre) {
       return builder
