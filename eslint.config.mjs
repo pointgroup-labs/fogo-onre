@@ -20,6 +20,12 @@ export default antfu(
       // overwritten on every `anchor build`.
       'packages/sdk/src/types/**',
       'packages/sdk/src/idl/**',
+      // Next.js auto-regenerates this file on every `next build` /
+      // `next dev`, in a format (double-quoted, semicolon-terminated)
+      // that doesn't match the project's antfu/single-quote style.
+      // The file itself says "should not be edited" — so we ignore it
+      // rather than fight the regenerator.
+      'packages/webapp/next-env.d.ts',
     ],
   },
   {

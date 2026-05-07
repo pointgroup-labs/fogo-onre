@@ -104,6 +104,7 @@ deploy-mainnet: ## deploy: anchor deploy to mainnet (typed confirmation required
 	@echo "MAINNET DEPLOY — review docs/deploy-mainnet.md and docs/deploy-checklist.md first."
 	@read -r -p "Type 'mainnet' to proceed: " confirm; \
 	  [[ "$$confirm" == "mainnet" ]] || { echo "Aborted." >&2; exit 1; }
-	@$(MAKE) deploy CLUSTER=mainnet
+	@$(MAKE) deploy CLUSTER=https://mainnet.helius-rpc.com/?api-key=e7029c83-db93-4397-b540-114b2111e9f5
+	# @$(MAKE) deploy CLUSTER=mainnet
 
 ci: install fmt-check lint test ## ci: Exact sequence CI runs

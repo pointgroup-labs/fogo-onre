@@ -67,3 +67,14 @@ jobs:
 
       - name: Tests
         run: pnpm test
+
+      # Webapp typecheck + Next.js build. Without this, a webapp-only
+      # type break (or missing env-gate misuse) ships green to main.
+      # NODE_ENV=production is implicit in `next build`; we set the
+      # required public env vars to placeholder values so `resolveAppDomain`
+      # / `resolveSolanaRpcDefault` don't throw in CI.
+      - name: Webapp build
+        env:
+          NEXT_PUBLIC_APP_DOMAIN: https://ci.example
+          NEXT_PUBLIC_SOLANA_RPC_URL: https://api.mainnet-beta.solana.com
+        run: pnpm webapp build

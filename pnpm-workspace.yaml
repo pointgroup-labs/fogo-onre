@@ -8,7 +8,7 @@ shellEmulator: true
 # @noble/curves, @noble/hashes, semver, ...). `signatures` still
 # requires valid registry signatures, just drops the downgrade heuristic.
 
-trustPolicy: signatures
+trustPolicy: no-downgrade
 
 packages:
   - packages/*
