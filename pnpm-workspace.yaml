@@ -17,3 +17,13 @@ overrides:
   # which lost its provenance attestation. The 25.x line uses
   # undici-types@~7.19 which has provenance.
   '@types/node': ^25.6.0
+  # @noble/curves@1.8.0 (transitive via @walletconnect/relay-auth) was
+  # republished without provenance. 1.9.x restored provenance attestations.
+  '@noble/curves': ^1.9.0
+  # @noble/hashes@1.7.0 (sibling package, same WalletConnect path) lost
+  # provenance the same way. 1.8.x is the matching restoration point.
+  '@noble/hashes': ^1.8.0
+  # semver@6.3.1 (transitive via babel/metro/react-native) was republished
+  # without provenance. 7.x has provenance attestations and an essentially
+  # identical public API for the parse/satisfies/range surface babel uses.
+  semver: ^7.6.0
