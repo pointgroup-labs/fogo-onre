@@ -223,7 +223,7 @@ services:
       - /etc/cranker/grafana-datasources.yml:/etc/grafana/provisioning/datasources/ds.yml:ro
     environment:
       GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/grafana_admin
-      GF_SERVER_ROOT_URL: https://grafana.cranker.tailnet
+      GF_SERVER_ROOT_URL: http://localhost:3000
     ports:
       - "127.0.0.1:3000:3000"
     secrets:
@@ -238,7 +238,7 @@ secrets:
     file: /etc/cranker/grafana_admin_password
 ```
 
-All ports bind to `127.0.0.1`; access from the operator workstation is via Tailscale's `tailscale serve` or `ssh -L` only. No `0.0.0.0` listeners.
+All ports bind to `127.0.0.1` on the host; nothing in the observability stack is publicly reachable. Operator access to Grafana, Prometheus UI, or Alertmanager happens on-demand via SSH local-port-forwarding from the operator workstation, e.g. `ssh -L 3000:127.0.0.1:3000 ops@<host>` then browse `http://localhost:3000`. No persistent VPN, no public TLS endpoint to maintain.
 
 ### Update model
 
@@ -254,36 +254,62 @@ CI (GitHub Actions) builds the image on every push to `main` and additionally ta
 
 **Rollback procedure**: edit `image:` in compose to a known-good `vX.Y.Z` or `@sha256:...` digest, `docker compose up -d cranker`. One command. Runbook keeps the last three known-good digests.
 
-### Host bootstrap and Tailscale
+### Host bootstrap and SSH access
 
-Tailscale is the only inbound-access mechanism for the box. Public port 22 is firewalled off; SSH binds to the Tailscale interface only. This means **if `tailscaled` dies, the operator loses SSH access and Grafana access simultaneously** — the only remaining recovery path is the Hetzner web console (KVM-over-web).
+Inbound access is plain hardened public SSH on port 22. No VPN. The cranker key is grief-only, the observability stack binds to host loopback only, and operator access uses ad-hoc `ssh -L` forwarding when needed — that combination keeps the attack surface small without the operational drag of a persistent overlay network.
 
 Bootstrap sequence on a fresh CX22:
 
-1. Initial provision via Hetzner web console: create user `ops` (UID arbitrary), add operator SSH public keys to `~/.ssh/authorized_keys`, disable root SSH, disable password auth.
-2. `apt install tailscale ufw fail2ban unattended-upgrades`.
-3. `tailscale up --auth-key=<ephemeral-tagged-key> --advertise-tags=tag:cranker --ssh`. The auth key is a **tagged ephemeral key** generated from the Tailscale admin console scoped to `tag:cranker`; ephemeral means the node deregisters automatically if it goes offline >30 days.
-4. Tailscale ACL (managed in the Tailscale admin, version-controlled separately) grants `tag:operator` → `tag:cranker:22,3000,9091,9093` and nothing else. No other tag can reach the box.
-5. `ufw default deny incoming; ufw allow in on tailscale0; ufw enable`. Public 22 stays closed; only Tailscale-side SSH works.
-6. Create the host `cranker` group and user with **UID/GID 10001** (matching the in-container user). `groupadd -g 10001 cranker; useradd -u 10001 -g 10001 -M -s /usr/sbin/nologin cranker`.
-7. `mkdir -p /etc/cranker; chown root:root /etc/cranker; chmod 0750 /etc/cranker`.
-8. Place `keypair.json`, `.env`, `docker-compose.yml`, `prometheus.yml`, `alertmanager.yml`, `grafana-datasources.yml`, `grafana_admin_password`. `chown 10001:10001 /etc/cranker/keypair.json && chmod 0400 /etc/cranker/keypair.json`. Other config files: `0640 root:docker`.
-9. `docker compose -f /etc/cranker/docker-compose.yml up -d`.
+1. Initial provision via Hetzner web console: Ubuntu 24.04 LTS image, paste operator SSH public key into the instance creation form (Hetzner injects it into `root@` `authorized_keys` automatically).
+2. SSH in once as root, immediately create unprivileged operator user and disable root login:
+   ```
+   adduser --disabled-password --gecos "" ops
+   mkdir -p /home/ops/.ssh && cp /root/.ssh/authorized_keys /home/ops/.ssh/
+   chown -R ops:ops /home/ops/.ssh && chmod 700 /home/ops/.ssh && chmod 600 /home/ops/.ssh/authorized_keys
+   usermod -aG sudo,docker ops
+   ```
+3. `apt update && apt install -y ufw fail2ban unattended-upgrades docker.io docker-compose-plugin`.
+4. Harden `/etc/ssh/sshd_config`:
+   - `PermitRootLogin no`
+   - `PasswordAuthentication no`
+   - `KbdInteractiveAuthentication no`
+   - `AllowUsers ops`
+   - `AllowTcpForwarding yes` (required for `ssh -L` operator access to Grafana)
+   - `MaxAuthTries 3`
+   - Then `systemctl restart ssh`.
+5. Configure `ufw`:
+   ```
+   ufw default deny incoming
+   ufw default allow outgoing
+   ufw allow 22/tcp
+   ufw enable
+   ```
+   Only port 22 is publicly reachable. All compose ports stay bound to `127.0.0.1` and are reached via `ssh -L` only.
+6. Configure `fail2ban` with stock `sshd` jail (enabled by default on Ubuntu): `systemctl enable --now fail2ban`. Default ban window 10min after 5 failures is fine for a grief-tier key.
+7. Enable `unattended-upgrades` for security patches: `dpkg-reconfigure --priority=low unattended-upgrades`.
+8. Create the host `cranker` group and user with **UID/GID 10001** (matching the in-container user):
+   ```
+   groupadd -g 10001 cranker
+   useradd -u 10001 -g 10001 -M -s /usr/sbin/nologin cranker
+   ```
+9. `mkdir -p /etc/cranker; chown root:root /etc/cranker; chmod 0750 /etc/cranker`.
+10. Place `keypair.json`, `.env`, `docker-compose.yml`, `prometheus.yml`, `alertmanager.yml`, `grafana-datasources.yml`, `grafana_admin_password`, `slack_webhook` (transferred via `scp` over SSH). `chown 10001:10001 /etc/cranker/keypair.json && chmod 0400 /etc/cranker/keypair.json`. Other config files: `0640 root:docker`.
+11. `docker compose -f /etc/cranker/docker-compose.yml up -d`.
 
-**Tailscale failure modes and mitigations**:
-- `tailscaled` crashes → systemd restarts it (default unit behavior). If it crash-loops, operator must use Hetzner web console KVM to debug.
-- Tailscale auth-key expires (default 90 days for non-ephemeral) → use ephemeral keys or rotate proactively. Documented in the rotation runbook.
-- Tailscale company outage → SSH and Grafana go dark for the duration. The cranker daemon itself keeps running — it makes only outbound connections to RPC endpoints, which don't traverse Tailscale. Grief-only blast radius makes this acceptable.
+**Failure modes**:
+- Operator SSH key compromised → attacker can reach the box on port 22 with rate-limit (fail2ban) but no password fallback. Mitigations: keep operator keys on hardware tokens (YubiKey), rotate on suspected exposure. Recovery: revoke from `authorized_keys` via Hetzner web console KVM.
+- SSH daemon misconfigured and operator locked out → recover via Hetzner web console KVM.
+- Fail2ban over-bans operator IP → unban via KVM, or wait out the 10-min window.
 
 ### SSH and host hardening
 
 Lifted from codex review's P2 key-custody bullet. None of these are negotiable:
 
-- SSH bound to `tailscale0` interface only — public port 22 firewalled off via `ufw`.
-- Root login disabled; key auth only; password auth disabled.
-- `fail2ban` on the SSH port (Tailscale-side, defense in depth against compromised operator keys).
+- SSH on public port 22, hardened per the bootstrap sequence above (`PermitRootLogin no`, `PasswordAuthentication no`, key auth only, `AllowUsers ops`).
+- `fail2ban` on the SSH port — defense in depth against credential-stuffing attempts.
 - `unattended-upgrades` enabled for security patches.
-- No SSH agent forwarding from operator workstations.
+- No SSH agent forwarding from operator workstations (operator workstation should set `ForwardAgent no` for this host).
+- Operator SSH keys on hardware tokens (YubiKey or equivalent) when available.
 - Cranker keypair file: `0400`, owned by host UID/GID `10001:10001` (matches in-container `cranker` user), mounted read-only into container. Host root can still read/replace it (root bypasses POSIX perms); no other host user can.
 
 ### Disk and log management
@@ -329,7 +355,7 @@ After implementation:
 
 - Multi-region / HA cranker.
 - HSM/KMS for cranker keypair (key is grief-only; tiny SOL balance + spend alarm is the proportionate mitigation).
-- Public Grafana dashboard. Internal Tailscale-only access for now.
+- Public Grafana dashboard. Operator-only access via `ssh -L` for now.
 - Migration of the CLI's interactive `cranker advance` UX. CLI keeps importing `advance/` from cranker package; user-facing CLI behavior is unchanged.
 - Auto-rollback on health regression. Watchtower currently only auto-forwards; rollback is human-driven via runbook.
 
