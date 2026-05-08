@@ -15,7 +15,13 @@ function shouldPersistKey(key: readonly unknown[]): boolean {
 }
 
 export default function QueryProviders({ children }: { children: ReactNode }) {
-  const [queryClient] = useState(() => getQueryClient())
+  const [queryClient] = useState(() => {
+    const qc = getQueryClient()
+    if (qc.getQueryData(['pending-flow-ids']) === undefined) {
+      qc.setQueryData<string[]>(['pending-flow-ids'], [])
+    }
+    return qc
+  })
 
   // Server render: plain QueryClientProvider (no localStorage available).
   if (typeof window === 'undefined') {
