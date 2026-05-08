@@ -115,7 +115,7 @@ export async function executeSdkBundledRedeem(
         const raw = inner.serialize()
         sig = await withTimeout(
           target.destConnection.sendRawTransaction(raw, { skipPreflight: false }),
-          60_000,
+          ctx.txConfirmTimeoutMs,
           `dest.sendRawTransaction(sdk-redeem:${description})`,
         )
         const latest = await target.destConnection.getLatestBlockhash('confirmed')
@@ -124,7 +124,7 @@ export async function executeSdkBundledRedeem(
             { signature: sig, blockhash: latest.blockhash, lastValidBlockHeight: latest.lastValidBlockHeight },
             'confirmed',
           ),
-          60_000,
+          ctx.txConfirmTimeoutMs,
           `dest.confirmTransaction(sdk-redeem:${description})`,
         )
       } else {
@@ -136,7 +136,7 @@ export async function executeSdkBundledRedeem(
             [target.destSigner, ...extraSigners],
             { commitment: 'confirmed', skipPreflight: false },
           ),
-          60_000,
+          ctx.txConfirmTimeoutMs,
           `dest.sendAndConfirmTransaction(sdk-redeem:${description})`,
         )
       }

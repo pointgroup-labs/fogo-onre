@@ -43,6 +43,7 @@ const schema = z.object({
   SHUTDOWN_DEADLINE_MS: z.coerce.number().int().min(1000).default(8000),
   BALANCE_POLL_INTERVAL_MS: z.coerce.number().int().min(5000).default(60_000),
   RPC_TIMEOUT_MS: z.coerce.number().int().min(1000).default(15_000),
+  TX_CONFIRM_TIMEOUT_MS: z.coerce.number().int().min(5000).default(60_000),
   WORMHOLESCAN_TIMEOUT_MS: z.coerce.number().int().min(1000).default(10_000),
   HEARTBEAT_STALE_MS: z.coerce.number().int().min(30_000).default(120_000),
   MAX_CONCURRENT_ADVANCES: z.coerce.number().int().min(1).max(32).default(4),
@@ -69,6 +70,7 @@ export type CrankerConfig = {
   shutdownDeadlineMs: number
   balancePollIntervalMs: number
   rpcTimeoutMs: number
+  txConfirmTimeoutMs: number
   wormholescanTimeoutMs: number
   heartbeatStaleMs: number
   maxConcurrentAdvances: number
@@ -97,6 +99,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     shutdownDeadlineMs: parsed.SHUTDOWN_DEADLINE_MS,
     balancePollIntervalMs: parsed.BALANCE_POLL_INTERVAL_MS,
     rpcTimeoutMs: parsed.RPC_TIMEOUT_MS,
+    txConfirmTimeoutMs: parsed.TX_CONFIRM_TIMEOUT_MS,
     wormholescanTimeoutMs: parsed.WORMHOLESCAN_TIMEOUT_MS,
     heartbeatStaleMs: parsed.HEARTBEAT_STALE_MS,
     maxConcurrentAdvances: parsed.MAX_CONCURRENT_ADVANCES,

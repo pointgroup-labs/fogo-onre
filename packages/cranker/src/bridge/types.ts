@@ -78,6 +78,7 @@ export interface BridgeContext {
   wormholescanUrl: string
   wormholescanTimeoutMs: number
   rpcTimeoutMs: number
+  txConfirmTimeoutMs: number
 }
 
 export type BridgeRedeemResult

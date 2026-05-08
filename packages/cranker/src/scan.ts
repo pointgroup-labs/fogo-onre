@@ -8,10 +8,6 @@ export type AdvanceFns = {
   claimUsdc: typeof advance.claimUsdc
   swapUsdcToOnyc: typeof advance.swapUsdcToOnyc
   lockOnyc: typeof advance.lockOnyc
-  unlockOnyc: typeof advance.unlockOnyc
-  requestRedemption: typeof advance.requestRedemption
-  claimRedemption: typeof advance.claimRedemption
-  sendUsdcToUser: typeof advance.sendUsdcToUser
 }
 
 export type ScannedFlow = {
@@ -57,10 +53,6 @@ const DEFAULT_ADVANCE_FNS: AdvanceFns = {
   claimUsdc: advance.claimUsdc,
   swapUsdcToOnyc: advance.swapUsdcToOnyc,
   lockOnyc: advance.lockOnyc,
-  unlockOnyc: advance.unlockOnyc,
-  requestRedemption: advance.requestRedemption,
-  claimRedemption: advance.claimRedemption,
-  sendUsdcToUser: advance.sendUsdcToUser,
 }
 
 const defaultEnumerateFlows: EnumerateFlowsFn = async () => []
@@ -215,9 +207,6 @@ function pickAdvanceForStatus(status: string, fns: AdvanceFns): DispatchFn | und
       return fns.swapUsdcToOnyc
     case 'Swapped':
       return fns.lockOnyc
-    // Withdraw-chain dispatches added when those advance fns are implemented:
-    //   case 'RedemptionPending': return fns.claimRedemption
-    //   case 'RedemptionSettled': return fns.sendUsdcToUser
     default:
       return undefined
   }

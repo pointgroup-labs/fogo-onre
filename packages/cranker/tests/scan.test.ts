@@ -50,10 +50,6 @@ describe('scanAndAdvance', () => {
         claimUsdc,
         swapUsdcToOnyc,
         lockOnyc,
-        unlockOnyc: vi.fn(),
-        requestRedemption: vi.fn(),
-        claimRedemption: vi.fn(),
-        sendUsdcToUser: vi.fn(),
       },
     })
 
@@ -87,10 +83,6 @@ describe('scanAndAdvance', () => {
         claimUsdc,
         swapUsdcToOnyc: vi.fn(),
         lockOnyc: vi.fn(),
-        unlockOnyc: vi.fn(),
-        requestRedemption: vi.fn(),
-        claimRedemption: vi.fn(),
-        sendUsdcToUser: vi.fn(),
       },
     })
 
@@ -110,10 +102,6 @@ describe('scanAndAdvance', () => {
           claimUsdc: vi.fn(),
           swapUsdcToOnyc: vi.fn(),
           lockOnyc: vi.fn(),
-          unlockOnyc: vi.fn(),
-          requestRedemption: vi.fn(),
-          claimRedemption: vi.fn(),
-          sendUsdcToUser: vi.fn(),
         },
       }),
     ).rejects.toThrow(/abort/)
@@ -136,10 +124,6 @@ describe('scanAndAdvance', () => {
         claimUsdc,
         swapUsdcToOnyc: vi.fn(),
         lockOnyc: vi.fn(),
-        unlockOnyc: vi.fn(),
-        requestRedemption: vi.fn(),
-        claimRedemption: vi.fn(),
-        sendUsdcToUser: vi.fn(),
       },
       seenAdvanceErrors,
     }
@@ -173,10 +157,6 @@ describe('scanAndAdvance', () => {
         claimUsdc,
         swapUsdcToOnyc: vi.fn(),
         lockOnyc: vi.fn(),
-        unlockOnyc: vi.fn(),
-        requestRedemption: vi.fn(),
-        claimRedemption: vi.fn(),
-        sendUsdcToUser: vi.fn(),
       },
       seenAdvanceErrors,
     }
@@ -218,10 +198,6 @@ describe('scanAndAdvance', () => {
         claimUsdc,
         swapUsdcToOnyc: vi.fn(),
         lockOnyc: vi.fn(),
-        unlockOnyc: vi.fn(),
-        requestRedemption: vi.fn(),
-        claimRedemption: vi.fn(),
-        sendUsdcToUser: vi.fn(),
       },
       seenAdvanceErrors,
     })

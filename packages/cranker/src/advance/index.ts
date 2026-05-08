@@ -1,8 +1,4 @@
-export { claimRedemption } from './claim-redemption'
 export { claimUsdc } from './claim-usdc'
 export { lockOnyc } from './lock-onyc'
-export { requestRedemption } from './request-redemption'
-export { sendUsdcToUser } from './send-usdc-to-user'
 export { swapUsdcToOnyc } from './swap-usdc-to-onyc'
 export * from './types'
-export { unlockOnyc } from './unlock-onyc'

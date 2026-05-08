@@ -13,6 +13,7 @@ export type AdvanceContext = {
   relayerProgramId: PublicKey
   wormholescanUrl: string
   wormholescanTimeoutMs: number
+  rpcTimeoutMs: number
   metrics: Metrics
   /** Structured logger; threaded through scan + enumerate + (future) advance fns. */
   log: Logger

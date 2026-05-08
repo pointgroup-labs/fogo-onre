@@ -174,6 +174,7 @@ async function main(): Promise<void> {
     relayerProgramId: client.program.programId,
     wormholescanUrl: cfg.wormholescanUrl,
     wormholescanTimeoutMs: cfg.wormholescanTimeoutMs,
+    rpcTimeoutMs: cfg.rpcTimeoutMs,
     metrics,
     log,
     // Cross-scan cache: FOGO source-tx → user wallet. claim_usdc resolves
@@ -250,6 +251,7 @@ async function main(): Promise<void> {
                 wormholescanUrl: cfg.wormholescanUrl,
                 wormholescanTimeoutMs: cfg.wormholescanTimeoutMs,
                 rpcTimeoutMs: cfg.rpcTimeoutMs,
+                txConfirmTimeoutMs: cfg.txConfirmTimeoutMs,
               },
               bridgeTarget,
               {

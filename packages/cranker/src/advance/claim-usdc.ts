@@ -12,6 +12,12 @@ import { PublicKey } from '@solana/web3.js'
 import { withTimeout } from '../rpc'
 import { fetchVaaBytes } from './helpers'
 
+// Bound for the FOGO-tx → user-wallet cache. ~10k entries × ~80 bytes ≈ <1 MB
+// of RSS — well below any practical limit, but enough to absorb a Wormholescan
+// backfill burst without re-fetching every entry. The chain is the source of
+// truth; eviction is harmless.
+const USER_WALLET_CACHE_MAX = 10_000
+
 export type ClaimUsdcInput = {
   fogoTx: string
   vaaHex?: string
@@ -78,7 +84,7 @@ export async function claimUsdc(
       const recovered = cached
         ?? await withTimeout(
           deriveUserWalletFromFogoTx(ctx.fogoConnection, input.fogoTx),
-          15_000,
+          ctx.rpcTimeoutMs,
           'deriveUserWalletFromFogoTx',
         ).catch(() => null)
       if (!recovered) {
@@ -100,13 +106,22 @@ export async function claimUsdc(
         }
       }
       userWallet = recovered
+      // Bound the cache to keep RSS flat over a long-running daemon. The
+      // chain is the source of truth — eviction at most causes one extra
+      // FOGO RPC the next time the same VAA is enumerated.
+      if (ctx.userWalletCache.size >= USER_WALLET_CACHE_MAX) {
+        const oldest = ctx.userWalletCache.keys().next().value
+        if (oldest !== undefined) {
+          ctx.userWalletCache.delete(oldest)
+        }
+      }
       ctx.userWalletCache.set(input.fogoTx, recovered)
     }
 
     // Pre-flight 1: RelayerConfig must exist
     const cfg = await withTimeout(
       connection.getAccountInfo(client.configPda),
-      15_000,
+      ctx.rpcTimeoutMs,
       'getAccountInfo(RelayerConfig)',
     ).catch(() => null)
     if (!cfg) {
@@ -154,12 +169,12 @@ export async function claimUsdc(
     const [inboxInfo, ataInfo] = await Promise.all([
       withTimeout(
         connection.getAccountInfo(resolved.nttInboxItem),
-        15_000,
+        ctx.rpcTimeoutMs,
         'getAccountInfo(NttInboxItem)',
       ).catch(() => null),
       withTimeout(
         connection.getAccountInfo(userInboxAta),
-        15_000,
+        ctx.rpcTimeoutMs,
         'getAccountInfo(userInboxAta)',
       ).catch(() => null),
     ])

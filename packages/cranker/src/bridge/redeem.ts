@@ -237,7 +237,7 @@ export async function executeBridgePlan(
         commitment: 'confirmed',
         skipPreflight: false,
       }),
-      60_000,
+      ctx.txConfirmTimeoutMs,
       `dest.sendAndConfirmTransaction(${plan.action})`,
     )
     ctx.metrics.redeemed.inc({ target: target.name, result: 'ok' })
