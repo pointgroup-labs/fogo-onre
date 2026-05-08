@@ -8,7 +8,7 @@ import {
   SYSVAR_RENT_PUBKEY,
 } from '@solana/web3.js'
 import { FOGO_WORMHOLE_CHAIN_ID } from '../constants'
-import { readonly, writable } from '../utils/accountMeta'
+import { readonly, signerWritable, writable } from '../utils/accountMeta'
 
 const CONFIG_SEED = Buffer.from('config')
 const NTT_MANAGER_PEER_SEED = Buffer.from('peer')
@@ -248,20 +248,21 @@ export function buildNttTransferLockAccountList(
   )
 
   const accounts: AccountMeta[] = [
+    // entry 0 has parameterised `isSigner` (PDA on relayer side, user on FOGO side) — keep literal.
     { pubkey: params.fromOwner, isSigner: params.fromOwnerIsSigner, isWritable: true },
-    { pubkey: configPda, isSigner: false, isWritable: false },
-    { pubkey: params.mint, isSigner: false, isWritable: true },
-    { pubkey: params.fromTokenAccount, isSigner: false, isWritable: true },
-    { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+    readonly(configPda),
+    writable(params.mint),
+    writable(params.fromTokenAccount),
+    readonly(TOKEN_PROGRAM_ID),
     { pubkey: params.outboxItem, isSigner: true, isWritable: true },
-    { pubkey: outboxRateLimitPda, isSigner: false, isWritable: true },
-    { pubkey: custody, isSigner: false, isWritable: true },
-    { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
-    { pubkey: inboxRateLimitPda, isSigner: false, isWritable: true },
-    { pubkey: peerPda, isSigner: false, isWritable: false },
-    { pubkey: sessionAuthorityPda, isSigner: false, isWritable: false },
-    { pubkey: tokenAuthorityPda, isSigner: false, isWritable: false },
-    { pubkey: params.nttProgramId, isSigner: false, isWritable: false },
+    writable(outboxRateLimitPda),
+    writable(custody),
+    readonly(SystemProgram.programId),
+    writable(inboxRateLimitPda),
+    readonly(peerPda),
+    readonly(sessionAuthorityPda),
+    readonly(tokenAuthorityPda),
+    readonly(params.nttProgramId),
   ]
   if (accounts.length !== NTT_TRANSFER_LOCK_ACCOUNT_COUNT) {
     throw new Error(
@@ -366,21 +367,21 @@ export function buildNttReleaseWormholeOutboundAccountList(
   const emitter = params.emitter ?? findNttEmitterPda(transceiverProgramId)[0]
 
   return [
-    { pubkey: params.payer, isSigner: true, isWritable: true }, //  0
-    { pubkey: configPda, isSigner: false, isWritable: false }, //  1
-    { pubkey: params.outboxItem, isSigner: false, isWritable: true }, //  2
-    { pubkey: registeredTransceiverPda, isSigner: false, isWritable: false }, //  3  transceiver (NTT IDL)
-    { pubkey: wormholeMessage, isSigner: false, isWritable: true }, //  4  wormhole_message (must be writable — NTT v3 inits this)
-    { pubkey: emitter, isSigner: false, isWritable: false }, //  5
-    { pubkey: params.wormholeBridge, isSigner: false, isWritable: true }, //  6  wormhole.bridge
-    { pubkey: params.wormholeFeeCollector, isSigner: false, isWritable: true }, //  7  wormhole.fee_collector
-    { pubkey: params.wormholeSequence, isSigner: false, isWritable: true }, //  8  wormhole.sequence
-    { pubkey: params.wormholeProgram, isSigner: false, isWritable: false }, //  9  wormhole.program
-    { pubkey: SystemProgram.programId, isSigner: false, isWritable: false }, // 10  wormhole.system_program
-    { pubkey: SYSVAR_CLOCK_PUBKEY, isSigner: false, isWritable: false }, // 11  wormhole.clock
-    { pubkey: SYSVAR_RENT_PUBKEY, isSigner: false, isWritable: false }, // 12  wormhole.rent
-    { pubkey: params.nttProgramId, isSigner: false, isWritable: false }, // 13  manager (v3)
-    { pubkey: params.outboxItemSigner, isSigner: false, isWritable: false }, // 14  outbox_item_signer (v3)
+    signerWritable(params.payer), //  0
+    readonly(configPda), //  1
+    writable(params.outboxItem), //  2
+    readonly(registeredTransceiverPda), //  3  transceiver (NTT IDL)
+    writable(wormholeMessage), //  4  wormhole_message (must be writable — NTT v3 inits this)
+    readonly(emitter), //  5
+    writable(params.wormholeBridge), //  6  wormhole.bridge
+    writable(params.wormholeFeeCollector), //  7  wormhole.fee_collector
+    writable(params.wormholeSequence), //  8  wormhole.sequence
+    readonly(params.wormholeProgram), //  9  wormhole.program
+    readonly(SystemProgram.programId), // 10  wormhole.system_program
+    readonly(SYSVAR_CLOCK_PUBKEY), // 11  wormhole.clock
+    readonly(SYSVAR_RENT_PUBKEY), // 12  wormhole.rent
+    readonly(params.nttProgramId), // 13  manager (v3)
+    readonly(params.outboxItemSigner), // 14  outbox_item_signer (v3)
   ]
 }
 

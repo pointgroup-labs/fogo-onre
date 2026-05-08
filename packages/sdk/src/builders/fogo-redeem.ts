@@ -1,8 +1,9 @@
 import type { PublicKey } from '@solana/web3.js'
-import { sha256 } from '@noble/hashes/sha2.js'
 import { TOKEN_PROGRAM_ID } from '@solana/spl-token'
 import { SystemProgram, TransactionInstruction } from '@solana/web3.js'
 import { SOLANA_WORMHOLE_CHAIN_ID } from '../constants'
+import { readonly, signerWritable, writable } from '../utils/accountMeta'
+import { ixDiscriminator } from '../utils/discriminators'
 import {
   findInboxRateLimitPda,
   findNttConfigPda,
@@ -35,17 +36,9 @@ import {
  * PDAs the manager can't validate.
  */
 
-const REDEEM_DISCRIMINATOR = sha256(
-  new TextEncoder().encode('global:redeem'),
-).slice(0, 8)
-
-const RELEASE_INBOUND_MINT_DISCRIMINATOR = sha256(
-  new TextEncoder().encode('global:release_inbound_mint'),
-).slice(0, 8)
-
-const RELEASE_INBOUND_UNLOCK_DISCRIMINATOR = sha256(
-  new TextEncoder().encode('global:release_inbound_unlock'),
-).slice(0, 8)
+const REDEEM_DISCRIMINATOR = ixDiscriminator('redeem')
+const RELEASE_INBOUND_MINT_DISCRIMINATOR = ixDiscriminator('release_inbound_mint')
+const RELEASE_INBOUND_UNLOCK_DISCRIMINATOR = ixDiscriminator('release_inbound_unlock')
 
 export interface BuildFogoNttRedeemIxParams {
   /** Permissionless caller (signs + pays FOGO gas). */
@@ -87,16 +80,16 @@ export function buildFogoNttRedeemIx(
   const [outboxRateLimitPda] = findOutboxRateLimitPda(params.nttManagerProgramId)
 
   const keys = [
-    { pubkey: params.payer, isSigner: true, isWritable: true },
-    { pubkey: configPda, isSigner: false, isWritable: false },
-    { pubkey: peerPda, isSigner: false, isWritable: false },
-    { pubkey: params.nttTransceiverMessage, isSigner: false, isWritable: false },
-    { pubkey: registeredTransceiverPda, isSigner: false, isWritable: false },
-    { pubkey: params.mint, isSigner: false, isWritable: false },
-    { pubkey: params.nttInboxItem, isSigner: false, isWritable: true },
-    { pubkey: inboxRateLimitPda, isSigner: false, isWritable: true },
-    { pubkey: outboxRateLimitPda, isSigner: false, isWritable: true },
-    { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+    signerWritable(params.payer),
+    readonly(configPda),
+    readonly(peerPda),
+    readonly(params.nttTransceiverMessage),
+    readonly(registeredTransceiverPda),
+    readonly(params.mint),
+    writable(params.nttInboxItem),
+    writable(inboxRateLimitPda),
+    writable(outboxRateLimitPda),
+    readonly(SystemProgram.programId),
   ]
 
   const data = Buffer.alloc(REDEEM_DISCRIMINATOR.length)
@@ -164,14 +157,14 @@ function buildReleaseInboundIx(
   const custody = findNttCustodyAta(params.mint, params.nttManagerProgramId)
 
   const keys = [
-    { pubkey: params.payer, isSigner: true, isWritable: true },
-    { pubkey: configPda, isSigner: false, isWritable: false },
-    { pubkey: params.nttInboxItem, isSigner: false, isWritable: true },
-    { pubkey: params.recipientAta, isSigner: false, isWritable: true },
-    { pubkey: tokenAuthorityPda, isSigner: false, isWritable: false },
-    { pubkey: params.mint, isSigner: false, isWritable: true },
-    { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
-    { pubkey: custody, isSigner: false, isWritable: true },
+    signerWritable(params.payer),
+    readonly(configPda),
+    writable(params.nttInboxItem),
+    writable(params.recipientAta),
+    readonly(tokenAuthorityPda),
+    writable(params.mint),
+    readonly(TOKEN_PROGRAM_ID),
+    writable(custody),
   ]
 
   const data = Buffer.alloc(discriminator.length + 1)

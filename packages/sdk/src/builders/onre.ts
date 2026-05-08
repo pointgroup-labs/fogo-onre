@@ -11,6 +11,7 @@ import {
 } from '@solana/web3.js'
 import { ONRE_PROGRAM_ID } from '../constants'
 import { readonly, writable } from '../utils/accountMeta'
+import { accountDiscriminator } from '../utils/discriminators'
 
 export function findOnreStatePda(
   programId: PublicKey = ONRE_PROGRAM_ID,
@@ -136,9 +137,19 @@ export const OFFER_TOKEN_OUT_MINT_OFFSET = 40
  *
  * Total: 256 bytes. See offset constants below for individual field locations.
  */
-export const REDEMPTION_OFFER_DISCRIMINATOR = new Uint8Array([
-  170, 229, 178, 15, 184, 107, 140, 41,
-])
+export const REDEMPTION_OFFER_DISCRIMINATOR = accountDiscriminator('RedemptionOffer')
+
+// Byte-pin tripwire: the hardcoded value below is the sha256("account:RedemptionOffer")[..8]
+// observed against OnRe mainnet. Any drift means upstream renamed the account; refresh
+// fixtures + this pin together (don't silently follow the rename).
+{
+  const pinned = new Uint8Array([170, 229, 178, 15, 184, 107, 140, 41])
+  for (let i = 0; i < 8; i++) {
+    if (REDEMPTION_OFFER_DISCRIMINATOR[i] !== pinned[i]) {
+      throw new Error('RedemptionOffer discriminator drifted from mainnet pin')
+    }
+  }
+}
 /** Total serialized size in bytes. */
 export const REDEMPTION_OFFER_SIZE = 256
 /** Offset of `offer` (deposit-Offer PDA reference) inside RedemptionOffer data. */
@@ -163,14 +174,34 @@ export interface OnreDeployment {
   programId: PublicKey
   state: PublicKey
   boss: PublicKey
+  /** `offer_vault_authority` PDA — owns deposit-side vault ATAs. */
+  vaultAuthority: PublicKey
+  /** `permissionless-1` PDA — used by `take_offer_permissionless`. */
+  permissionlessAuthority: PublicKey
+  /** `mint_authority` PDA — mints ONyc on the deposit leg. */
+  mintAuthority: PublicKey
+  /** `redemption_offer_vault_authority` PDA — owns withdraw-side vault ATAs. */
+  redemptionVaultAuthority: PublicKey
+}
+
+/** Build an `OnreDeployment` from a `programId` + `boss` pair, deriving all PDAs. */
+export function makeOnreDeployment(programId: PublicKey, boss: PublicKey): OnreDeployment {
+  return {
+    programId,
+    state: findOnreStatePda(programId)[0],
+    boss,
+    vaultAuthority: findOnreVaultAuthorityPda(programId)[0],
+    permissionlessAuthority: findOnrePermissionlessAuthorityPda(programId)[0],
+    mintAuthority: findOnreMintAuthorityPda(programId)[0],
+    redemptionVaultAuthority: findOnreRedemptionVaultAuthorityPda(programId)[0],
+  }
 }
 
 /** OnRe mainnet deployment (the only one currently in production). */
-export const ONRE_MAINNET_DEPLOYMENT: OnreDeployment = {
-  programId: ONRE_PROGRAM_ID,
-  state: findOnreStatePda(ONRE_PROGRAM_ID)[0],
-  boss: ONRE_BOSS_PUBKEY,
-}
+export const ONRE_MAINNET_DEPLOYMENT: OnreDeployment = makeOnreDeployment(
+  ONRE_PROGRAM_ID,
+  ONRE_BOSS_PUBKEY,
+)
 
 /**
  * Optional overrides for `buildOnreSwapRemainingAccounts`. Defaults are wired
@@ -219,8 +250,7 @@ function resolveRedemptionVaultAccounts(params: {
   tokenInMint: PublicKey
   tokenOutMint: PublicKey
   tokenProgram?: PublicKey
-  programId?: PublicKey
-  state?: PublicKey
+  deployment?: OnreDeployment
 }): {
   programId: PublicKey
   tokenProgram: PublicKey
@@ -229,17 +259,23 @@ function resolveRedemptionVaultAccounts(params: {
   vaultAuthority: PublicKey
   vaultTokenAccount: PublicKey
 } {
-  const programId = params.programId ?? ONRE_PROGRAM_ID
+  const deployment = params.deployment ?? ONRE_MAINNET_DEPLOYMENT
   const tokenProgram = params.tokenProgram ?? TOKEN_PROGRAM_ID
-  const state = params.state ?? findOnreStatePda(programId)[0]
   const [redemptionOffer] = findOnreRedemptionOfferPda(
-    params.tokenInMint, params.tokenOutMint, programId,
+    params.tokenInMint, params.tokenOutMint, deployment.programId,
   )
-  const [vaultAuthority] = findOnreRedemptionVaultAuthorityPda(programId)
+  const vaultAuthority = deployment.redemptionVaultAuthority
   const vaultTokenAccount = getAssociatedTokenAddressSync(
     params.tokenInMint, vaultAuthority, true, tokenProgram,
   )
-  return { programId, tokenProgram, state, redemptionOffer, vaultAuthority, vaultTokenAccount }
+  return {
+    programId: deployment.programId,
+    tokenProgram,
+    state: deployment.state,
+    redemptionOffer,
+    vaultAuthority,
+    vaultTokenAccount,
+  }
 }
 
 /**
@@ -275,12 +311,9 @@ export function buildOnreSwapRemainingAccounts(params: {
   ctx?: OnreSwapContext
 }): AccountMeta[] {
   const { deployment, tokenInProgram, tokenOutProgram } = resolveContext(params.ctx)
-  const { programId, state: statePda, boss } = deployment
+  const { programId, state: statePda, boss, vaultAuthority, permissionlessAuthority: permAuthority, mintAuthority } = deployment
 
   const [offerPda] = findOnreOfferPda(params.tokenInMint, params.tokenOutMint, programId)
-  const [vaultAuthority] = findOnreVaultAuthorityPda(programId)
-  const [permAuthority] = findOnrePermissionlessAuthorityPda(programId)
-  const [mintAuthority] = findOnreMintAuthorityPda(programId)
 
   // ATA derivation depends on the token program (Token-2022 vs SPL Token).
   // Vault/perm/boss accounts holding `tokenIn` must use `tokenInProgram`;
@@ -394,10 +427,8 @@ export interface OnreRedemptionVaultParams {
   redemptionRequest: PublicKey
   /** Token program for the input mint. Defaults to SPL Token. */
   tokenProgram?: PublicKey
-  /** Optional OnRe program override. Defaults to mainnet. */
-  programId?: PublicKey
-  /** Optional precomputed State PDA; defaults to `findOnreStatePda(programId)`. */
-  state?: PublicKey
+  /** OnRe deployment (programId, state PDA, boss, cached PDAs). Defaults to mainnet. */
+  deployment?: OnreDeployment
 }
 
 export function buildOnreCreateRedemptionRequestRemainingAccounts(

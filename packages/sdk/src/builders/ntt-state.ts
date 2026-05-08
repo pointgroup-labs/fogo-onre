@@ -1,5 +1,5 @@
-import { sha256 } from '@noble/hashes/sha2.js'
 import { PublicKey } from '@solana/web3.js'
+import { accountDiscriminator } from '../utils/discriminators'
 
 /**
  * Borsh decoders for the NTT v3 `Config` and `InboxItem` accounts.
@@ -8,18 +8,10 @@ import { PublicKey } from '@solana/web3.js'
  * SDK doesn't have to ship the NTT IDL as a runtime dependency.
  * Verified against `@wormhole-foundation/sdk-solana-ntt`'s
  * `idl/3_0_0/json/example_native_token_transfers.json`.
- *
- * Account discriminator: Anchor's standard
- * `sha256("account:<TypeName>")[0..8]`.
  */
 
-const CONFIG_DISCRIMINATOR = sha256(
-  new TextEncoder().encode('account:Config'),
-).slice(0, 8)
-
-const INBOX_ITEM_DISCRIMINATOR = sha256(
-  new TextEncoder().encode('account:InboxItem'),
-).slice(0, 8)
+const CONFIG_DISCRIMINATOR = accountDiscriminator('Config')
+const INBOX_ITEM_DISCRIMINATOR = accountDiscriminator('InboxItem')
 
 export type NttManagerMode = 'Locking' | 'Burning'
 
@@ -123,8 +115,17 @@ export function decodeNttConfig(data: Buffer): NttConfig {
   const mint = r.pubkey()
   const tokenProgram = r.pubkey()
   const modeByte = r.u8()
-  const mode: NttManagerMode
-    = modeByte === 0 ? 'Locking' : modeByte === 1 ? 'Burning' : (() => { throw new Error(`NttConfig: unknown mode byte ${modeByte}`) })()
+  let mode: NttManagerMode
+  switch (modeByte) {
+    case 0:
+      mode = 'Locking'
+      break
+    case 1:
+      mode = 'Burning'
+      break
+    default:
+      throw new Error(`NttConfig: unknown mode byte ${modeByte}`)
+  }
   const chainId = r.u16()
   const nextTransceiverId = r.u8()
   const threshold = r.u8()

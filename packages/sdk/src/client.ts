@@ -22,6 +22,7 @@ import {
   buildOnreCreateRedemptionRequestRemainingAccounts,
   buildOnreSwapRemainingAccounts,
   NTT_TRANSFER_LOCK_ACCOUNT_COUNT,
+  type OnreDeployment,
 } from './builders'
 import {
   findAuthorityPda,
@@ -41,11 +42,13 @@ export class RelayerClient {
   readonly program: Program<FogoOnreRelayer>
   readonly configPda: PublicKey
   readonly authorityPda: PublicKey
+  readonly redemptionTrackerPda: PublicKey
 
   constructor(provider: Provider) {
     this.program = new Program<FogoOnreRelayer>(IDL as unknown as FogoOnreRelayer, provider)
     ;[this.configPda] = findConfigPda(this.program.programId)
     ;[this.authorityPda] = findAuthorityPda(this.program.programId)
+    ;[this.redemptionTrackerPda] = findRedemptionTrackerPda(this.program.programId)
   }
 
   /**
@@ -72,8 +75,8 @@ export class RelayerClient {
         relayerAuthority: this.authorityPda,
         usdcMint: params.usdcMint,
         onycMint: params.onycMint,
-        usdcAta: this.ata(params.usdcMint),
-        onycAta: this.ata(params.onycMint),
+        usdcAta: this.relayerAta(params.usdcMint),
+        onycAta: this.relayerAta(params.onycMint),
         feeVault: params.feeVault,
         tokenProgram: TOKEN_PROGRAM_ID,
         associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
@@ -111,7 +114,7 @@ export class RelayerClient {
         relayerConfig: this.configPda,
         relayerAuthority: this.authorityPda,
         onycMint,
-        onycAta: this.ata(onycMint),
+        onycAta: this.relayerAta(onycMint),
         feeVault: params.feeVault ?? null,
         tokenProgram: TOKEN_PROGRAM_ID,
       })
@@ -184,7 +187,7 @@ export class RelayerClient {
         relayerConfig: this.configPda,
         relayerAuthority: this.authorityPda,
         usdcMint: params.usdcMint,
-        usdcAta: this.ata(params.usdcMint),
+        usdcAta: this.relayerAta(params.usdcMint),
         userWallet: params.userWallet,
         userInboxAuthority,
         userInboxAta,
@@ -224,8 +227,8 @@ export class RelayerClient {
         relayerAuthority: this.authorityPda,
         usdcMint: params.usdcMint,
         onycMint: params.onycMint,
-        usdcAta: this.ata(params.usdcMint),
-        onycAta: this.ata(params.onycMint),
+        usdcAta: this.relayerAta(params.usdcMint),
+        onycAta: this.relayerAta(params.onycMint),
         feeVault: params.feeVault,
         nttInboxItem: params.nttInboxItem,
         inflightFlow,
@@ -240,8 +243,8 @@ export class RelayerClient {
       buildOnreSwapRemainingAccounts({
         tokenInMint: params.usdcMint,
         tokenOutMint: params.onycMint,
-        userTokenInAccount: this.ata(params.usdcMint),
-        userTokenOutAccount: this.ata(params.onycMint),
+        userTokenInAccount: this.relayerAta(params.usdcMint),
+        userTokenOutAccount: this.relayerAta(params.onycMint),
         user: this.authorityPda,
         ctx: params.onre,
       }),
@@ -301,7 +304,7 @@ export class RelayerClient {
         relayerConfig: this.configPda,
         relayerAuthority: this.authorityPda,
         onycMint: params.onycMint,
-        onycAta: this.ata(params.onycMint),
+        onycAta: this.relayerAta(params.onycMint),
         nttInboxItem: params.nttInboxItem,
         inflightFlow,
         rentDestination: params.rentDestination,
@@ -367,7 +370,7 @@ export class RelayerClient {
           authority: this.authorityPda,
           // ONyc release: route to the long-lived relayer custody ATA
           // (the standard `unlock_onyc` path).
-          recipientAta: this.ata(params.onycMint),
+          recipientAta: this.relayerAta(params.onycMint),
         })
       : null
 
@@ -378,7 +381,7 @@ export class RelayerClient {
         relayerConfig: this.configPda,
         relayerAuthority: this.authorityPda,
         onycMint: params.onycMint,
-        onycAta: this.ata(params.onycMint),
+        onycAta: this.relayerAta(params.onycMint),
         nttInboxItem: params.nttInboxItem,
         nttTransceiverMessage: params.nttTransceiverMessage,
         outflightFlow,
@@ -412,7 +415,7 @@ export class RelayerClient {
         relayerConfig: this.configPda,
         relayerAuthority: this.authorityPda,
         usdcMint: params.usdcMint,
-        usdcAta: this.ata(params.usdcMint),
+        usdcAta: this.relayerAta(params.usdcMint),
         nttInboxItem: params.nttInboxItem,
         outflightFlow,
         rentDestination: params.rentDestination,
@@ -444,8 +447,7 @@ export class RelayerClient {
     onre?: {
       redemptionRequest: PublicKey
       tokenProgram?: PublicKey
-      programId?: PublicKey
-      state?: PublicKey
+      deployment?: OnreDeployment
     }
   }) {
     const { outflightFlow, redemptionTracker } = this.flowPdas(params.nttInboxItem)
@@ -457,8 +459,8 @@ export class RelayerClient {
         relayerAuthority: this.authorityPda,
         usdcMint: params.usdcMint,
         onycMint: params.onycMint,
-        usdcAta: this.ata(params.usdcMint),
-        onycAta: this.ata(params.onycMint),
+        usdcAta: this.relayerAta(params.usdcMint),
+        onycAta: this.relayerAta(params.onycMint),
         feeVault: params.feeVault,
         nttInboxItem: params.nttInboxItem,
         outflightFlow,
@@ -475,11 +477,10 @@ export class RelayerClient {
         tokenInMint: params.onycMint,
         tokenOutMint: params.usdcMint,
         redeemer: this.authorityPda,
-        redeemerTokenAccount: this.ata(params.onycMint),
+        redeemerTokenAccount: this.relayerAta(params.onycMint),
         redemptionRequest: params.onre.redemptionRequest,
         tokenProgram: params.onre.tokenProgram,
-        programId: params.onre.programId,
-        state: params.onre.state,
+        deployment: params.onre.deployment,
       }),
     )
   }
@@ -499,7 +500,7 @@ export class RelayerClient {
         relayerConfig: this.configPda,
         relayerAuthority: this.authorityPda,
         usdcMint: params.usdcMint,
-        usdcAta: this.ata(params.usdcMint),
+        usdcAta: this.relayerAta(params.usdcMint),
         nttInboxItem: params.nttInboxItem,
         outflightFlow,
         redemptionTracker,
@@ -519,8 +520,7 @@ export class RelayerClient {
       redemptionAdmin: PublicKey
       usdcMint: PublicKey
       tokenProgram?: PublicKey
-      programId?: PublicKey
-      state?: PublicKey
+      deployment?: OnreDeployment
     }
   }) {
     const { outflightFlow, redemptionTracker } = this.flowPdas(params.nttInboxItem)
@@ -531,7 +531,7 @@ export class RelayerClient {
         relayerConfig: this.configPda,
         relayerAuthority: this.authorityPda,
         onycMint: params.onycMint,
-        onycAta: this.ata(params.onycMint),
+        onycAta: this.relayerAta(params.onycMint),
         nttInboxItem: params.nttInboxItem,
         outflightFlow,
         redemptionTracker,
@@ -548,32 +548,31 @@ export class RelayerClient {
         tokenOutMint: params.onre.usdcMint,
         signer: this.authorityPda,
         redeemer: this.authorityPda,
-        redeemerTokenAccount: this.ata(params.onycMint),
+        redeemerTokenAccount: this.relayerAta(params.onycMint),
         redemptionAdmin: params.onre.redemptionAdmin,
         redemptionRequest: params.onre.redemptionRequest,
         tokenProgram: params.onre.tokenProgram,
-        programId: params.onre.programId,
-        state: params.onre.state,
+        deployment: params.onre.deployment,
       }),
     )
   }
 
   async fetchConfig() {
-    return (this.program.account as any).relayerConfig.fetch(this.configPda)
+    return this.program.account.relayerConfig.fetch(this.configPda)
   }
 
   async fetchInflightFlow(nttInboxItem: PublicKey) {
     const [pda] = findInflightFlowPda(nttInboxItem, this.program.programId)
-    return (this.program.account as any).flow.fetch(pda)
+    return this.program.account.flow.fetch(pda)
   }
 
   async fetchOutflightFlow(nttInboxItem: PublicKey) {
     const [pda] = findOutflightFlowPda(nttInboxItem, this.program.programId)
-    return (this.program.account as any).flow.fetch(pda)
+    return this.program.account.flow.fetch(pda)
   }
 
-  private ata(mint: PublicKey, owner: PublicKey = this.authorityPda) {
-    return getAssociatedTokenAddressSync(mint, owner, true)
+  private relayerAta(mint: PublicKey) {
+    return getAssociatedTokenAddressSync(mint, this.authorityPda, true)
   }
 
   /**
@@ -603,7 +602,7 @@ export class RelayerClient {
       nttProgramId: args.nttProgramId,
       fromOwner: this.authorityPda,
       fromOwnerIsSigner: false,
-      fromTokenAccount: this.ata(args.mint),
+      fromTokenAccount: this.relayerAta(args.mint),
       mint: args.mint,
       outboxItem: args.outboxItem,
       recipientChain: FOGO_WORMHOLE_CHAIN_ID,
@@ -619,8 +618,7 @@ export class RelayerClient {
   } {
     const [inflightFlow] = findInflightFlowPda(nttInboxItem, this.program.programId)
     const [outflightFlow] = findOutflightFlowPda(nttInboxItem, this.program.programId)
-    const [redemptionTracker] = findRedemptionTrackerPda(this.program.programId)
-    return { inflightFlow, outflightFlow, redemptionTracker }
+    return { inflightFlow, outflightFlow, redemptionTracker: this.redemptionTrackerPda }
   }
 
   /**

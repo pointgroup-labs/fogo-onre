@@ -1,9 +1,10 @@
 import type { PublicKey } from '@solana/web3.js'
 import type { NttTransferArgs } from './ntt'
-import { sha256 } from '@noble/hashes/sha2.js'
 import { getAssociatedTokenAddressSync, TOKEN_PROGRAM_ID } from '@solana/spl-token'
 import { SystemProgram, TransactionInstruction } from '@solana/web3.js'
 import { SOLANA_WORMHOLE_CHAIN_ID } from '../constants'
+import { readonly, signerWritable, writable } from '../utils/accountMeta'
+import { ixDiscriminator } from '../utils/discriminators'
 import {
   encodeNttTransferArgsBorsh,
   findInboxRateLimitPda,
@@ -16,14 +17,8 @@ import {
   nttTransferArgsHash,
 } from './ntt'
 
-/**
- * Anchor instruction discriminators for NTT v1's burning-mode transfer.
- * Computed as `sha256("global:transfer_burn").slice(0, 8)` — matches the
- * upstream Anchor-generated sighash. Cached at module init.
- */
-const TRANSFER_BURN_DISCRIMINATOR = sha256(
-  new TextEncoder().encode('global:transfer_burn'),
-).slice(0, 8)
+/** NTT v1 burning-mode `transfer_burn` Anchor sighash. Cached at module init. */
+const TRANSFER_BURN_DISCRIMINATOR = ixDiscriminator('transfer_burn')
 
 export interface BuildFogoNttTransferParams {
   /** User's FOGO wallet — signer; encoded as `NttManagerMessage.sender`. */
@@ -89,19 +84,19 @@ function buildFogoNttTransferBurnIx(
   )
 
   const keys = [
-    { pubkey: params.payer, isSigner: true, isWritable: true },
-    { pubkey: configPda, isSigner: false, isWritable: false },
-    { pubkey: params.mint, isSigner: false, isWritable: true },
-    { pubkey: fromTokenAccount, isSigner: false, isWritable: true },
-    { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
-    { pubkey: params.outboxItem, isSigner: true, isWritable: true },
-    { pubkey: outboxRateLimitPda, isSigner: false, isWritable: true },
-    { pubkey: custody, isSigner: false, isWritable: true },
-    { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
-    { pubkey: inboxRateLimitPda, isSigner: false, isWritable: true },
-    { pubkey: peerPda, isSigner: false, isWritable: false },
-    { pubkey: sessionAuthorityPda, isSigner: false, isWritable: false },
-    { pubkey: tokenAuthorityPda, isSigner: false, isWritable: false },
+    signerWritable(params.payer),
+    readonly(configPda),
+    writable(params.mint),
+    writable(fromTokenAccount),
+    readonly(TOKEN_PROGRAM_ID),
+    signerWritable(params.outboxItem),
+    writable(outboxRateLimitPda),
+    writable(custody),
+    readonly(SystemProgram.programId),
+    writable(inboxRateLimitPda),
+    readonly(peerPda),
+    readonly(sessionAuthorityPda),
+    readonly(tokenAuthorityPda),
   ]
 
   const argsBytes = encodeNttTransferArgsBorsh(args)

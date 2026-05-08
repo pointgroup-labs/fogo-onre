@@ -1,4 +1,4 @@
-import type { PublicKey, TransactionInstruction } from '@solana/web3.js'
+import type { PublicKey } from '@solana/web3.js'
 import { ASSOCIATED_TOKEN_PROGRAM_ID, TOKEN_PROGRAM_ID } from '@solana/spl-token'
 import {
   Ed25519Program,
@@ -6,9 +6,10 @@ import {
   SYSVAR_CLOCK_PUBKEY,
   SYSVAR_INSTRUCTIONS_PUBKEY,
   SYSVAR_RENT_PUBKEY,
-  TransactionInstruction as TxIx,
+  TransactionInstruction,
 } from '@solana/web3.js'
 import { INTENT_TRANSFER_PROGRAM_ID } from '../constants'
+import { readonly, signerWritable, writable } from '../utils/accountMeta'
 
 /**
  * Wire-format primitives for FOGO `intent_transfer.bridge_ntt_tokens`.
@@ -200,46 +201,46 @@ export function buildBridgeNttTokensIx(
 
   const keys = [
     // Top-level (IDL order)
-    { pubkey: params.fromChainId, isSigner: false, isWritable: false },
-    { pubkey: SYSVAR_INSTRUCTIONS_PUBKEY, isSigner: false, isWritable: false },
-    { pubkey: params.intentTransferSetter, isSigner: false, isWritable: false },
-    { pubkey: params.source, isSigner: false, isWritable: true },
-    { pubkey: params.intermediateTokenAccount, isSigner: false, isWritable: true },
-    { pubkey: params.mint, isSigner: false, isWritable: true },
-    { pubkey: params.metadata ?? PUBKEY_NULL, isSigner: false, isWritable: false },
-    { pubkey: params.expectedNttConfig, isSigner: false, isWritable: false },
-    { pubkey: params.nonce, isSigner: false, isWritable: true },
-    { pubkey: params.sponsor, isSigner: true, isWritable: true },
-    { pubkey: params.feeSource, isSigner: false, isWritable: true },
-    { pubkey: params.feeDestination, isSigner: false, isWritable: true },
-    { pubkey: params.feeMint, isSigner: false, isWritable: false },
-    { pubkey: params.feeMetadata ?? PUBKEY_NULL, isSigner: false, isWritable: false },
-    { pubkey: params.feeConfig, isSigner: false, isWritable: false },
-    { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
-    { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
-    { pubkey: ASSOCIATED_TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+    readonly(params.fromChainId),
+    readonly(SYSVAR_INSTRUCTIONS_PUBKEY),
+    readonly(params.intentTransferSetter),
+    writable(params.source),
+    writable(params.intermediateTokenAccount),
+    writable(params.mint),
+    readonly(params.metadata ?? PUBKEY_NULL),
+    readonly(params.expectedNttConfig),
+    writable(params.nonce),
+    signerWritable(params.sponsor),
+    writable(params.feeSource),
+    writable(params.feeDestination),
+    readonly(params.feeMint),
+    readonly(params.feeMetadata ?? PUBKEY_NULL),
+    readonly(params.feeConfig),
+    readonly(SystemProgram.programId),
+    readonly(TOKEN_PROGRAM_ID),
+    readonly(ASSOCIATED_TOKEN_PROGRAM_ID),
     // NTT sub-struct (IDL order)
-    { pubkey: SYSVAR_CLOCK_PUBKEY, isSigner: false, isWritable: false },
-    { pubkey: SYSVAR_RENT_PUBKEY, isSigner: false, isWritable: false },
-    { pubkey: params.ntt.nttManager, isSigner: false, isWritable: false },
-    { pubkey: params.ntt.nttConfig, isSigner: false, isWritable: false },
-    { pubkey: params.ntt.nttInboxRateLimit, isSigner: false, isWritable: true },
-    { pubkey: params.ntt.nttSessionAuthority, isSigner: false, isWritable: false },
-    { pubkey: params.ntt.nttTokenAuthority, isSigner: false, isWritable: false },
-    { pubkey: params.ntt.wormholeMessage, isSigner: false, isWritable: true },
-    { pubkey: params.ntt.transceiver, isSigner: false, isWritable: false },
-    { pubkey: params.ntt.emitter, isSigner: false, isWritable: false },
-    { pubkey: params.ntt.wormholeBridge, isSigner: false, isWritable: true },
-    { pubkey: params.ntt.wormholeFeeCollector, isSigner: false, isWritable: true },
-    { pubkey: params.ntt.wormholeSequence, isSigner: false, isWritable: true },
-    { pubkey: params.ntt.wormholeProgram, isSigner: false, isWritable: false },
-    { pubkey: params.ntt.nttWithExecutorProgram, isSigner: false, isWritable: false },
-    { pubkey: params.ntt.executorProgram, isSigner: false, isWritable: false },
-    { pubkey: params.ntt.nttPeer, isSigner: false, isWritable: false },
+    readonly(SYSVAR_CLOCK_PUBKEY),
+    readonly(SYSVAR_RENT_PUBKEY),
+    readonly(params.ntt.nttManager),
+    readonly(params.ntt.nttConfig),
+    writable(params.ntt.nttInboxRateLimit),
+    readonly(params.ntt.nttSessionAuthority),
+    readonly(params.ntt.nttTokenAuthority),
+    writable(params.ntt.wormholeMessage),
+    readonly(params.ntt.transceiver),
+    readonly(params.ntt.emitter),
+    writable(params.ntt.wormholeBridge),
+    writable(params.ntt.wormholeFeeCollector),
+    writable(params.ntt.wormholeSequence),
+    readonly(params.ntt.wormholeProgram),
+    readonly(params.ntt.nttWithExecutorProgram),
+    readonly(params.ntt.executorProgram),
+    readonly(params.ntt.nttPeer),
     { pubkey: params.ntt.nttOutboxItem, isSigner: true, isWritable: true },
-    { pubkey: params.ntt.nttOutboxRateLimit, isSigner: false, isWritable: true },
-    { pubkey: params.ntt.nttCustody, isSigner: false, isWritable: true },
-    { pubkey: params.ntt.payeeNttWithExecutor, isSigner: false, isWritable: true },
+    writable(params.ntt.nttOutboxRateLimit),
+    writable(params.ntt.nttCustody),
+    writable(params.ntt.payeeNttWithExecutor),
   ]
 
   // BorshSerialize(BridgeNttTokensArgs) = signed_quote_bytes ([u8; 165]) + pay_destination_ata_rent (u8)
@@ -248,5 +249,5 @@ export function buildBridgeNttTokensIx(
   data.set(params.signedQuoteBytes, 1)
   data[1 + 165] = params.payDestinationAtaRent ? 1 : 0
 
-  return new TxIx({ programId, keys, data })
+  return new TransactionInstruction({ programId, keys, data })
 }
