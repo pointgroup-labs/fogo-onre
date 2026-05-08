@@ -1,6 +1,7 @@
 {
   "name": "@fogo-onre/cli",
   "version": "0.0.1",
+  "type": "module",
   "bin": {
     "fogo-onre": "./dist/cli.js"
   },
