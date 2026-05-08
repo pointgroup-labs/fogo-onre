@@ -369,13 +369,13 @@ export function buildNttReleaseWormholeOutboundAccountList(
     { pubkey: params.payer, isSigner: true, isWritable: true }, //  0
     { pubkey: configPda, isSigner: false, isWritable: false }, //  1
     { pubkey: params.outboxItem, isSigner: false, isWritable: true }, //  2
-    { pubkey: wormholeMessage, isSigner: false, isWritable: true }, //  3
-    { pubkey: emitter, isSigner: false, isWritable: false }, //  4
-    { pubkey: registeredTransceiverPda, isSigner: false, isWritable: false }, //  5
-    { pubkey: params.wormholeBridge, isSigner: false, isWritable: true }, //  6
-    { pubkey: params.wormholeFeeCollector, isSigner: false, isWritable: true }, //  7
-    { pubkey: params.wormholeSequence, isSigner: false, isWritable: true }, //  8
-    { pubkey: params.wormholeProgram, isSigner: false, isWritable: false }, //  9
+    { pubkey: registeredTransceiverPda, isSigner: false, isWritable: false }, //  3  transceiver (NTT IDL)
+    { pubkey: wormholeMessage, isSigner: false, isWritable: true }, //  4  wormhole_message (must be writable — NTT v3 inits this)
+    { pubkey: emitter, isSigner: false, isWritable: false }, //  5
+    { pubkey: params.wormholeBridge, isSigner: false, isWritable: true }, //  6  wormhole.bridge
+    { pubkey: params.wormholeFeeCollector, isSigner: false, isWritable: true }, //  7  wormhole.fee_collector
+    { pubkey: params.wormholeSequence, isSigner: false, isWritable: true }, //  8  wormhole.sequence
+    { pubkey: params.wormholeProgram, isSigner: false, isWritable: false }, //  9  wormhole.program
     { pubkey: SystemProgram.programId, isSigner: false, isWritable: false }, // 10  wormhole.system_program
     { pubkey: SYSVAR_CLOCK_PUBKEY, isSigner: false, isWritable: false }, // 11  wormhole.clock
     { pubkey: SYSVAR_RENT_PUBKEY, isSigner: false, isWritable: false }, // 12  wormhole.rent

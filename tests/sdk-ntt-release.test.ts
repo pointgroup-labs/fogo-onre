@@ -1,10 +1,17 @@
 /**
  * Unit tests for `buildNttReleaseWormholeOutboundAccountList`.
  *
- * Locks in the mainnet-verified 15-account ordering for NTT v3
- * `release_wormhole_outbound`, derived from tx `3NR6EEbk…` (top-level
- * accounts array). Reordering or losing system/clock/rent silently
- * breaks the CPI on the publish leg.
+ * Locks in the NTT v3 IDL ordering for `releaseWormholeOutbound`
+ * (verified against `idl/3_0_0/json/example_native_token_transfers.json`
+ * — also matches v2 IDL). The previous version of this test pinned a
+ * permuted ordering that swapped indices 3 (transceiver) and 4
+ * (wormholeMessage), which produced ConstraintMut on wormhole_message
+ * at runtime because Anchor reads its `wormholeMessage` field from the
+ * IDL position (4), found a non-writable account there, and rejected.
+ *
+ * The 6-account composite-flattened wormhole block (bridge / fee_collector /
+ * sequence / program / system / clock / rent) starts at index 6.
+ * Reordering or losing system/clock/rent silently breaks the CPI.
  */
 
 import {
@@ -46,11 +53,11 @@ describe('buildNttReleaseWormholeOutboundAccountList', () => {
     outboxItemSigner,
   })
 
-  it('produces exactly 15 accounts (mainnet tx 3NR6EEbk…)', () => {
+  it('produces exactly 15 accounts', () => {
     expect(accts.length).toBe(15)
   })
 
-  it('matches the mainnet pubkey ordering', () => {
+  it('matches the NTT v3 IDL pubkey ordering', () => {
     const [configPda] = findNttConfigPda(NTT_ONYC_PROGRAM_ID)
     const [registeredTransceiverPda] = findRegisteredTransceiverPda(
       NTT_ONYC_PROGRAM_ID,
@@ -63,9 +70,9 @@ describe('buildNttReleaseWormholeOutboundAccountList', () => {
       payer.toBase58(), //  0
       configPda.toBase58(), //  1
       outboxItem.toBase58(), //  2
-      wormholeMessage.toBase58(), //  3
-      emitter.toBase58(), //  4
-      registeredTransceiverPda.toBase58(), //  5
+      registeredTransceiverPda.toBase58(), //  3  transceiver (per IDL)
+      wormholeMessage.toBase58(), //  4  wormhole_message (writable)
+      emitter.toBase58(), //  5
       wormholeBridge.toBase58(), //  6
       wormholeFeeCollector.toBase58(), //  7
       wormholeSequence.toBase58(), //  8
@@ -79,14 +86,15 @@ describe('buildNttReleaseWormholeOutboundAccountList', () => {
     expect(accts.map(a => a.pubkey.toBase58())).toEqual(expected)
   })
 
-  it('marks the writable accounts (mut flags) per mainnet tx', () => {
+  it('marks the writable accounts (mut flags) per the NTT v3 IDL', () => {
     const writable = accts
       .map((a, i) => ({ i, w: a.isWritable }))
       .filter(x => x.w)
       .map(x => x.i)
-    // Per tx 3NR6EEbk…: payer, outbox_item, wormhole_message, bridge,
-    // fee_collector, sequence are all `mut`.
-    expect(writable).toEqual([0, 2, 3, 6, 7, 8])
+    // Per NTT v3 IDL: payer, outbox_item, wormhole_message, bridge,
+    // fee_collector, sequence are all `mut`. wormhole_message is at
+    // index 4 (NOT 3 — that's the non-writable transceiver PDA).
+    expect(writable).toEqual([0, 2, 4, 6, 7, 8])
   })
 
   it('marks only the payer as signer', () => {
@@ -120,8 +128,8 @@ describe('buildNttReleaseWormholeOutboundAccountList', () => {
       wormholeMessage: overrideMessage,
       emitter: overrideEmitter,
     })
-    expect(overridden[3].pubkey.toBase58()).toBe(overrideMessage.toBase58())
-    expect(overridden[4].pubkey.toBase58()).toBe(overrideEmitter.toBase58())
+    expect(overridden[4].pubkey.toBase58()).toBe(overrideMessage.toBase58())
+    expect(overridden[5].pubkey.toBase58()).toBe(overrideEmitter.toBase58())
   })
 })
 

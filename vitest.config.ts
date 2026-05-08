@@ -3,6 +3,15 @@ import { defineConfig } from 'vitest/config'
 export default defineConfig({
   test: {
     globals: true,
+    server: {
+      deps: {
+        // @wormhole-foundation/sdk-solana-ntt's `index.js` does
+        // `import "./side-effects"` (extensionless), which Node's strict
+        // ESM resolver rejects. Inline it so vite resolves at bundle-time.
+        // Production tsup build does the same via `noExternal`.
+        inline: ['@wormhole-foundation/sdk-solana-ntt'],
+      },
+    },
   },
 })
 

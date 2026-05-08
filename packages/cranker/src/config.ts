@@ -7,6 +7,11 @@ const [DEFAULT_USDC_EMITTER] = findNttEmitterPda(NTT_USDC_PROGRAM_ID)
 const [DEFAULT_ONYC_EMITTER] = findNttEmitterPda(NTT_ONYC_PROGRAM_ID)
 const DEFAULT_USDC_EMITTER_HEX = Buffer.from(DEFAULT_USDC_EMITTER.toBytes()).toString('hex')
 const DEFAULT_ONYC_EMITTER_HEX = Buffer.from(DEFAULT_ONYC_EMITTER.toBytes()).toString('hex')
+// Solana ONyc manager and FOGO ONyc manager share the same NTT v3 binary
+// and program id (same bytecode deployed on both chains), so the source
+// emitter for outbound Solana → FOGO ONyc VAAs derives from the same
+// `NTT_ONYC_PROGRAM_ID` constant.
+const DEFAULT_SOLANA_ONYC_EMITTER_HEX = DEFAULT_ONYC_EMITTER_HEX
 
 const schema = z.object({
   SOLANA_RPC_URL: z.string().url().refine(
@@ -25,6 +30,13 @@ const schema = z.object({
   FOGO_USDC_EMITTER_HEX: z.string().regex(/^[0-9a-f]{64}$/i).default(DEFAULT_USDC_EMITTER_HEX),
   /** Hex emitter for the FOGO ONyc NTT manager. Defaults to PDA derived from SDK's NTT_ONYC_PROGRAM_ID. */
   FOGO_ONYC_EMITTER_HEX: z.string().regex(/^[0-9a-f]{64}$/i).default(DEFAULT_ONYC_EMITTER_HEX),
+  /** Hex emitter for the Solana ONyc NTT manager. Outbound source for the bridge pipeline.
+   *  Defaults to PDA derived from SDK's NTT_ONYC_PROGRAM_ID (same bytecode as FOGO side). */
+  SOLANA_ONYC_EMITTER_HEX: z.string().regex(/^[0-9a-f]{64}$/i).default(DEFAULT_SOLANA_ONYC_EMITTER_HEX),
+  /** Set to "false" to disable the Solana → FOGO ONyc bridge pipeline (e.g. during incident triage). */
+  BRIDGE_PIPELINE_ENABLED: z.enum(['true', 'false']).default('true'),
+  /** Bridge-side concurrency budget — separate from MAX_CONCURRENT_ADVANCES so a Wormholescan backfill can't starve normal Flow advances. */
+  BRIDGE_MAX_CONCURRENT: z.coerce.number().int().min(1).max(32).default(4),
   METRICS_PORT: z.coerce.number().int().min(1).max(65535).default(9090),
   SCAN_INTERVAL_MS: z.coerce.number().int().min(1000).default(30_000),
   SCAN_MAX_BACKOFF_MS: z.coerce.number().int().min(1000).default(300_000),
@@ -48,6 +60,9 @@ export type CrankerConfig = {
   fogoWormholeChainId: number
   fogoUsdcEmitterHex: string
   fogoOnycEmitterHex: string
+  solanaOnycEmitterHex: string
+  bridgePipelineEnabled: boolean
+  bridgeMaxConcurrent: number
   metricsPort: number
   scanIntervalMs: number
   scanMaxBackoffMs: number
@@ -73,6 +88,9 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     fogoWormholeChainId: parsed.FOGO_WORMHOLE_CHAIN_ID,
     fogoUsdcEmitterHex: parsed.FOGO_USDC_EMITTER_HEX,
     fogoOnycEmitterHex: parsed.FOGO_ONYC_EMITTER_HEX,
+    solanaOnycEmitterHex: parsed.SOLANA_ONYC_EMITTER_HEX,
+    bridgePipelineEnabled: parsed.BRIDGE_PIPELINE_ENABLED === 'true',
+    bridgeMaxConcurrent: parsed.BRIDGE_MAX_CONCURRENT,
     metricsPort: parsed.METRICS_PORT,
     scanIntervalMs: parsed.SCAN_INTERVAL_MS,
     scanMaxBackoffMs: parsed.SCAN_MAX_BACKOFF_MS,

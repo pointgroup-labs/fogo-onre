@@ -3,7 +3,7 @@
   "private": true,
   "packageManager": "pnpm@10.33.0",
   "scripts": {
-    "@": "fogo-onre",
+    "cli": "fogo-onre",
     "cli:build": "pnpm -F @fogo-onre/cli build",
     "sdk": "pnpm -F @fogo-onre/sdk",
     "webapp": "pnpm -F @fogo-onre/webapp",

@@ -1,5 +1,7 @@
-import type { Connection, PublicKey } from '@solana/web3.js'
-import type { SolanaNtt } from '@wormhole-foundation/sdk-solana-ntt'
+import type { Connection } from '@solana/web3.js'
+import { INTENT_TRANSFER_PROGRAM_ID } from '@fogo-onre/sdk'
+import { PublicKey } from '@solana/web3.js'
+import { SolanaNtt } from '@wormhole-foundation/sdk-solana-ntt'
 import { withTimeout } from '../rpc'
 import { WormholescanClient } from '../wormholescan'
 
@@ -70,15 +72,9 @@ export interface MakeSolanaNttArgs {
 /**
  * Build a `SolanaNtt` instance configured for the OnRe ONyc deployment.
  * Transceiver is baked into the manager binary, so `transceiver.wormhole = manager`.
- *
- * `SolanaNtt` is dynamic-imported here to avoid a vitest module-resolution
- * snag in `@wormhole-foundation/sdk-solana-ntt`'s ESM build (it does
- * `import './side-effects'` without a `.js` extension, which Node's
- * strict ESM rejects at static analysis time but tolerates at runtime).
  */
-export async function makeSolanaNtt(args: MakeSolanaNttArgs): Promise<SolanaNtt<'Mainnet', 'Solana'>> {
-  const { SolanaNtt: SolanaNttCtor } = await import('@wormhole-foundation/sdk-solana-ntt')
-  return new SolanaNttCtor(
+export function makeSolanaNtt(args: MakeSolanaNttArgs): SolanaNtt<'Mainnet', 'Solana'> {
+  return new SolanaNtt(
     'Mainnet',
     'Solana',
     args.connection,
@@ -96,8 +92,17 @@ export async function makeSolanaNtt(args: MakeSolanaNttArgs): Promise<SolanaNtt<
 
 /**
  * Derive the 7-pubkey `release` argument for `client.lockOnyc({...})` from
- * a `SolanaNtt` instance. Index positions match the mainnet tx
- * `3NR6EEbk…` ordering pinned in `sdk-ntt-release.test.ts`.
+ * a `SolanaNtt` instance. Index positions match the NTT v3 IDL for
+ * `releaseWormholeOutbound` (verified against
+ * `idl/3_0_0/json/example_native_token_transfers.json`):
+ *   k[ 3] = transceiver (registered_transceiver PDA)
+ *   k[ 4] = wormhole_message (writable, init'd by NTT v3)
+ *   k[ 5] = emitter
+ *   k[ 6] = wormhole.bridge
+ *   k[ 7] = wormhole.fee_collector
+ *   k[ 8] = wormhole.sequence
+ *   k[ 9] = wormhole.program
+ *   k[14] = outbox_item_signer (v3)
  */
 export async function deriveLockOnycReleaseAccounts(
   ntt: SolanaNtt<'Mainnet', 'Solana'>,
@@ -119,8 +124,8 @@ export async function deriveLockOnycReleaseAccounts(
   const releaseIx = await xcvr.createReleaseWormholeOutboundIx(payer, outboxItem, false)
   const k = releaseIx.keys
   return {
-    wormholeMessage: k[3].pubkey,
-    emitter: k[4].pubkey,
+    wormholeMessage: k[4].pubkey,
+    emitter: k[5].pubkey,
     wormholeBridge: k[6].pubkey,
     wormholeFeeCollector: k[7].pubkey,
     wormholeSequence: k[8].pubkey,
@@ -131,3 +136,57 @@ export async function deriveLockOnycReleaseAccounts(
 
 export const WORMHOLE_CORE_MAINNET = 'worm2ZoG2kUd4vFXhvjh93UUH596ayRfgQ2MgjNMTth'
 export const DEFAULT_NTT_VERSION = '3.0.0'
+
+/**
+ * Recover the user's Solana wallet from the FOGO source tx that emitted
+ * the deposit VAA. Required because the VAA carries only the per-user
+ * inbox PDA (recipient) and the `intent_transfer_setter` PDA (sender) —
+ * neither is invertible to the user wallet. The original FOGO
+ * `bridge_ntt_tokens` ix has the source ATA at IDL position 3; that
+ * ATA's `owner` field (SPL TokenAccount layout: mint(32) || owner(32))
+ * IS the user wallet.
+ *
+ * Two RPCs per uncached VAA: getTransaction(fogoTx) + getAccountInfo(sourceAta).
+ * Returns null when the tx isn't findable, doesn't contain a
+ * `bridge_ntt_tokens` ix, or the source ATA can't be read.
+ */
+export async function deriveUserWalletFromFogoTx(
+  fogoConnection: Connection,
+  fogoTx: string,
+): Promise<PublicKey | null> {
+  if (!fogoTx) {
+    return null
+  }
+  const tx = await fogoConnection.getTransaction(fogoTx, {
+    commitment: 'confirmed',
+    maxSupportedTransactionVersion: 0,
+  }).catch(() => null)
+  if (!tx) {
+    return null
+  }
+  const msg = tx.transaction.message
+  // Versioned + legacy unify under `getAccountKeys` in @solana/web3.js 1.95+.
+  const keys = msg.getAccountKeys({ accountKeysFromLookups: tx.meta?.loadedAddresses })
+  for (const ix of msg.compiledInstructions) {
+    const programId = keys.get(ix.programIdIndex)
+    if (!programId?.equals(INTENT_TRANSFER_PROGRAM_ID)) {
+      continue
+    }
+    // intent_transfer.bridge_ntt_tokens IDL: keys[3] = source ATA
+    // (see packages/sdk/src/builders/intent-transfer.ts:206).
+    const sourceIdx = ix.accountKeyIndexes[3]
+    if (sourceIdx === undefined) {
+      continue
+    }
+    const sourceAta = keys.get(sourceIdx)
+    if (!sourceAta) {
+      continue
+    }
+    const ataInfo = await fogoConnection.getAccountInfo(sourceAta).catch(() => null)
+    if (!ataInfo || ataInfo.data.length < 64) {
+      continue
+    }
+    return new PublicKey(ataInfo.data.subarray(32, 64))
+  }
+  return null
+}

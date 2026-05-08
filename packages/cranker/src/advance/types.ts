@@ -17,6 +17,15 @@ export type AdvanceContext = {
   /** Structured logger; threaded through scan + enumerate + (future) advance fns. */
   log: Logger
   abortSignal: AbortSignal
+  /**
+   * Cross-scan cache: FOGO source-tx signature → user wallet (Solana
+   * pubkey of the depositor). The VAA carries only a PDA recipient and a
+   * setter-PDA sender — neither is invertible to the user wallet — so
+   * `claim_usdc` resolves it by reading the original FOGO tx's
+   * `bridge_ntt_tokens` source ATA owner. Two RPCs per first sighting,
+   * zero on subsequent scans. Owned by the daemon (one Map per process).
+   */
+  userWalletCache: Map<string, PublicKey>
 }
 
 export type PlannedTx = {

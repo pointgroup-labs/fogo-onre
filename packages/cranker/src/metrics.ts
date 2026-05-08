@@ -53,6 +53,18 @@ export function createMetrics(opts: MetricsOptions) {
     labelNames: ['reason'] as const,
     registers: [registry],
   })
+  const bridgeRedeemed = new Counter({
+    name: 'cranker_bridge_redeemed_total',
+    help: 'Outcome of bridge VAA redeem attempts (decoupled from relayer Flow advances)',
+    labelNames: ['target', 'result'] as const,
+    registers: [registry],
+  })
+  const bridgeScanIterations = new Counter({
+    name: 'cranker_bridge_scan_iterations_total',
+    help: 'Bridge pipeline scan iterations',
+    labelNames: ['target', 'result'] as const,
+    registers: [registry],
+  })
   const solBalance = new Gauge({
     name: 'cranker_keypair_sol_balance',
     help: 'Cranker keypair SOL balance (lamports / 1e9)',
@@ -84,6 +96,8 @@ export function createMetrics(opts: MetricsOptions) {
     rpcErrors,
     flowAdvance,
     flowSkipped,
+    bridgeRedeemed,
+    bridgeScanIterations,
     solBalance,
     wsAlive,
 

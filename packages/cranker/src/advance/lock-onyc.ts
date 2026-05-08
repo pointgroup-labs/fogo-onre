@@ -1,5 +1,5 @@
 import type { AdvanceContext, AdvanceResult } from './types'
-import { findAuthorityPda, findNttPeerPda, findSessionAuthorityPda, FOGO_WORMHOLE_CHAIN_ID, NTT_ONYC_PROGRAM_ID, NTT_USDC_PROGRAM_ID, nttTransferArgsHash } from '@fogo-onre/sdk'
+import { findAuthorityPda, findNttPeerPda, findRegisteredTransceiverPda, findSessionAuthorityPda, FOGO_WORMHOLE_CHAIN_ID, NTT_ONYC_PROGRAM_ID, NTT_USDC_PROGRAM_ID, nttTransferArgsHash } from '@fogo-onre/sdk'
 import { Keypair, PublicKey, SystemProgram } from '@solana/web3.js'
 import { resolveNttVaa } from '../vaa'
 import { DEFAULT_NTT_VERSION, deriveLockOnycReleaseAccounts, describeStatus, fetchVaaBytes, makeSolanaNtt, WORMHOLE_CORE_MAINNET } from './helpers'
@@ -36,6 +36,13 @@ export async function lockOnyc(
   input: LockOnycInput,
 ): Promise<AdvanceResult> {
   const { connection, keypair, client, metrics } = ctx
+  // The deposit-chain Flow PDA is keyed on the USDC-side VAA's inbox-item
+  // (created by claim_usdc), so resolveNttVaa MUST derive it under the
+  // USDC program ID — same VAA the cranker has been carrying through
+  // claim_usdc and swap_usdc_to_onyc. The ONyc program ID is only used
+  // for the outbound transfer_lock + release_wormhole_outbound accounts
+  // built below; mixing it into the inbox-item derivation produces a
+  // different PDA and the Flow lookup misses.
   const nttProgram = input.nttProgram ?? NTT_USDC_PROGRAM_ID
   const rentDestination = input.rentDestination ?? keypair.publicKey
 
@@ -90,6 +97,26 @@ export async function lockOnyc(
       return {
         kind: 'noop',
         reason: `FOGO peer not registered on ONyc NTT manager (${fogoPeerPda.toBase58()})`,
+      }
+    }
+
+    // Pre-flight: registered_transceiver PDA must exist. NTT v3
+    // `release_wormhole_outbound` reads it at IDL position 3 (`transceiver`)
+    // and Anchor's `init` constraint fails with AccountNotInitialized (3012)
+    // otherwise. The OnRe stack registers the manager-as-transceiver, so the
+    // seed is `["registered_transceiver", manager_pubkey]` under the manager
+    // program ID.
+    const [registeredTransceiverPda] = findRegisteredTransceiverPda(
+      NTT_ONYC_PROGRAM_ID,
+      NTT_ONYC_PROGRAM_ID,
+    )
+    const transceiverInfo = await connection
+      .getAccountInfo(registeredTransceiverPda)
+      .catch(() => null)
+    if (!transceiverInfo) {
+      return {
+        kind: 'noop',
+        reason: `registered_transceiver PDA not initialized on ONyc NTT manager (${registeredTransceiverPda.toBase58()}) — operator must run NTT register-transceiver before lock_onyc can succeed`,
       }
     }
 
