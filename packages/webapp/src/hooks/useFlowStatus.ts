@@ -2,7 +2,7 @@
 
 import { getAssociatedTokenAddressSync } from '@solana/spl-token'
 import { Connection, PublicKey } from '@solana/web3.js'
-import { useEffect, useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { FOGO_ONYC_MINT, USDC_S_MINT } from '@/constants'
 import { useDocumentVisible } from '@/hooks/useDocumentVisible'
 import { useSettings } from '@/store/settings'
@@ -78,84 +78,68 @@ export interface FlowWatchInput {
   baselineBalance: bigint | null
 }
 
+function isTerminal(phase: FlowPhase | undefined): boolean {
+  return phase === 'delivered' || phase === 'expired'
+}
+
 export function useFlowStatus(input: FlowWatchInput): FlowStatus | null {
   const ownerKey = input.owner?.toBase58() ?? null
-  const [status, setStatus] = useState<FlowStatus | null>(null)
   const visible = useDocumentVisible()
   // Subscribe so a settings change rebinds the polling loop against the
   // new endpoint immediately.
   const { fogoRpcUrl } = useSettings()
+  const queryClient = useQueryClient()
 
-  useEffect(() => {
-    // Capture validated values into local consts so the inner closures
-    // can use them without `!` non-null assertions.
-    const signature = input.signature
-    const startedAt = input.startedAt
-    const presetBaseline = input.baselineBalance
-    if (signature === null || ownerKey === null || startedAt === null) {
-      setStatus(null)
-      return
-    }
+  const { signature, startedAt, kind, baselineBalance: presetBaseline } = input
+  const enabled = signature !== null && ownerKey !== null && startedAt !== null
 
-    let cancelled = false
-    let intervalId: ReturnType<typeof setInterval> | null = null
-    const ownerPk = new PublicKey(ownerKey)
-    const connection = getFogoConnection(fogoRpcUrl)
-    // Deposit: user receives ONyc on FOGO. Withdraw: user receives USDC.s.
-    const destinationMint = input.kind === 'deposit' ? FOGO_ONYC_MINT : USDC_S_MINT
-    const destAta = getAssociatedTokenAddressSync(destinationMint, ownerPk)
-    let baseline: bigint | null = presetBaseline
-    let delivered = false
-    const expireMs = EXPIRE_MS_BY_KIND[input.kind]
+  const queryKey = ['flow-status', signature, kind, ownerKey, fogoRpcUrl] as const
 
-    // Caller-provided baseline → emit `submitted` immediately so the UI
-    // doesn't render a 1-tick gap before the watcher publishes state.
-    if (presetBaseline !== null) {
-      setStatus({ phase: 'submitted', signature, startedAt, baselineBalance: presetBaseline })
-    }
-
-    const stop = () => {
-      cancelled = true
-      if (intervalId !== null) {
-        clearInterval(intervalId)
-        intervalId = null
+  const query = useQuery<FlowStatus>({
+    queryKey,
+    enabled,
+    refetchOnWindowFocus: false,
+    refetchInterval: (q) => {
+      if (isTerminal(q.state.data?.phase)) {
+        return false
       }
-    }
-
-    const tick = async () => {
-      if (cancelled || delivered) {
-        return
-      }
+      return visible ? POLL_MS : false
+    },
+    staleTime: (q) => (isTerminal(q.state.data?.phase) ? Infinity : POLL_MS),
+    placeholderData: presetBaseline !== null && signature !== null && startedAt !== null
+      ? { phase: 'submitted', signature, startedAt, baselineBalance: presetBaseline }
+      : undefined,
+    queryFn: async () => {
+      // Non-null after `enabled` gate.
+      const sig = signature as string
+      const start = startedAt as number
+      const owner = ownerKey as string
+      const prior = queryClient.getQueryData<FlowStatus>(queryKey)
+      const connection = getFogoConnection(fogoRpcUrl)
+      // Deposit: user receives ONyc on FOGO. Withdraw: user receives USDC.s.
+      const destinationMint = kind === 'deposit' ? FOGO_ONYC_MINT : USDC_S_MINT
+      const destAta = getAssociatedTokenAddressSync(destinationMint, new PublicKey(owner))
       const balance = await readBalance(connection, destAta)
-      if (cancelled) {
-        return
-      }
-      if (baseline === null) {
-        baseline = balance
-        setStatus({ phase: 'submitted', signature, startedAt, baselineBalance: balance })
-        return
-      }
-      if (balance !== null && balance > baseline) {
-        delivered = true
-        setStatus({ phase: 'delivered', signature, startedAt, baselineBalance: baseline })
-        stop()
-        return
-      }
-      const elapsed = Date.now() - startedAt
-      setStatus({
-        phase: elapsed > expireMs ? 'expired' : 'bridging',
-        signature,
-        startedAt,
-        baselineBalance: baseline,
-      })
-    }
+      // Preset baseline wins; otherwise reuse a baseline captured on a prior
+      // tick; otherwise capture now (legacy first-tick fallback).
+      const baseline = presetBaseline ?? prior?.baselineBalance ?? balance
+      const expireMs = EXPIRE_MS_BY_KIND[kind]
+      const elapsed = Date.now() - start
 
-    tick()
-    if (visible) {
-      intervalId = setInterval(tick, POLL_MS)
-    }
-    return stop
-  }, [input.signature, ownerKey, input.kind, input.startedAt, input.baselineBalance, visible, fogoRpcUrl])
+      let phase: FlowPhase
+      if (baseline !== null && balance !== null && balance > baseline) {
+        phase = 'delivered'
+      } else if (elapsed > expireMs) {
+        phase = 'expired'
+      } else if (prior === undefined) {
+        phase = 'submitted'
+      } else {
+        phase = 'bridging'
+      }
 
-  return status
+      return { phase, signature: sig, startedAt: start, baselineBalance: baseline }
+    },
+  })
+
+  return query.data ?? null
 }
