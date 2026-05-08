@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createLogger, errorClass, errorFields, errorMessage } from '../src/log'
+import { createLogger, errorClass, errorFields, errorMessage } from '../src/utils/log'
 
 describe('createLogger', () => {
   it('emits JSON lines on stderr', () => {

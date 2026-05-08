@@ -1,7 +1,11 @@
-import type { ClassRollupAgg } from '../log'
+import type { ClassRollupAgg } from '../utils/log'
+import type { WatermarkStore } from '../state/watermarks'
 import type { BridgeContext, BridgeRedeemResult, BridgeRedeemTarget } from './types'
 import { WormholescanClient } from '@fogo-onre/sdk'
-import { errorFields, recordErrorClass, rollupErrorClasses } from '../log'
+import { errorFields, recordErrorClass, rollupErrorClasses } from '../utils/log'
+import { recordSeen } from '../state/watermarks'
+import { runBounded } from '../utils/concurrency'
+import { harvestVaaPages } from '../utils/wormholescan-pages'
 import { executeBridgePlan, planBridgeRedeem } from './redeem'
 
 export interface BridgeScanOptions {
@@ -19,6 +23,18 @@ export interface BridgeScanOptions {
    * one warn per failing VAA, mirroring the Flow scanner's UX.
    */
   seenRedeemErrors?: Map<string, string>
+  /**
+   * Optional per-emitter watermark store (shared with the Flow
+   * enumerator's instance is fine — keys are emitter-hex). When set,
+   * paging stops at `lastSeen - BACKFILL_COUNT`.
+   */
+  watermarks?: WatermarkStore
+  /**
+   * Optional callback fired once after the iteration if at least one
+   * VAA was successfully redeemed. Used to wake the daemon's sleep
+   * early when the bridge is busy.
+   */
+  onProgress?: () => void
 }
 
 /**
@@ -47,24 +63,23 @@ export async function scanAndRedeemBridge(
   // Collect work first — keeps Wormholescan paging linear and lets the
   // bounded worker pool do its job without interleaving HTTP and CPI.
   const vaas: { vaa: Uint8Array, sequence: bigint, txHash: string | null }[] = []
-  for (let page = 0; page < opts.maxPages; page++) {
-    if (ctx.abortSignal.aborted) {
-      return
-    }
-    const items = await ws.listVaasByEmitter(target.sourceChainId, target.sourceEmitterHex, {
-      pageSize: opts.pageSize,
-      page,
-    }).catch((err) => {
+  const pages = harvestVaaPages({
+    ws,
+    chainId: target.sourceChainId,
+    emitterHex: target.sourceEmitterHex,
+    pageSize: opts.pageSize,
+    maxPages: opts.maxPages,
+    watermarks: opts.watermarks,
+    abortSignal: ctx.abortSignal,
+    onPageError: (page, err) => {
       ctx.log.warn('bridge wormholescan fetch failed', {
         target: target.name,
         page,
         ...errorFields(err),
       })
-      return []
-    })
-    if (items.length === 0) {
-      break
-    }
+    },
+  })
+  for await (const items of pages) {
     for (const it of items) {
       vaas.push({ vaa: it.vaa, sequence: it.sequence, txHash: it.txHash })
     }
@@ -72,14 +87,31 @@ export async function scanAndRedeemBridge(
 
   ctx.log.debug('bridge vaas enumerated', { target: target.name, count: vaas.length })
 
+  let progress = false
   await runBounded(vaas, opts.maxConcurrentRedeems, ctx.abortSignal, async (item) => {
     const seqLabel = item.sequence.toString()
     const result = await planAndSubmit(ctx, target, item.vaa).catch((err): BridgeRedeemResult => ({
       kind: 'error',
       error: err instanceof Error ? err : new Error(String(err)),
     }))
+    if (result.kind === 'submitted') {
+      progress = true
+    }
+    // Watermark advances only on submitted/noop. An `error` outcome
+    // leaves the floor untouched so the next scan retries this VAA —
+    // dual to the relayer enumerator's "transient RPC blip → don't
+    // record" rule. Errors here are usually transient (rate-limit,
+    // RPC blip, simulation noise); permanently broken VAAs end up as
+    // `noop` once the planner can prove they're unactionable.
+    if (result.kind !== 'error' && opts.watermarks) {
+      recordSeen(opts.watermarks, target.sourceChainId, target.sourceEmitterHex, item.sequence)
+    }
     logBridgeResult(ctx, target.name, seqLabel, item.txHash, result, opts.seenRedeemErrors, iterFailures)
   })
+
+  if (progress) {
+    opts.onProgress?.()
+  }
 
   for (const { klass, agg, isKnown } of rollupErrorClasses(iterFailures, knownClasses)) {
     const fields = {
@@ -149,23 +181,4 @@ function logBridgeResult(
       }
     }
   }
-}
-
-async function runBounded<T>(
-  items: T[],
-  concurrency: number,
-  signal: AbortSignal,
-  worker: (item: T) => Promise<void>,
-): Promise<void> {
-  let i = 0
-  const workers = Array.from({ length: Math.max(1, concurrency) }, async () => {
-    while (i < items.length) {
-      if (signal.aborted) {
-        return
-      }
-      const idx = i++
-      await worker(items[idx])
-    }
-  })
-  await Promise.all(workers)
 }

@@ -57,3 +57,10 @@ tmp
 **/.next/
 
 /deploy/**/*.env
+
+# Cranker runtime state — per-instance Wormholescan watermarks. Generated
+# at the path set by `CHECKPOINT_PATH` (defaults to ./cranker-checkpoint.json).
+# Committing this would cause a fresh deploy to start with stale watermarks
+# and silently skip historical VAAs.
+cranker-checkpoint.json
+*-checkpoint.json

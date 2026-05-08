@@ -17,7 +17,7 @@ follow it end to end.
 | -------------------------------------------- | -------------------------- | ---------------------------------------- |
 | `relayer` Anchor program                     | Solana mainnet-beta        | ✅                                       |
 | Solana-side NTT manager (ONyc, locking mode) | Solana mainnet-beta        | ✅ — deployed via `ntt` CLI, see §7.1    |
-| FOGO-side NTT manager (ONyc, burning mode)  | FOGO chain                 | ✅ — deployed via `ntt` CLI, see §7.1    |
+| FOGO-side NTT manager (ONyc, burning mode)   | FOGO chain                 | ✅ — deployed via `ntt` CLI, see §7.1    |
 | Solana-side NTT manager (USDC.s, wrap mode)  | Solana mainnet-beta        | ❌ — already live, you only reference it |
 | FOGO-side NTT manager (USDC.s, native mode)  | FOGO chain                 | ❌ — already live, you only reference it |
 | `@fogo-onre/sdk` (TS client)                 | npm (or internal registry) | ✅                                       |
@@ -136,14 +136,14 @@ contracts, which can drop these numbers by an order of magnitude.
 
 Assuming FOGO uses Solana-identical rent parameters:
 
-| Bucket                                                   | FOGO           | Notes                                                |
-| -------------------------------------------------------- | -------------- | ---------------------------------------------------- |
-| FOGO-side NTT manager program rent (Burning mode)        | **4–6**        | Comparable to Solana NTT manager size                |
-| NTT init + ONyc mint creation                           | ~0.01          | NTT manager creates the ONyc mint and pays its rent |
-| Peer registration + rate limit PDAs                      | ~0.005         | One-time                                             |
-| Per-inbound-message account rent (refundable, but float) | ~0.001 each    | NTT inbox items                                      |
-| Buffer for failed deploys                                | **2**          |                                                      |
-| **Recommended total**                                    | **10–14 FOGO** | (or ~1–3 FOGO if rent is subsidized)                 |
+| Bucket                                                   | FOGO           | Notes                                               |
+| -------------------------------------------------------- | -------------- | --------------------------------------------------- |
+| FOGO-side NTT manager program rent (Burning mode)        | **4–6**        | Comparable to Solana NTT manager size               |
+| NTT init + ONyc mint creation                            | ~0.01          | NTT manager creates the ONyc mint and pays its rent |
+| Peer registration + rate limit PDAs                      | ~0.005         | One-time                                            |
+| Per-inbound-message account rent (refundable, but float) | ~0.001 each    | NTT inbox items                                     |
+| Buffer for failed deploys                                | **2**          |                                                     |
+| **Recommended total**                                    | **10–14 FOGO** | (or ~1–3 FOGO if rent is subsidized)                |
 
 The relayer itself does **not** run on FOGO — the entire FOGO budget
 is for the NTT manager + ONyc setup. End users need their own FOGO

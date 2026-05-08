@@ -3,14 +3,14 @@ name: cranker-image
 on:
   push:
     branches: [main]
-    tags: ["v*"]
+    tags: ['v*']
     paths:
-      - "packages/cranker/**"
-      - "packages/sdk/**"
-      - "deploy/cranker/Dockerfile"
-      - "pnpm-lock.yaml"
-      - "pnpm-workspace.yaml"
-      - ".github/workflows/cranker-image.yml"
+      - 'packages/cranker/**'
+      - 'packages/sdk/**'
+      - deploy/cranker/Dockerfile
+      - pnpm-lock.yaml
+      - pnpm-workspace.yaml
+      - .github/workflows/cranker-image.yml
   workflow_dispatch:
 
 permissions:

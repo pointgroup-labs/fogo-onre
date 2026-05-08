@@ -78,6 +78,7 @@ Operator-facing guide: take a clean Hetzner CX22 from blank to running cranker; 
 **Rolling forward** is automatic — Watchtower pulls `:latest` every 60s and recreates the container.
 
 **Rollback to a specific commit:**
+
 ```sh
 cd /opt/cranker
 # Edit docker-compose.yml: pin cranker image to a prior sha tag, e.g.
@@ -85,6 +86,7 @@ cd /opt/cranker
 docker compose pull cranker
 docker compose up -d cranker
 ```
+
 Watchtower will not override a pinned-sha tag. To re-enable rolling updates, restore `:latest` and `docker compose up -d cranker`.
 
 ## 4. Cranker key rotation
@@ -123,14 +125,14 @@ The cranker key is grief-only — its theft costs at most a small amount of SOL 
 
 ## 5. Incident response
 
-| Symptom | First diagnostic | Likely cause | Action |
-|---|---|---|---|
-| `CrankerHeartbeatStale` | `docker compose logs --tail=200 cranker` | RPC outage, stuck scan | Watchdog should self-kill; if not, `docker compose restart cranker` |
-| `CrankerDown` | `docker compose ps` | Container crashed | Read last log lines for `level: fatal`; common: config validation, RPC unreachable |
-| `CrankerKeypairLowSol` | `solana balance <cranker-pubkey>` | Fees consumed | Top up immediately |
-| `CrankerScanErrorRate` warn | Logs grep `level: error` | Upstream ABI drift, RPC errors | Check NTT/OnRe binary fixtures; see CLAUDE.md "Third-party CPI ABI sync" |
-| Container crashlooping immediately after deploy | `docker compose logs cranker` | Bad env var, missing keypair, paid-RPC validation, authority-keypair invariant | Read the JSON `level: fatal` message; fix env or keypair |
-| Suspected key compromise | — | — | Rotate keypair (§4) immediately; review on-chain activity for anomalous tx |
+| Symptom                                         | First diagnostic                         | Likely cause                                                                   | Action                                                                             |
+| ----------------------------------------------- | ---------------------------------------- | ------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------- |
+| `CrankerHeartbeatStale`                         | `docker compose logs --tail=200 cranker` | RPC outage, stuck scan                                                         | Watchdog should self-kill; if not, `docker compose restart cranker`                |
+| `CrankerDown`                                   | `docker compose ps`                      | Container crashed                                                              | Read last log lines for `level: fatal`; common: config validation, RPC unreachable |
+| `CrankerKeypairLowSol`                          | `solana balance <cranker-pubkey>`        | Fees consumed                                                                  | Top up immediately                                                                 |
+| `CrankerScanErrorRate` warn                     | Logs grep `level: error`                 | Upstream ABI drift, RPC errors                                                 | Check NTT/OnRe binary fixtures; see CLAUDE.md "Third-party CPI ABI sync"           |
+| Container crashlooping immediately after deploy | `docker compose logs cranker`            | Bad env var, missing keypair, paid-RPC validation, authority-keypair invariant | Read the JSON `level: fatal` message; fix env or keypair                           |
+| Suspected key compromise                        | —                                        | —                                                                              | Rotate keypair (§4) immediately; review on-chain activity for anomalous tx         |
 
 The cranker has **no fund-redirect powers** — `ValidatedTransceiverMessage` in the relayer pins the recipient on-chain. Worst case from cranker compromise: griefing (paying fees for no-op tx). Authority compromise is materially different — that's a separate `docs/security.md` runbook.
 

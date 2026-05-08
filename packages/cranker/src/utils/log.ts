@@ -51,6 +51,27 @@ export function errorMessage(err: unknown): string {
     return `ProgramError ${programErr.code}: ${programErr.msg}`
   }
 
+  // `@solana/web3.js` `SendTransactionError` constructed without an
+  // `action` field falls into the "Unknown action 'undefined'" trap —
+  // its `super(message)` is literally that string and the real signal
+  // is on `.transactionMessage` / `.transactionLogs`. Surface the
+  // useful payload instead so dedup and triage actually work.
+  const sendErr = err as {
+    transactionMessage?: unknown
+    signature?: unknown
+    transactionLogs?: unknown
+  }
+  if (typeof sendErr.transactionMessage === 'string' && sendErr.transactionMessage) {
+    const sig = typeof sendErr.signature === 'string' && sendErr.signature ? ` (sig=${sendErr.signature})` : ''
+    return `SendTransactionError: ${sendErr.transactionMessage}${sig}`
+  }
+  if (err.message === 'Unknown action \'undefined\'') {
+    // No transactionMessage attached either: at least surface the
+    // class so the operator knows they're looking at a degenerate
+    // SendTransactionError, not a real "unknown action" bug.
+    return 'SendTransactionError <action=undefined, no transactionMessage>'
+  }
+
   if (err.message) {
     return err.message
   }
@@ -74,12 +95,26 @@ export function errorFields(err: unknown): LogFields {
       stack: err.stack,
     },
   }
-  const withLogs = err as { logs?: unknown, errorLogs?: unknown }
+  const withLogs = err as {
+    logs?: unknown
+    errorLogs?: unknown
+    transactionLogs?: unknown
+    signature?: unknown
+  }
   if (Array.isArray(withLogs.logs) && withLogs.logs.length > 0) {
     fields.programLogs = withLogs.logs
   }
   if (Array.isArray(withLogs.errorLogs) && withLogs.errorLogs.length > 0) {
     fields.errorLogs = withLogs.errorLogs
+  }
+  // SendTransactionError carries program logs on `transactionLogs` (not
+  // `logs`) and the failed-tx signature on `.signature`. Surface both —
+  // the operator needs the on-chain logs to triage the simulated failure.
+  if (Array.isArray(withLogs.transactionLogs) && withLogs.transactionLogs.length > 0) {
+    fields.transactionLogs = withLogs.transactionLogs
+  }
+  if (typeof withLogs.signature === 'string' && withLogs.signature) {
+    fields.signature = withLogs.signature
   }
   return fields
 }

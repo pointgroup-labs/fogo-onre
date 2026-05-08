@@ -8,8 +8,8 @@ groups:
         labels:
           severity: page
         annotations:
-          summary: "Cranker scrape target down"
-          description: "Prometheus has been unable to reach the cranker /metrics endpoint for 2m. Either the container is down or networking is broken."
+          summary: Cranker scrape target down
+          description: Prometheus has been unable to reach the cranker /metrics endpoint for 2m. Either the container is down or networking is broken.
 
       - alert: CrankerHeartbeatStale
         expr: cranker_heartbeat_age_seconds > 120
@@ -17,7 +17,7 @@ groups:
         labels:
           severity: page
         annotations:
-          summary: "Cranker heartbeat stale ({{ $value | humanizeDuration }})"
+          summary: 'Cranker heartbeat stale ({{ $value | humanizeDuration }})'
           description: "Last successful scan completed >2m ago. The watchdog inside the daemon should self-kill at the configured staleness threshold; if that already happened and we're still alerting, Docker isn't restarting the container."
 
       - alert: CrankerScanErrorRate
@@ -26,8 +26,8 @@ groups:
         labels:
           severity: warn
         annotations:
-          summary: "Cranker scan error rate elevated"
-          description: ">20% of scans erroring over the last 5 minutes. Likely RPC provider issue or upstream NTT/OnRe ABI drift."
+          summary: Cranker scan error rate elevated
+          description: '>20% of scans erroring over the last 5 minutes. Likely RPC provider issue or upstream NTT/OnRe ABI drift.'
 
       - alert: CrankerKeypairLowSol
         expr: cranker_keypair_sol_balance < 0.1
@@ -35,7 +35,7 @@ groups:
         labels:
           severity: page
         annotations:
-          summary: "Cranker keypair SOL balance low ({{ $value }} SOL)"
+          summary: 'Cranker keypair SOL balance low ({{ $value }} SOL)'
           description: "Cranker can't pay tx fees once balance hits zero. Top up immediately."
 
       - alert: CrankerTxErrorRate
@@ -44,5 +44,5 @@ groups:
         labels:
           severity: warn
         annotations:
-          summary: "Cranker tx error rate elevated"
-          description: "Sustained tx submission failures. Check RPC health, keypair balance, and on-chain Flow state for stuck items."
+          summary: Cranker tx error rate elevated
+          description: 'Sustained tx submission failures. Check RPC health, keypair balance, and on-chain Flow state for stuck items.'

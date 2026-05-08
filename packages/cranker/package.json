@@ -1,8 +1,8 @@
 {
   "name": "@fogo-onre/cranker",
+  "type": "module",
   "version": "0.1.0",
   "private": true,
-  "type": "module",
   "description": "Fogo-OnRe permissionless cranker daemon",
   "bin": {
     "cranker": "./dist/bin.js"

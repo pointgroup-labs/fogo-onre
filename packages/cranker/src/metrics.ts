@@ -67,8 +67,34 @@ export function createMetrics(opts: MetricsOptions) {
   })
   const solBalance = new Gauge({
     name: 'cranker_keypair_sol_balance',
-    help: 'Cranker keypair SOL balance (lamports / 1e9)',
+    help: 'Cranker keypair SOL balance on Solana (lamports / 1e9). NaN during RPC outage so the low-balance alert fires instead of holding the last good value.',
     registers: [registry],
+  })
+  const fogoBalance = new Gauge({
+    name: 'cranker_keypair_fogo_balance',
+    help: 'Cranker keypair native-token balance on FOGO (lamports / 1e9). The same keypair pays bridge-redeem fees on FOGO; if this hits zero, all Solana → FOGO ONyc redeems start failing silently. NaN during RPC outage.',
+    registers: [registry],
+  })
+  // Per-chain poll-age, evaluated at scrape time from `lastBalancePollSuccess`.
+  // Lets a Prometheus alert distinguish "balance gauge is NaN because the
+  // chain is down" from "balance gauge is NaN because the poller never ran"
+  // — the age keeps growing in the first case and stays at +Inf in the second.
+  const lastBalancePollSuccess: Record<'solana' | 'fogo', number | undefined> = {
+    solana: undefined,
+    fogo: undefined,
+  }
+  const balancePollAge = new Gauge({
+    name: 'cranker_balance_poll_age_seconds',
+    help: 'Seconds since the last successful balance poll, per chain. +Inf when the poller has never succeeded.',
+    labelNames: ['chain'] as const,
+    registers: [registry],
+    collect() {
+      for (const chain of ['solana', 'fogo'] as const) {
+        const ts = lastBalancePollSuccess[chain]
+        const age = ts === undefined ? Number.POSITIVE_INFINITY : (Date.now() - ts) / 1000
+        this.set({ chain }, age)
+      }
+    },
   })
   const wsAlive = new Gauge({
     name: 'cranker_ws_subscription_alive',
@@ -99,6 +125,17 @@ export function createMetrics(opts: MetricsOptions) {
     bridgeRedeemed,
     bridgeScanIterations,
     solBalance,
+    fogoBalance,
+    balancePollAge,
+    /**
+     * Stamp a successful balance poll so `cranker_balance_poll_age_seconds`
+     * resets to ~0 on the next scrape. The poller calls this *only* on a
+     * successful `getBalance` — failures leave the timestamp untouched so
+     * age grows naturally and the alert fires.
+     */
+    recordBalancePollSuccess(chain: 'solana' | 'fogo'): void {
+      lastBalancePollSuccess[chain] = Date.now()
+    },
     wsAlive,
 
     actualPort: () => actualPort,

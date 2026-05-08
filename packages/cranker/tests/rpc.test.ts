@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { withTimeout } from '../src/rpc'
+import { withTimeout } from '../src/utils/rpc'
 
 describe('withTimeout', () => {
   it('resolves when underlying promise resolves before timeout', async () => {

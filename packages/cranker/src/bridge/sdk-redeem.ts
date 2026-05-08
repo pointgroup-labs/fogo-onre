@@ -7,8 +7,8 @@ import {
 import { deserialize } from '@wormhole-foundation/sdk-definitions'
 import { register as registerNttDefinitions } from '@wormhole-foundation/sdk-definitions-ntt'
 import { register as registerSolanaNtt, SolanaNtt } from '@wormhole-foundation/sdk-solana-ntt'
-import { errorFields } from '../log'
-import { withTimeout } from '../rpc'
+import { errorFields } from '../utils/log'
+import { withTimeout } from '../utils/rpc'
 
 registerNttDefinitions()
 registerSolanaNtt()

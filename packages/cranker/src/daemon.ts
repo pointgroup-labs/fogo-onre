@@ -1,6 +1,5 @@
-import type { EventEmitter } from 'node:events'
-import { once } from 'node:events'
-import { errorFields, writeLogLine } from './log'
+import type { WakeFlag } from './utils/wake-flag'
+import { errorFields, writeLogLine } from './utils/log'
 
 export type DaemonHeartbeat = {
   setNow: () => void
@@ -27,8 +26,16 @@ export type DaemonOptions = {
   /** Optional callback fired before each iteration (e.g. periodic invariant re-check). */
   preScan?: () => Promise<void>
   abortSignal: AbortSignal
-  /** Optional event emitter for WebSocket wake hints — `wakeup.emit('wake')`. */
-  wakeup?: EventEmitter
+  /**
+   * Optional wake-up channel for "chain busy → run next iteration sooner
+   * than the floor". Scanners call `wakeup.signal()` when they make
+   * progress; the daemon's sleep races against `wakeup.wait()`.
+   *
+   * Uses `WakeFlag` (not `EventEmitter`) so signals fired *during* the
+   * scan are not dropped on the floor — the flag is sticky until the
+   * daemon consumes it via `wait()`.
+   */
+  wakeup?: WakeFlag
 }
 
 /**
@@ -116,15 +123,24 @@ export async function runDaemon(opts: DaemonOptions): Promise<void> {
         break
       }
 
+      // ±10% jitter on the sleep so multiple cranker instances don't
+      // synchronize their Wormholescan calls (herd → rate limits → retry
+      // storms). Cheap to add and harmless when there's only one instance.
+      const sleepMs = jitter(currentDelay)
       await Promise.race([
-        sleep(currentDelay),
-        opts.wakeup ? once(opts.wakeup, 'wake').then(() => undefined) : new Promise<never>(() => {}),
+        sleep(sleepMs),
+        opts.wakeup ? opts.wakeup.wait() : new Promise<never>(() => {}),
         waitForAbort(opts.abortSignal),
       ])
     }
   } finally {
     clearInterval(watchdog)
   }
+}
+
+function jitter(ms: number, factor = 0.1): number {
+  const delta = ms * factor
+  return Math.max(0, ms - delta + Math.random() * 2 * delta)
 }
 
 function sleep(ms: number): Promise<void> {

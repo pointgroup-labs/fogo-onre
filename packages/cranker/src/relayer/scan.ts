@@ -1,20 +1,41 @@
 import type { PublicKey } from '@solana/web3.js'
-import type { AdvanceContext, AdvanceResult } from './advance/types'
-import type { ClassRollupAgg } from './log'
-import * as advance from './advance'
-import { errorFields, recordErrorClass, rollupErrorClasses } from './log'
-import { withTimeout } from './rpc'
+import type { AdvanceContext, AdvanceResult } from './types'
+import type { ClassRollupAgg } from '../utils/log'
+import type { FlowStateTracker } from '../state/flow-state'
+import { claimUsdc } from './claim-usdc'
+import { lockOnyc } from './lock-onyc'
+import { swapUsdcToOnyc } from './swap-usdc-to-onyc'
+import { errorClass, errorFields, recordErrorClass, rollupErrorClasses } from '../utils/log'
+import { runBounded } from '../utils/concurrency'
+import { withTimeout } from '../utils/rpc'
+
+/**
+ * Flow lifecycle states the cranker recognises. Mirrors the on-chain
+ * `FlowStatus` enum (`programs/relayer/src/state.rs`) plus the synthetic
+ * `Pending` value used for VAAs that don't yet have a Flow PDA.
+ *
+ * Centralised here so leg handlers, scan dispatch, and tests share the
+ * exact same vocabulary — typo'd statuses become compile errors instead
+ * of silent skip-paths through `pickAdvanceForStatus`'s default branch.
+ */
+export const FLOW_STATUSES = ['Pending', 'Claimed', 'Swapped', 'Locked', 'Closed'] as const
+export type FlowStatus = typeof FLOW_STATUSES[number]
 
 export type AdvanceFns = {
-  claimUsdc: typeof advance.claimUsdc
-  swapUsdcToOnyc: typeof advance.swapUsdcToOnyc
-  lockOnyc: typeof advance.lockOnyc
+  claimUsdc: typeof claimUsdc
+  swapUsdcToOnyc: typeof swapUsdcToOnyc
+  lockOnyc: typeof lockOnyc
 }
 
 export type ScannedFlow = {
   pubkey: PublicKey
-  /** Synthetic status: 'Pending' for VAAs without a Flow yet, else the Flow's on-chain status. */
-  status: string
+  /**
+   * Synthetic `Pending` for VAAs without a Flow PDA yet, else the on-chain
+   * `FlowStatus`. Unrecognised values may still flow through (forward-compat
+   * with on-chain enum additions); they fall through `pickAdvanceForStatus`
+   * to the default skip branch.
+   */
+  status: FlowStatus | string
   /** Source-chain tx signature; may be empty if unknown. */
   fogoTx: string
   /** Pre-fetched VAA bytes hex-encoded — preferred over fogoTx to avoid a second Wormholescan round-trip. */
@@ -26,6 +47,13 @@ export type EnumerateFlowsFn = (ctx: AdvanceContext) => Promise<ScannedFlow[]>
 export type ScanOptions = {
   maxConcurrentAdvances: number
   rpcTimeoutMs: number
+  /**
+   * Budget for the `enumerateFlows` call. Separate from `rpcTimeoutMs`
+   * because enumeration covers a full page window of Wormholescan +
+   * per-VAA Flow PDA lookups; a 15s RPC budget is too tight on initial
+   * backfill. Defaults to `rpcTimeoutMs` for back-compat with tests.
+   */
+  enumerateTimeoutMs?: number
   enumerateFlows?: EnumerateFlowsFn
   advanceFns?: AdvanceFns
   /** Optional skip counter — incremented when a Flow has a status the cranker cannot currently advance (e.g. withdraw-leg statuses gated on ONyc deploy). */
@@ -48,12 +76,29 @@ export type ScanOptions = {
    * stays free of module-level mutable state and stays unit-testable.
    */
   seenAdvanceErrors?: Map<string, string>
+  /**
+   * Optional per-flow processing-state tracker. Gates dispatch so a
+   * flow whose previous tx is still in flight (or that has been
+   * cooling down after a recent error, or that has been quarantined as
+   * poisoned) is skipped this tick — saving the RPC + sim cost. The
+   * on-chain Flow PDA remains the source of truth; this is a pure
+   * latency / load optimization. Without it, behavior matches the old
+   * "always dispatch" path (used by tests that don't care).
+   */
+  flowState?: FlowStateTracker
+  /**
+   * Optional callback fired once after the iteration if at least one
+   * flow advanced (`AdvanceResult.kind === 'advanced'`). Used to wake
+   * the daemon's sleep early — when the chain is busy, the next tick
+   * should run sooner than the 30s floor.
+   */
+  onProgress?: () => void
 }
 
 const DEFAULT_ADVANCE_FNS: AdvanceFns = {
-  claimUsdc: advance.claimUsdc,
-  swapUsdcToOnyc: advance.swapUsdcToOnyc,
-  lockOnyc: advance.lockOnyc,
+  claimUsdc,
+  swapUsdcToOnyc,
+  lockOnyc,
 }
 
 const defaultEnumerateFlows: EnumerateFlowsFn = async () => []
@@ -71,7 +116,7 @@ export async function scanAndAdvance(
 
   const flows = await withTimeout(
     enumerate(ctx),
-    opts.rpcTimeoutMs,
+    opts.enumerateTimeoutMs ?? opts.rpcTimeoutMs,
     'enumerateFlows',
   )
 
@@ -89,6 +134,7 @@ export async function scanAndAdvance(
   const knownClassesAtStart = new Set(opts.seenAdvanceErrors?.keys() ?? [])
 
   const tasks: Array<() => Promise<AdvanceResult>> = []
+  let progress = false
   for (const flow of flows) {
     const dispatch = pickAdvanceForStatus(flow.status, fns)
     if (!dispatch) {
@@ -100,15 +146,79 @@ export async function scanAndAdvance(
       continue
     }
     const flowKey = flow.pubkey.toBase58()
+    // Per-flow FSM gate: skip flows that are already in flight, in
+    // cooldown after a recent error, or quarantined as poisoned. Saves
+    // the RPC + sim cost on flows that are guaranteed to be wasted work
+    // this tick. The on-chain Flow PDA remains the truth; this is purely
+    // about whether *this cranker* should re-dispatch *this iteration*.
+    if (opts.flowState) {
+      const decision = opts.flowState.beginIfReady(flowKey)
+      if (!decision.allowed) {
+        ctx.log.debug('flow gated', { flow: flowKey, reason: decision.reason })
+        opts.skipCounter?.inc({ reason: `gated:${decision.reason ?? 'unknown'}` })
+        continue
+      }
+    }
     tasks.push(async () => {
-      ctx.log.debug('dispatching advance', { flow: flowKey, status: flow.status })
-      const result = await dispatch(ctx, { fogoTx: flow.fogoTx, vaaHex: flow.vaaHex })
-      logAdvanceResult(ctx, flowKey, flow.status, result, opts.seenAdvanceErrors, iterationFailures)
-      return result
+      // Chain legs in-tick: a flow that progresses Pending → Claimed →
+      // Swapped → Locked shouldn't pay one scan-interval (and one full
+      // re-enumerate) per leg. We hold the FSM in-flight slot for the
+      // whole chain — releasing it between legs would let another task
+      // in this same tick race us on the same flow. Loop terminates on
+      // first non-`advanced` result, on abort, or when the new status
+      // has no successor dispatch.
+      let currentStatus = flow.status
+      let lastResult: AdvanceResult = {
+        kind: 'noop',
+        reason: `no dispatch for status ${flow.status}`,
+      }
+      let nextDispatch: DispatchFn | undefined = dispatch
+      while (nextDispatch) {
+        if (ctx.abortSignal.aborted) {
+          break
+        }
+        ctx.log.debug('dispatching advance', { flow: flowKey, status: currentStatus })
+        const result = await nextDispatch(ctx, { fogoTx: flow.fogoTx, vaaHex: flow.vaaHex })
+        logAdvanceResult(ctx, flowKey, currentStatus, result, opts.seenAdvanceErrors, iterationFailures)
+        lastResult = result
+        if (result.kind !== 'advanced') {
+          break
+        }
+        progress = true
+        currentStatus = result.toStatus
+        nextDispatch = pickAdvanceForStatus(currentStatus, fns)
+      }
+      if (opts.flowState) {
+        if (lastResult.kind === 'error') {
+          opts.flowState.recordError(flowKey, errorClass(lastResult.error))
+        } else {
+          opts.flowState.recordSuccess(flowKey)
+        }
+      }
+      return lastResult
     })
   }
 
-  await runBounded(tasks, opts.maxConcurrentAdvances, ctx.abortSignal, ctx.log)
+  await runBounded(
+    tasks,
+    opts.maxConcurrentAdvances,
+    ctx.abortSignal,
+    async task => task(),
+    {
+      throwOnAbort: true,
+      // Advance fns are contractually no-throw (they map errors into
+      // AdvanceResult.error). A throw here is a bug; surface it instead
+      // of swallowing.
+      onWorkerThrow: err => ctx.log.warn(
+        'runBounded task threw (advance contract violation)',
+        errorFields(err),
+      ),
+    },
+  )
+
+  if (progress) {
+    opts.onProgress?.()
+  }
 
   // Iteration-level rollup. New classes (first appearance this process)
   // promote to info — pairs with the inline first-sighting warn so the
@@ -191,7 +301,7 @@ type DispatchFn = (
   input: { fogoTx: string, vaaHex?: string },
 ) => Promise<AdvanceResult>
 
-function pickAdvanceForStatus(status: string, fns: AdvanceFns): DispatchFn | undefined {
+function pickAdvanceForStatus(status: FlowStatus | string, fns: AdvanceFns): DispatchFn | undefined {
   switch (status) {
     case 'Pending':
       return fns.claimUsdc
@@ -200,34 +310,9 @@ function pickAdvanceForStatus(status: string, fns: AdvanceFns): DispatchFn | und
     case 'Swapped':
       return fns.lockOnyc
     default:
+      // 'Locked', 'Closed', or any forward-compat on-chain status the
+      // cranker doesn't drive. Caller skips + bumps the `flow_skipped`
+      // counter with `reason = status`.
       return undefined
-  }
-}
-
-async function runBounded<T>(
-  tasks: Array<() => Promise<T>>,
-  concurrency: number,
-  signal: AbortSignal,
-  log?: { warn: (msg: string, fields?: Record<string, unknown>) => void },
-): Promise<void> {
-  let i = 0
-  let aborted = false
-  const workers = Array.from({ length: concurrency }, async () => {
-    while (i < tasks.length) {
-      if (signal.aborted) {
-        aborted = true
-        return
-      }
-      const idx = i++
-      // Advance fns are contractually no-throw (they map errors into AdvanceResult.error).
-      // A throw here is a bug; surface it instead of swallowing.
-      await tasks[idx]().catch((err) => {
-        log?.warn('runBounded task threw (advance contract violation)', errorFields(err))
-      })
-    }
-  })
-  await Promise.all(workers)
-  if (aborted) {
-    throw new Error('scan aborted mid-flight')
   }
 }

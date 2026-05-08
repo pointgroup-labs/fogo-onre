@@ -45,10 +45,25 @@ const schema = z.object({
   SHUTDOWN_DEADLINE_MS: z.coerce.number().int().min(1000).default(8000),
   BALANCE_POLL_INTERVAL_MS: z.coerce.number().int().min(5000).default(60_000),
   RPC_TIMEOUT_MS: z.coerce.number().int().min(1000).default(15_000),
+  /**
+   * Budget for a single `enumerateFlows` call (Wormholescan paging +
+   * per-VAA Flow PDA lookups). Separate from `RPC_TIMEOUT_MS` because
+   * a fresh process with no checkpoint must backfill the full page
+   * window — easily 50–100 round-trips — and 15s isn't enough.
+   */
+  ENUMERATE_TIMEOUT_MS: z.coerce.number().int().min(5000).default(90_000),
   TX_CONFIRM_TIMEOUT_MS: z.coerce.number().int().min(5000).default(60_000),
   WORMHOLESCAN_TIMEOUT_MS: z.coerce.number().int().min(1000).default(10_000),
   HEARTBEAT_STALE_MS: z.coerce.number().int().min(30_000).default(120_000),
   MAX_CONCURRENT_ADVANCES: z.coerce.number().int().min(1).max(32).default(4),
+  /**
+   * Path to the on-disk checkpoint file (per-emitter Wormholescan
+   * watermarks). Empty string disables persistence — in-memory
+   * watermarks still apply within a process lifetime. Idempotency
+   * on-chain means a lost checkpoint just causes a one-time backfill,
+   * never a missed dispatch.
+   */
+  CHECKPOINT_PATH: z.string().default('./cranker-checkpoint.json'),
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
 })
 
@@ -72,10 +87,12 @@ export type CrankerConfig = {
   shutdownDeadlineMs: number
   balancePollIntervalMs: number
   rpcTimeoutMs: number
+  enumerateTimeoutMs: number
   txConfirmTimeoutMs: number
   wormholescanTimeoutMs: number
   heartbeatStaleMs: number
   maxConcurrentAdvances: number
+  checkpointPath: string
   logLevel: 'debug' | 'info' | 'warn' | 'error'
 }
 
@@ -101,10 +118,12 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     shutdownDeadlineMs: parsed.SHUTDOWN_DEADLINE_MS,
     balancePollIntervalMs: parsed.BALANCE_POLL_INTERVAL_MS,
     rpcTimeoutMs: parsed.RPC_TIMEOUT_MS,
+    enumerateTimeoutMs: parsed.ENUMERATE_TIMEOUT_MS,
     txConfirmTimeoutMs: parsed.TX_CONFIRM_TIMEOUT_MS,
     wormholescanTimeoutMs: parsed.WORMHOLESCAN_TIMEOUT_MS,
     heartbeatStaleMs: parsed.HEARTBEAT_STALE_MS,
     maxConcurrentAdvances: parsed.MAX_CONCURRENT_ADVANCES,
+    checkpointPath: parsed.CHECKPOINT_PATH,
     logLevel: parsed.LOG_LEVEL,
   }
 }

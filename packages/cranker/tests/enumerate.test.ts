@@ -1,8 +1,8 @@
-import type { AdvanceContext } from '../src/advance/types'
+import type { AdvanceContext } from '../src/relayer/types'
 import type { WormholescanVaa } from '../src/wormholescan'
 import { describe, expect, it, vi } from 'vitest'
-import { makeEnumerator } from '../src/enumerate'
-import { silentLogger } from '../src/log'
+import { makeEnumerator } from '../src/relayer/enumerate'
+import { silentLogger } from '../src/utils/log'
 
 function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), { status: 200 })

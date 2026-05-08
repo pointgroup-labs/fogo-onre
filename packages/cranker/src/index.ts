@@ -1,9 +1,9 @@
-import type { AdvanceContext } from './advance/types'
+import type { AdvanceContext, EnumerateFlowsFn } from './relayer'
 import type { BridgeRedeemTarget } from './bridge'
 import type { CrankerConfig } from './config'
-import type { Logger } from './log'
+import type { Logger } from './utils/log'
 import type { Metrics } from './metrics'
-import type { EnumerateFlowsFn } from './scan'
+import type { WatermarkStore } from './state'
 import { readFileSync } from 'node:fs'
 import { AnchorProvider, Wallet } from '@anchor-lang/core'
 import { RelayerClient } from '@fogo-onre/sdk'
@@ -11,10 +11,17 @@ import { Connection, Keypair, LAMPORTS_PER_SOL, PublicKey } from '@solana/web3.j
 import { buildSolanaOnycToFogoTarget, scanAndRedeemBridge } from './bridge'
 import { loadConfig } from './config'
 import { runDaemon } from './daemon'
-import { makeEnumerator } from './enumerate'
-import { createLogger, errorFields, errorMessage, writeLogLine } from './log'
 import { createMetrics } from './metrics'
-import { scanAndAdvance } from './scan'
+import { makeEnumerator, scanAndAdvance } from './relayer'
+import { FlowStateTracker, loadCheckpoint, saveCheckpoint, watermarksFromCheckpoint } from './state'
+import { BoundedMap } from './utils/bounded-map'
+import { createLogger, errorFields, errorMessage, writeLogLine } from './utils/log'
+import { WakeFlag } from './utils/wake-flag'
+
+// Per-process bound for the FOGO-tx → user-wallet cache. ~10k entries ×
+// ~80 bytes ≈ <1 MB RSS. Authoritative source is the chain; eviction at
+// most causes one extra FOGO RPC the next time the same VAA enumerates.
+const USER_WALLET_CACHE_MAX = 10_000
 
 type ShutdownSignal = 'SIGTERM' | 'SIGINT'
 
@@ -33,12 +40,23 @@ export function installShutdownHandlers(controller: AbortController, log?: Logge
 }
 
 /**
- * Background SOL-balance poller. Sets `cranker_keypair_sol_balance` so
- * the `CrankerKeypairLowSol` alert is real. Runs until aborted; errors
- * are logged but never thrown — a temporary RPC blip shouldn't kill the
- * daemon.
+ * Background balance poller. Used for both Solana SOL and FOGO native fees
+ * — the cranker keypair pays gas on both chains (Solana txs from the
+ * relayer-Flow scanner, FOGO txs from the bridge-redeem path which signs
+ * with this same keypair against the FOGO RPC). Two pollers run in
+ * parallel, one per chain.
+ *
+ * On RPC failure the balance gauge is set to **NaN** rather than left at
+ * the last good value — otherwise a long RPC outage masks a draining
+ * balance and the low-balance alert never fires. The companion
+ * `cranker_balance_poll_age_seconds{chain}` gauge keeps growing during
+ * the outage so an alert can distinguish "RPC down" from "poller dead".
+ *
+ * Errors are logged but never thrown — a temporary RPC blip shouldn't
+ * kill the daemon.
  */
 export function startBalancePoller(args: {
+  chain: 'solana' | 'fogo'
   connection: Connection
   pubkey: PublicKey
   metrics: Metrics
@@ -46,13 +64,16 @@ export function startBalancePoller(args: {
   log: Logger
   signal: AbortSignal
 }): void {
+  const balanceGauge = args.chain === 'solana' ? args.metrics.solBalance : args.metrics.fogoBalance
   const tick = async (): Promise<void> => {
     try {
       const lamports = await args.connection.getBalance(args.pubkey, 'confirmed')
-      args.metrics.solBalance.set(lamports / LAMPORTS_PER_SOL)
+      balanceGauge.set(lamports / LAMPORTS_PER_SOL)
+      args.metrics.recordBalancePollSuccess(args.chain)
     } catch (err) {
-      args.log.warn('balance poll failed', errorFields(err))
-      args.metrics.rpcErrors.inc({ endpoint: 'solana', kind: 'getBalance' })
+      args.log.warn('balance poll failed', { chain: args.chain, ...errorFields(err) })
+      balanceGauge.set(Number.NaN)
+      args.metrics.rpcErrors.inc({ endpoint: args.chain, kind: 'getBalance' })
     }
   }
   void tick()
@@ -114,6 +135,11 @@ type ScanDeps = {
   enumerateFlows: EnumerateFlowsFn
   seenAdvanceErrors: Map<string, string>
   seenBridgeErrors: Map<string, string>
+  flowState: FlowStateTracker
+  /** Per-emitter Wormholescan watermarks, shared with `makeEnumerator`. */
+  watermarks: WatermarkStore
+  /** Fired by either leg on progress so the daemon wakes early. */
+  wakeup: WakeFlag
 }
 
 /**
@@ -127,15 +153,25 @@ type ScanDeps = {
  * scan itself threw — surface it but don't drag the other leg down.
  */
 async function runScanIteration(deps: ScanDeps, signal: AbortSignal): Promise<void> {
-  const { advanceCtxBase, bridgeTarget, cfg, metrics, log, enumerateFlows, seenAdvanceErrors, seenBridgeErrors } = deps
+  const { advanceCtxBase, bridgeTarget, cfg, metrics, log, enumerateFlows, seenAdvanceErrors, seenBridgeErrors, flowState, watermarks, wakeup } = deps
   const advanceCtx = { ...advanceCtxBase, abortSignal: signal }
+  // Coalesce the wake signal: a tick that advances 12 flows shouldn't
+  // signal 12 separate wakes. The scan*-side `progress` boolean does the
+  // batching; this just relays. WakeFlag deduplicates by design — multiple
+  // signal()s between two wait()s coalesce.
+  const onProgress = (): void => {
+    wakeup.signal()
+  }
 
   const flowScan = scanAndAdvance(advanceCtx, {
     maxConcurrentAdvances: cfg.maxConcurrentAdvances,
     rpcTimeoutMs: cfg.rpcTimeoutMs,
+    enumerateTimeoutMs: cfg.enumerateTimeoutMs,
     enumerateFlows,
     skipCounter: metrics.flowSkipped,
     seenAdvanceErrors,
+    flowState,
+    onProgress,
   })
   const bridgeScan = bridgeTarget
     ? scanAndRedeemBridge(
@@ -158,6 +194,8 @@ async function runScanIteration(deps: ScanDeps, signal: AbortSignal): Promise<vo
           maxPages: cfg.wormholescanMaxPages,
           maxConcurrentRedeems: cfg.bridgeMaxConcurrent,
           seenRedeemErrors: seenBridgeErrors,
+          watermarks,
+          onProgress,
         },
       )
     : Promise.resolve()
@@ -232,8 +270,20 @@ async function main(): Promise<void> {
   const shutdown = new AbortController()
   installShutdownHandlers(shutdown, log)
 
+  // Solana side pays for relayer-Flow advances; FOGO side pays for
+  // bridge-redeem `transfer_*` submits. Same keypair; different chains.
   startBalancePoller({
+    chain: 'solana',
     connection,
+    pubkey: keypair.publicKey,
+    metrics,
+    intervalMs: cfg.balancePollIntervalMs,
+    log,
+    signal: shutdown.signal,
+  })
+  startBalancePoller({
+    chain: 'fogo',
+    connection: fogoConnection,
     pubkey: keypair.publicKey,
     metrics,
     intervalMs: cfg.balancePollIntervalMs,
@@ -242,6 +292,20 @@ async function main(): Promise<void> {
   })
   startWsKeepalive({ connection, metrics, log, signal: shutdown.signal })
 
+  // Persisted across restarts: per-emitter Wormholescan watermarks. A
+  // missing/corrupt file is harmless (full backfill, idempotent). Same
+  // store is shared between the Flow enumerator and the bridge scanner
+  // — keys are emitter-hex so collisions are impossible across legs.
+  const checkpoint = cfg.checkpointPath ? loadCheckpoint(cfg.checkpointPath) : undefined
+  const watermarks = watermarksFromCheckpoint(checkpoint)
+  if (checkpoint) {
+    log.info('checkpoint loaded', {
+      path: cfg.checkpointPath,
+      emitters: Object.keys(checkpoint.watermarks).length,
+      updatedAt: checkpoint.updatedAt,
+    })
+  }
+
   const enumerateFlows = makeEnumerator({
     fogoWormholeChainId: cfg.fogoWormholeChainId,
     fogoUsdcEmitterHex: cfg.fogoUsdcEmitterHex,
@@ -249,6 +313,7 @@ async function main(): Promise<void> {
     pageSize: cfg.wormholescanPageSize,
     maxPages: cfg.wormholescanMaxPages,
     baseUrl: cfg.wormholescanUrl,
+    watermarks,
   })
 
   const advanceCtxBase = {
@@ -266,7 +331,7 @@ async function main(): Promise<void> {
     // Cross-scan cache: FOGO source-tx → user wallet. claim_usdc resolves
     // user wallets by reading the original FOGO bridge_ntt_tokens source
     // ATA owner; cache so repeat scans don't re-fetch the same tx.
-    userWalletCache: new Map<string, PublicKey>(),
+    userWalletCache: new BoundedMap<string, PublicKey>(USER_WALLET_CACHE_MAX),
   } satisfies Omit<AdvanceContext, 'abortSignal'>
 
   try {
@@ -274,6 +339,35 @@ async function main(): Promise<void> {
     // unrecoverable flows don't spam warn every scan interval.
     const seenAdvanceErrors = new Map<string, string>()
     const seenBridgeErrors = new Map<string, string>()
+
+    // Per-flow ephemeral processing FSM (idle / inFlight / cooldown /
+    // poisoned). Gates dispatch to skip flows already in flight or
+    // backing off after errors. On-chain Flow PDA remains the truth.
+    const flowState = new FlowStateTracker()
+
+    // WakeFlag wakes the daemon early when either leg makes progress —
+    // chain busy ⇒ next tick runs sooner than the 30s floor. Sticky-flag
+    // semantics mean a signal() during the scan is preserved until the
+    // daemon's next wait() consumes it (the EventEmitter version dropped
+    // signals fired before the listener attached, silently breaking the
+    // wake-on-progress optimization).
+    const wakeup = new WakeFlag()
+
+    // Periodic checkpoint flush. The watermark store mutates inside
+    // both legs; flushing every 30s bounds the "data we'd lose on a
+    // crash" to ~30s of paging redundancy — far cheaper than per-tick
+    // I/O and harmless given on-chain idempotency.
+    let checkpointTimer: NodeJS.Timeout | undefined
+    if (cfg.checkpointPath) {
+      checkpointTimer = setInterval(() => {
+        try {
+          saveCheckpoint(cfg.checkpointPath, watermarks)
+        } catch (err) {
+          log.warn('checkpoint flush failed', errorFields(err))
+        }
+      }, 30_000)
+      checkpointTimer.unref()
+    }
 
     // Probe the FOGO ONyc Config once at startup (not per VAA). Mode is
     // a deploy-time invariant — flipping it requires NTT governance — so
@@ -324,6 +418,9 @@ async function main(): Promise<void> {
         enumerateFlows,
         seenAdvanceErrors,
         seenBridgeErrors,
+        flowState,
+        watermarks,
+        wakeup,
       }, signal),
       metrics,
       intervalMs: cfg.scanIntervalMs,
@@ -331,8 +428,18 @@ async function main(): Promise<void> {
       maxBackoffMs: cfg.scanMaxBackoffMs,
       shutdownDeadlineMs: cfg.shutdownDeadlineMs,
       abortSignal: shutdown.signal,
+      wakeup,
     })
   } finally {
+    if (cfg.checkpointPath) {
+      // Final flush — captures whatever the last 30s of progress
+      // produced before SIGTERM. Best-effort; never block shutdown.
+      try {
+        saveCheckpoint(cfg.checkpointPath, watermarks)
+      } catch (err) {
+        log.warn('checkpoint final flush failed', errorFields(err))
+      }
+    }
     await metrics.stop().catch(() => undefined)
   }
 }

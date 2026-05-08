@@ -15,7 +15,7 @@ import {
   WH_TRANSCEIVER_ONYC_PROGRAM_ID,
 } from '@fogo-onre/sdk'
 import { PublicKey } from '@solana/web3.js'
-import { withTimeout } from '../rpc'
+import { withTimeout } from '../utils/rpc'
 
 /** Default FOGO ONyc mint. Same address as webapp constants.ts. */
 export const DEFAULT_FOGO_ONYC_MINT = new PublicKey('oNyCm1QsAatj3ckaEwZjtAPWvstPn3Zm5MAYPtkjEfa')

@@ -15,8 +15,8 @@ import {
   sendAndConfirmTransaction,
   Transaction,
 } from '@solana/web3.js'
-import { errorFields } from '../log'
-import { withTimeout } from '../rpc'
+import { errorFields } from '../utils/log'
+import { withTimeout } from '../utils/rpc'
 import { executeSdkBundledRedeem } from './sdk-redeem'
 
 /**

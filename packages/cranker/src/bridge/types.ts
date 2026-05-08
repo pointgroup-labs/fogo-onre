@@ -1,6 +1,6 @@
 import type { NttManagerMode } from '@fogo-onre/sdk'
 import type { Connection, Keypair, PublicKey, TransactionInstruction } from '@solana/web3.js'
-import type { Logger } from '../log'
+import type { Logger } from '../utils/log'
 import type { Metrics } from '../metrics'
 
 /**

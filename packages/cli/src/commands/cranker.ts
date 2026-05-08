@@ -33,20 +33,22 @@
  * landed step is a hard error rather than wasted gas.
  */
 
+import type { FlowAccount } from '@fogo-onre/sdk'
+import type { TransactionInstruction } from '@solana/web3.js'
 import { AnchorProvider, Wallet } from '@anchor-lang/core'
-import { describeStatus, findAuthorityPda, findInboxRateLimitPda, findInflightFlowPda, findNttPeerPda, findSessionAuthorityPda, findUserInboxAuthorityPda, type FlowAccount, FOGO_WORMHOLE_CHAIN_ID, NTT_ONYC_PROGRAM_ID, NTT_USDC_PROGRAM_ID, nttTransferArgsHash, ONYC_MINT, resolveNttVaa, USDC_MINT, WormholescanClient } from '@fogo-onre/sdk'
+import { describeStatus, findAuthorityPda, findInboxRateLimitPda, findInflightFlowPda, findNttPeerPda, findSessionAuthorityPda, findUserInboxAuthorityPda, FOGO_WORMHOLE_CHAIN_ID, NTT_ONYC_PROGRAM_ID, NTT_USDC_PROGRAM_ID, nttTransferArgsHash, ONYC_MINT, resolveNttVaa, USDC_MINT, WormholescanClient } from '@fogo-onre/sdk'
 import { createAssociatedTokenAccountIdempotentInstruction, getAssociatedTokenAddressSync } from '@solana/spl-token'
-import { Connection, Keypair, PublicKey, SystemProgram, Transaction, type TransactionInstruction, VersionedTransaction } from '@solana/web3.js'
+import { Connection, Keypair, PublicKey, SystemProgram, Transaction, VersionedTransaction } from '@solana/web3.js'
 import { deserialize } from '@wormhole-foundation/sdk-definitions'
 // Auto-registration on import is deprecated in sdk 4.x; call `register()`
 // explicitly so `deserialize('Ntt:WormholeTransfer', bytes)` resolves.
 import { register as registerNttPayloads } from '@wormhole-foundation/sdk-definitions-ntt'
 import { SolanaNtt } from '@wormhole-foundation/sdk-solana-ntt'
-
-registerNttPayloads()
 import chalk from 'chalk'
 import { Command } from 'commander'
 import { runTx, useContext } from '../context'
+
+registerNttPayloads()
 
 // Wormhole Core Bridge program ID (Solana mainnet). Stable on-chain
 // identifier; testnet/devnet would need a different value but this CLI
@@ -71,7 +73,6 @@ const FOGO_WORMHOLE_CORE_MAINNET = 'worm2mrQkG1B1KTz37erMfWN8anHkSK24nzca7UD8BB'
 // First-party Fogo Labs RPC, matching the webapp default in
 // `packages/webapp/src/store/settings.ts`.
 const FOGO_RPC_DEFAULT = 'https://mainnet.fogo.io'
-
 
 export function crankerCommands(): Command {
   const cranker = new Command('cranker').description(
@@ -1359,7 +1360,6 @@ function printFlow(label: string, flow: FlowAccount) {
   console.log(chalk.dim(`  amount:     ${flow.amount.toString()}`))
   console.log(chalk.dim(`  payer:      ${flow.payer.toBase58()}`))
 }
-
 
 function nextDepositStep(status: FlowAccount['status'], fogoTx: string): string {
   // Deposit chain (set by relayer instructions, see programs/relayer/src/instructions/*.rs):

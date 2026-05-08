@@ -9,14 +9,10 @@ import {
 } from '@fogo-onre/sdk'
 import { createAssociatedTokenAccountIdempotentInstruction, getAssociatedTokenAddressSync } from '@solana/spl-token'
 import { PublicKey } from '@solana/web3.js'
-import { withTimeout } from '../rpc'
-import { fetchVaaBytes } from './helpers'
-
-// Bound for the FOGO-tx → user-wallet cache. ~10k entries × ~80 bytes ≈ <1 MB
-// of RSS — well below any practical limit, but enough to absorb a Wormholescan
-// backfill burst without re-fetching every entry. The chain is the source of
-// truth; eviction is harmless.
-const USER_WALLET_CACHE_MAX = 10_000
+import { withTimeout } from '../utils/rpc'
+import { readNttInboxAmount, readSplTokenAmount } from './account-layouts'
+import { fetchVaaBytes } from '../utils/wormhole'
+import { isLostRace } from './race-classifier'
 
 export type ClaimUsdcInput = {
   fogoTx: string
@@ -106,15 +102,9 @@ export async function claimUsdc(
         }
       }
       userWallet = recovered
-      // Bound the cache to keep RSS flat over a long-running daemon. The
-      // chain is the source of truth — eviction at most causes one extra
-      // FOGO RPC the next time the same VAA is enumerated.
-      if (ctx.userWalletCache.size >= USER_WALLET_CACHE_MAX) {
-        const oldest = ctx.userWalletCache.keys().next().value
-        if (oldest !== undefined) {
-          ctx.userWalletCache.delete(oldest)
-        }
-      }
+      // The cache is wired as a `BoundedMap` in the daemon, so `set`
+      // handles FIFO eviction at `USER_WALLET_CACHE_MAX`. Tests that
+      // pass a plain `Map` get unbounded growth — fine at test scale.
       ctx.userWalletCache.set(input.fogoTx, recovered)
     }
 
@@ -156,16 +146,12 @@ export async function claimUsdc(
     // doesn't catch it, NTT release is idempotent (skip path), and the
     // amount check fails permanently.
     //
-    // We compare the two values the on-chain handler compares using fixed-offset
-    // byte reads:
-    //   - inbox.amount: NTT InboxItem layout = [disc(8) | init(1) | bump(1) |
-    //     amount(u64 LE) | ...] → offset 10
-    //   - ata.amount:   SPL TokenAccount layout = [mint(32) | owner(32) |
-    //     amount(u64 LE) | ...] → offset 64
-    //
-    // If the inbox-item doesn't exist yet, this is a fresh claim — proceed.
-    // If both exist and the ATA balance is insufficient for the recorded
-    // inbox amount, the on-chain check would always fail; noop instead.
+    // Layout-aware reads live in `account-layouts.ts` — the sha256 binary
+    // pins in `tests/utils/withdraw-scaffolding.ts` are the tripwire if
+    // upstream layout drifts. If the inbox-item doesn't exist yet, this
+    // is a fresh claim — proceed. If both exist and the ATA balance is
+    // insufficient for the recorded inbox amount, the on-chain check
+    // would always fail; noop instead.
     const [inboxInfo, ataInfo] = await Promise.all([
       withTimeout(
         connection.getAccountInfo(resolved.nttInboxItem),
@@ -178,11 +164,9 @@ export async function claimUsdc(
         'getAccountInfo(userInboxAta)',
       ).catch(() => null),
     ])
-    if (inboxInfo && inboxInfo.data.length >= 18) {
-      const inboxAmount = inboxInfo.data.readBigUInt64LE(10)
-      const ataAmount = ataInfo && ataInfo.data.length >= 72
-        ? ataInfo.data.readBigUInt64LE(64)
-        : 0n
+    const inboxAmount = readNttInboxAmount(inboxInfo?.data)
+    if (inboxAmount !== null) {
+      const ataAmount = readSplTokenAmount(ataInfo?.data) ?? 0n
       if (ataAmount < inboxAmount) {
         return {
           kind: 'noop',
@@ -232,6 +216,16 @@ export async function claimUsdc(
     }
   } catch (err) {
     metrics.txSent.inc({ instruction: 'claim_usdc', result: 'error' })
+    // Anchor 6026 (RelayerInsufficientInboxBalance) is a benign race —
+    // another cranker advanced claim_usdc + swap_usdc_to_onyc between our
+    // pre-flight 3 (TOCTOU window) and our submit. Classifier in
+    // `race-classifier.ts` is the single source of truth for which codes
+    // count as "lost race"; downgrade those to noop so the FSM doesn't
+    // burn cooldown on a flow already further along the chain.
+    const raceReason = isLostRace(err)
+    if (raceReason) {
+      return { kind: 'noop', reason: raceReason }
+    }
     return {
       kind: 'error',
       error: err instanceof Error ? err : new Error(String(err)),
