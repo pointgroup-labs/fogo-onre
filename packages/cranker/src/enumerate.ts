@@ -1,12 +1,14 @@
 import type { AdvanceContext } from './advance/types'
 import type { ScannedFlow } from './scan'
-import type { ResolvedNttVaa } from './vaa'
-import type { WormholescanVaa } from './wormholescan'
-import { NTT_ONYC_PROGRAM_ID, NTT_USDC_PROGRAM_ID } from '@fogo-onre/sdk'
-import { describeStatus } from './advance/helpers'
+import type { ResolvedNttVaa, WormholescanVaa } from '@fogo-onre/sdk'
+import {
+  describeStatus,
+  NTT_ONYC_PROGRAM_ID,
+  NTT_USDC_PROGRAM_ID,
+  resolveNttVaa,
+  WormholescanClient,
+} from '@fogo-onre/sdk'
 import { errorFields, errorFieldsCompact } from './log'
-import { resolveNttVaa } from './vaa'
-import { WormholescanClient } from './wormholescan'
 
 const VAA_LEG = {
   deposit: { nttProgramId: NTT_USDC_PROGRAM_ID },

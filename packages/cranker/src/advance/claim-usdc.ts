@@ -1,10 +1,16 @@
 import type { AdvanceContext, AdvanceResult } from './types'
-import { findUserInboxAuthorityPda, NTT_USDC_PROGRAM_ID, USDC_MINT } from '@fogo-onre/sdk'
+import {
+  describeStatus,
+  deriveUserWalletFromFogoTx,
+  findUserInboxAuthorityPda,
+  NTT_USDC_PROGRAM_ID,
+  resolveNttVaa,
+  USDC_MINT,
+} from '@fogo-onre/sdk'
 import { createAssociatedTokenAccountIdempotentInstruction, getAssociatedTokenAddressSync } from '@solana/spl-token'
 import { PublicKey } from '@solana/web3.js'
 import { withTimeout } from '../rpc'
-import { resolveNttVaa } from '../vaa'
-import { deriveUserWalletFromFogoTx, describeStatus, fetchVaaBytes } from './helpers'
+import { fetchVaaBytes } from './helpers'
 
 export type ClaimUsdcInput = {
   fogoTx: string

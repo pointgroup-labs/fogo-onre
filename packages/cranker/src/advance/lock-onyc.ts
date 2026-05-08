@@ -1,8 +1,18 @@
 import type { AdvanceContext, AdvanceResult } from './types'
-import { findAuthorityPda, findNttPeerPda, findRegisteredTransceiverPda, findSessionAuthorityPda, FOGO_WORMHOLE_CHAIN_ID, NTT_ONYC_PROGRAM_ID, NTT_USDC_PROGRAM_ID, nttTransferArgsHash } from '@fogo-onre/sdk'
+import {
+  describeStatus,
+  findAuthorityPda,
+  findNttPeerPda,
+  findRegisteredTransceiverPda,
+  findSessionAuthorityPda,
+  FOGO_WORMHOLE_CHAIN_ID,
+  NTT_ONYC_PROGRAM_ID,
+  NTT_USDC_PROGRAM_ID,
+  nttTransferArgsHash,
+  resolveNttVaa,
+} from '@fogo-onre/sdk'
 import { Keypair, PublicKey, SystemProgram } from '@solana/web3.js'
-import { resolveNttVaa } from '../vaa'
-import { DEFAULT_NTT_VERSION, deriveLockOnycReleaseAccounts, describeStatus, fetchVaaBytes, makeSolanaNtt, WORMHOLE_CORE_MAINNET } from './helpers'
+import { DEFAULT_NTT_VERSION, deriveLockOnycReleaseAccounts, fetchVaaBytes, makeSolanaNtt, WORMHOLE_CORE_MAINNET } from './helpers'
 
 export type LockOnycInput = {
   fogoTx: string

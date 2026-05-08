@@ -1,8 +1,7 @@
 import type { AdvanceContext, AdvanceResult } from './types'
-import { NTT_USDC_PROGRAM_ID, USDC_MINT } from '@fogo-onre/sdk'
+import { describeStatus, NTT_USDC_PROGRAM_ID, resolveNttVaa, USDC_MINT } from '@fogo-onre/sdk'
 import { PublicKey } from '@solana/web3.js'
-import { resolveNttVaa } from '../vaa'
-import { describeStatus, fetchVaaBytes } from './helpers'
+import { fetchVaaBytes } from './helpers'
 
 export type SwapUsdcToOnycInput = {
   fogoTx: string

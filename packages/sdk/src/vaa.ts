@@ -1,6 +1,11 @@
+import { Buffer } from 'node:buffer'
+import { keccak_256 } from '@noble/hashes/sha3.js'
+import { PublicKey } from '@solana/web3.js'
+import { findInboxItemPda } from './builders/ntt'
+
 /**
  * VAA + Wormhole-NTT-transceiver + NttManagerMessage wire decoders, plus
- * the two PDA derivations a manual cranker needs to invoke `claim_usdc`
+ * the PDA derivations any cranker / observer needs to invoke `claim_usdc`
  * or `unlock_onyc`:
  *
  *   - `nttInboxItem`           = ["inbox_item", keccak256(from_chain_BE || ntt_manager_message_wire)]
@@ -11,35 +16,21 @@
  * they're considerably smaller. See that file for the long-form
  * commentary on wire vs Borsh divergence.
  *
- * NOT a full VAA validator. We don't verify the guardian signatures —
- * the Solana NTT manager does that downstream when we submit the redeem
- * tx. We only need enough parsing to (a) recover the addresses of the
- * on-chain accounts the relayer's `claim_usdc` / `unlock_onyc` ix
- * references, and (b) report status to the operator.
+ * NOT a full VAA validator — guardian signatures aren't checked. The
+ * Solana NTT manager re-verifies them downstream during redeem. We only
+ * need enough parsing to (a) recover the on-chain account addresses the
+ * relayer's `claim_usdc` / `unlock_onyc` ix references, and (b) report
+ * status to operators.
  */
 
-import { Buffer } from 'node:buffer'
-// `@noble/hashes` 1.x: import path has no `.js` suffix. We pin to 1.x
-// because the rest of the bundled CLI deps (`@solana/spl-token` etc.)
-// resolve `@noble/hashes/sha256` against 1.x; mixing 2.x here would
-// duplicate the package and break the bundle.
-import { keccak_256 } from '@noble/hashes/sha3'
-import { PublicKey } from '@solana/web3.js'
-
-const INBOX_ITEM_SEED = Buffer.from('inbox_item')
 const TRANSCEIVER_MESSAGE_SEED = Buffer.from('transceiver_message')
 
 // Wormhole NTT transceiver wire prefix. Verified against
 // upstream `solana/programs/wormhole-transceiver/src/messages.rs`.
 const WH_TRANSCEIVER_PREFIX = Uint8Array.from([0x99, 0x45, 0xFF, 0x10])
-// Inner NativeTokenTransfer wire prefix (see ntt-accounts.ts:71).
+// Inner NativeTokenTransfer wire prefix (see tests/utils/ntt-accounts.ts:71).
 const NATIVE_TOKEN_TRANSFER_PREFIX = Uint8Array.from([0x99, 0x4E, 0x54, 0x54])
 
-/**
- * Wormhole VAA header + body, fully parsed. Signatures are NOT validated —
- * we hand the raw bytes to the on-chain NTT manager which does its own
- * guardian-set verification.
- */
 export interface ParsedVaa {
   version: number
   guardianSetIndex: number
@@ -217,17 +208,6 @@ export function inboxItemMessageHash(fromChain: number, nttManagerWire: Uint8Arr
   return keccak_256(buf)
 }
 
-export function findInboxItemPda(
-  messageHash: Uint8Array,
-  nttProgramId: PublicKey,
-): PublicKey {
-  const [pda] = PublicKey.findProgramAddressSync(
-    [INBOX_ITEM_SEED, Buffer.from(messageHash)],
-    nttProgramId,
-  )
-  return pda
-}
-
 export function findValidatedTransceiverMessagePda(
   fromChain: number,
   messageId: Uint8Array,
@@ -243,10 +223,9 @@ export function findValidatedTransceiverMessagePda(
 }
 
 /**
- * One-shot: signed VAA bytes → everything the cranker needs to call
- * `claim_usdc` / `unlock_onyc`. Throws with a precise message at the
- * first parse failure (so operator knows whether the VAA is malformed
- * or addresses to a non-NTT emitter).
+ * One-shot: signed VAA bytes → everything needed to call `claim_usdc` /
+ * `unlock_onyc`. Throws with a precise message at the first parse failure
+ * (so the caller can distinguish a malformed VAA from a non-NTT emitter).
  */
 export interface ResolvedNttVaa {
   vaa: ParsedVaa
@@ -280,12 +259,13 @@ export function resolveNttVaa(params: {
   const manager = parseNttManagerMessage(transceiver.nttManagerPayload)
   const transceiverProgramId = params.transceiverProgramId ?? params.nttProgramId
   const messageHash = inboxItemMessageHash(vaa.emitterChain, transceiver.nttManagerPayload)
+  const [nttInboxItem] = findInboxItemPda(messageHash, params.nttProgramId)
   return {
     vaa,
     transceiver,
     manager,
     fromChain: vaa.emitterChain,
-    nttInboxItem: findInboxItemPda(messageHash, params.nttProgramId),
+    nttInboxItem,
     nttTransceiverMessage: findValidatedTransceiverMessagePda(
       vaa.emitterChain,
       manager.id,

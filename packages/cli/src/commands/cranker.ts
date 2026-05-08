@@ -34,7 +34,7 @@
  */
 
 import { AnchorProvider, Wallet } from '@anchor-lang/core'
-import { findAuthorityPda, findInboxRateLimitPda, findInflightFlowPda, findNttPeerPda, findSessionAuthorityPda, findUserInboxAuthorityPda, FOGO_WORMHOLE_CHAIN_ID, NTT_ONYC_PROGRAM_ID, NTT_USDC_PROGRAM_ID, nttTransferArgsHash, ONYC_MINT, USDC_MINT } from '@fogo-onre/sdk'
+import { describeStatus, findAuthorityPda, findInboxRateLimitPda, findInflightFlowPda, findNttPeerPda, findSessionAuthorityPda, findUserInboxAuthorityPda, type FlowAccount, FOGO_WORMHOLE_CHAIN_ID, NTT_ONYC_PROGRAM_ID, NTT_USDC_PROGRAM_ID, nttTransferArgsHash, ONYC_MINT, resolveNttVaa, USDC_MINT, WormholescanClient } from '@fogo-onre/sdk'
 import { createAssociatedTokenAccountIdempotentInstruction, getAssociatedTokenAddressSync } from '@solana/spl-token'
 import { Connection, Keypair, PublicKey, SystemProgram, Transaction, type TransactionInstruction, VersionedTransaction } from '@solana/web3.js'
 import { deserialize } from '@wormhole-foundation/sdk-definitions'
@@ -47,8 +47,6 @@ registerNttPayloads()
 import chalk from 'chalk'
 import { Command } from 'commander'
 import { runTx, useContext } from '../context'
-import { resolveNttVaa } from '../lib/vaa'
-import { WormholescanClient } from '../lib/wormholescan'
 
 // Wormhole Core Bridge program ID (Solana mainnet). Stable on-chain
 // identifier; testnet/devnet would need a different value but this CLI
@@ -1353,13 +1351,6 @@ async function fetchVaaBytes(args: FetchVaaArgs): Promise<Uint8Array> {
   return bytes
 }
 
-interface FlowAccount {
-  fogoSender: number[] | Uint8Array
-  status: { claimed?: object, swapped?: object, redemptionPending?: object }
-  amount: { toString: () => string }
-  payer: PublicKey
-}
-
 function printFlow(label: string, flow: FlowAccount) {
   const sender = new PublicKey(Uint8Array.from(flow.fogoSender as ArrayLike<number>))
   console.log(chalk.cyan(`\nFlow (${label})`))
@@ -1369,18 +1360,6 @@ function printFlow(label: string, flow: FlowAccount) {
   console.log(chalk.dim(`  payer:      ${flow.payer.toBase58()}`))
 }
 
-function describeStatus(status: FlowAccount['status']): string {
-  if (status.claimed !== undefined) {
-    return 'Claimed'
-  }
-  if (status.swapped !== undefined) {
-    return 'Swapped'
-  }
-  if (status.redemptionPending !== undefined) {
-    return 'RedemptionPending'
-  }
-  return 'Unknown'
-}
 
 function nextDepositStep(status: FlowAccount['status'], fogoTx: string): string {
   // Deposit chain (set by relayer instructions, see programs/relayer/src/instructions/*.rs):

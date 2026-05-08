@@ -1,10 +1,11 @@
-import type { ResolvedNttVaa } from '../vaa'
 import type { BridgeContext, BridgePlan, BridgeRedeemResult, BridgeRedeemTarget } from './types'
 import {
   buildFogoNttReleaseInboundMintIx,
   buildFogoNttReleaseInboundUnlockIx,
   decodeNttInboxItem,
   type NttInboxItem,
+  type ResolvedNttVaa,
+  resolveNttVaa,
 } from '@fogo-onre/sdk'
 import {
   createAssociatedTokenAccountIdempotentInstruction,
@@ -17,7 +18,6 @@ import {
 } from '@solana/web3.js'
 import { errorFields } from '../log'
 import { withTimeout } from '../rpc'
-import { resolveNttVaa } from '../vaa'
 import { executeSdkBundledRedeem } from './sdk-redeem'
 
 /**

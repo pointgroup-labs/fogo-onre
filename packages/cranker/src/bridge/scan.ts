@@ -1,6 +1,6 @@
 import type { BridgeContext, BridgeRedeemResult, BridgeRedeemTarget } from './types'
+import { WormholescanClient } from '@fogo-onre/sdk'
 import { errorClass, errorFields, errorMessage } from '../log'
-import { WormholescanClient } from '../wormholescan'
 import { executeBridgePlan, planBridgeRedeem } from './redeem'
 
 export interface BridgeScanOptions {

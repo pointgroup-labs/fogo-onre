@@ -122,13 +122,34 @@ export {
   applyFeeBps,
   computeOnycPrice,
   type DepositQuote,
+  describeStatus,
   type FeeBreakdown,
+  type FlowAccount,
+  type FlowStatusName,
   humanPriceToBaseRatio,
   type OnycPriceSnapshot,
   quoteDeposit,
   quoteWithdraw,
   type WithdrawQuote,
 } from './utils'
+export {
+  findValidatedTransceiverMessagePda,
+  inboxItemMessageHash,
+  parseNttManagerMessage,
+  type ParsedNttManagerMessage,
+  type ParsedTransceiverMessage,
+  type ParsedVaa,
+  parseTransceiverMessage,
+  parseVaa,
+  type ResolvedNttVaa,
+  resolveNttVaa,
+} from './vaa'
+export { deriveUserWalletFromFogoTx } from './wallet-recovery'
+export {
+  WormholescanClient,
+  type WormholescanClientOptions,
+  type WormholescanVaa,
+} from './wormholescan'
 export { type FogoOnreRelayer } from './types/fogo_onre_relayer'
 export { BN } from '@anchor-lang/core'
 export type { Provider } from '@anchor-lang/core'

@@ -13,8 +13,6 @@ import { createLogger, errorFields, errorMessage, writeLogLine } from './log'
 import { createMetrics } from './metrics'
 import { scanAndAdvance } from './scan'
 
-export * from './vaa'
-export * from './wormholescan'
 
 type ShutdownSignal = 'SIGTERM' | 'SIGINT'
 

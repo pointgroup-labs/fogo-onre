@@ -1,3 +1,11 @@
+/**
+ * Minimal Wormholescan REST client. Used by crankers/observers to fetch
+ * signed VAAs by source-chain tx hash, by `(chain, emitter, sequence)`,
+ * or to scan recent emissions for a `(chain, emitter)` pair.
+ *
+ * Pure `fetch` + base64 — no third-party HTTP deps.
+ */
+
 const DEFAULT_BASE_URL = 'https://api.wormholescan.io'
 
 export type WormholescanVaa = {
@@ -54,8 +62,8 @@ export class WormholescanClient {
 
   /**
    * List recent VAAs for a (chain, emitter) pair, newest first. Used by
-   * the cranker scanner to discover Pending bridge messages that don't
-   * yet have an on-chain Flow account.
+   * scanners to discover Pending bridge messages that don't yet have an
+   * on-chain Flow account.
    */
   async listVaasByEmitter(
     chain: number,
