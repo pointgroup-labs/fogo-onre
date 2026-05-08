@@ -1,25 +1,23 @@
 import { defineConfig } from 'tsup'
 
+// esbuild's ESM output replaces `require()` with a `__require` helper
+// that throws unless a real `require` is in scope. Bundled CJS deps
+// (@anchor-lang/core, NTT SDK) call `require("buffer")` at runtime, so
+// we re-create one from `import.meta.url`. tsup's `shims: true` only
+// covers __dirname/__filename — not require — so this banner is required.
+const requireShim = `import { createRequire } from 'module'; const require = createRequire(import.meta.url);`
+
 export default defineConfig({
   entry: ['src/cli.ts'],
   format: ['esm'],
   platform: 'node',
   target: 'node24',
-  // Banner: shebang + createRequire shim. The shim is required because
-  // bundled CJS deps (@anchor-lang/core, etc.) `require()` Node built-ins
-  // at runtime; under ESM output, esbuild's default `__require` helper
-  // throws unless a real `require` is in scope.
-  banner: {
-    js: `#!/usr/bin/env node\nimport { createRequire as __cR } from 'module'; var require = __cR(import.meta.url);`,
-  },
-  // SDK is a workspace dep that re-exports BN from a CJS-only package
-  // (@anchor-lang/core whose "ESM" build is actually CJS source). Bundling
-  // resolves the named exports at build time; esbuild injects a
-  // `createRequire(import.meta.url)` shim so bundled CJS deps' runtime
-  // `require()` calls keep working under ESM output.
+  banner: { js: `#!/usr/bin/env node\n${requireShim}` },
+  // Bundle deps whose "ESM" is actually CJS source under .js extensions
+  // (named-export + dynamic-require landmines) or whose ESM index does
+  // extensionless imports Node's strict resolver rejects (NTT SDK's
+  // `import "./side-effects"`). esbuild resolves both at build time.
   noExternal: ['@fogo-onre/sdk', '@fogo-onre/cranker', '@anchor-lang/core', '@wormhole-foundation/sdk-solana-ntt', 'chalk'],
-  // @anchor-lang/core's "module" entry is fake ESM (CJS source with .js
-  // ESM extension). Resolve via "main" so esbuild gets real CJS instead.
   esbuildOptions(options) {
     options.mainFields = ['main', 'module']
   },
