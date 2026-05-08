@@ -8,6 +8,9 @@ import './polyfills'
 import type { ReactNode } from 'react'
 
 import { FogoSessionProvider } from '@fogo/sessions-sdk-react'
+import { ThemeProvider } from 'next-themes'
+import { Toaster } from '@/components/ui/sonner'
+import QueryProviders from '@/lib/query/persist'
 import { APP_DOMAIN, FOGO_NETWORK, FOGO_ONYC_MINT, USDC_S_MINT } from '@/constants'
 import { useSettings } from '@/store/settings'
 
@@ -20,15 +23,20 @@ export default function Providers({ children }: { children: ReactNode }) {
   // reload.
   const { fogoRpcUrl } = useSettings()
   return (
-    <FogoSessionProvider
-      key={fogoRpcUrl}
-      network={FOGO_NETWORK}
-      rpc={fogoRpcUrl}
-      domain={APP_DOMAIN}
-      tokens={[USDC_S_MINT, FOGO_ONYC_MINT]}
-      enableUnlimited
-    >
-      {children}
-    </FogoSessionProvider>
+    <ThemeProvider attribute="class" defaultTheme="dark" enableSystem disableTransitionOnChange>
+      <QueryProviders>
+        <FogoSessionProvider
+          key={fogoRpcUrl}
+          network={FOGO_NETWORK}
+          rpc={fogoRpcUrl}
+          domain={APP_DOMAIN}
+          tokens={[USDC_S_MINT, FOGO_ONYC_MINT]}
+          enableUnlimited
+        >
+          {children}
+          <Toaster richColors closeButton position="bottom-right" />
+        </FogoSessionProvider>
+      </QueryProviders>
+    </ThemeProvider>
   )
 }
