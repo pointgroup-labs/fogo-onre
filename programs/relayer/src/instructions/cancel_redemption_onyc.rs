@@ -1,15 +1,8 @@
-//! Withdraw chain, recovery hatch.
+//! Withdraw chain recovery hatch: aborts a stuck OnRe redemption (admin
+//! outage, kill-switch, KYC issue) and rolls the flow back to `Claimed`.
 //!
-//! Aborts a stuck OnRe redemption (admin outage, kill-switch, KYC issue,
-//! etc.) and rolls the flow back to `Claimed`.
-//!
-//! ## Why authority-only (not permissionless)
-//!
-//! Permissionless cancel is a griefing vector: any cranker could call
-//! `request_redemption_onyc` → `cancel_redemption_onyc` in a loop, each
-//! cycle taking another `withdraw_fee_bps` skim into `fee_vault`. The
-//! authority is the existing cold/admin key (same as `configure`)
-//! — already trusted to set fees up to `MAX_FEE_BPS` — so no new trust surface.
+//! Authority-only: permissionless cancel would be a griefing vector
+//! (loop request → cancel → bleed `withdraw_fee_bps` per cycle).
 
 use anchor_lang::prelude::*;
 use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};
@@ -46,11 +39,10 @@ pub fn handler<'info>(ctx: Context<'info, CancelRedemptionOnyc<'info>>) -> Resul
         RelayerError::InvalidAccountSplit
     );
 
-    // Pin the redemption_request slot to what the tracker recorded BEFORE
-    // firing the CPI. Without this, a malicious authority could pass a
-    // different RedemptionRequest PDA in slot 2 and cancel an unrelated
-    // redemption — OnRe's seed validation would pass, but the returned ONyc
-    // would belong to whoever opened that request, not us.
+    // Pin the redemption_request slot to the tracker's record. Without
+    // this, a malicious authority could pass a different
+    // RedemptionRequest in slot 2 — OnRe's seed validation would still
+    // pass, but the returned ONyc would belong to whoever opened it.
     let cpi_redemption_request_key =
         *ctx.remaining_accounts[ONRE_CANCEL_REDEMPTION_REQUEST_REDEMPTION_REQUEST_INDEX].key;
     require_keys_eq!(
@@ -64,7 +56,7 @@ pub fn handler<'info>(ctx: Context<'info, CancelRedemptionOnyc<'info>>) -> Resul
         &ONRE_CANCEL_REDEMPTION_REQUEST_IX,
         &OnreCancelRedemptionRequestArgs {},
         ctx.remaining_accounts,
-        &ctx.accounts.relayer_authority.to_account_info(),
+        Some(&ctx.accounts.relayer_authority.to_account_info()),
         ctx.accounts.relayer_config.relayer_authority_bump,
     )?;
 
@@ -96,15 +88,14 @@ pub struct CancelRedemptionOnyc<'info> {
     )]
     pub relayer_config: Account<'info, RelayerConfig>,
 
-    /// CHECK: PDA derived from RELAYER_SEED. Must be the redeemer recorded
-    /// inside `redemption_request` (OnRe enforces this), so the unlocked
-    /// ONyc returns to its `onyc_ata`.
+    /// CHECK: PDA seeds enforce identity. Recorded as redeemer inside
+    /// `redemption_request`, so unlocked ONyc returns to its `onyc_ata`.
     #[account(seeds = [RELAYER_SEED], bump = relayer_config.relayer_authority_bump)]
     pub relayer_authority: UncheckedAccount<'info>,
 
     pub onyc_mint: InterfaceAccount<'info, Mint>,
 
-    /// Receives the unlocked ONyc back from OnRe's redemption vault.
+    /// Receives unlocked ONyc from OnRe's redemption vault.
     #[account(
         mut,
         associated_token::mint = onyc_mint,
@@ -131,8 +122,7 @@ pub struct CancelRedemptionOnyc<'info> {
     )]
     pub redemption_tracker: Account<'info, RedemptionTracker>,
 
-    /// CHECK: pinned by `address = redemption_tracker.payer` so the original
-    /// init-time payer always gets rent back.
+    /// CHECK: pinned by `address`; original payer gets rent back.
     #[account(mut, address = redemption_tracker.payer)]
     pub payer_for_close: UncheckedAccount<'info>,
 

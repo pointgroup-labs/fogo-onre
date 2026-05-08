@@ -3,8 +3,7 @@ use anchor_lang::prelude::*;
 use crate::constants::{CONFIG_SEED, FEE_TIMELOCK_SLOTS, MAX_FEE_BPS};
 use crate::error::RelayerError;
 
-/// Long-lived program state. `authority` gates governance only; flow
-/// instructions are permissionless.
+/// `authority` gates governance only; flow instructions are permissionless.
 #[account]
 #[derive(InitSpace)]
 pub struct RelayerConfig {
@@ -20,13 +19,11 @@ pub struct RelayerConfig {
     pub relayer_authority_bump: u8,
     pub bump: u8,
 
-    /// Two-step rotation lets multisig→multisig handoffs work without
-    /// atomic co-sign. Promoted to `authority` by `accept_authority`.
+    /// Promoted to `authority` by `accept_authority` (two-step handoff).
     pub pending_authority: Option<Pubkey>,
 
-    /// Staged fee *increase*, auto-promoted on the next `configure` once
-    /// `ready_slot` elapses. Decreases bypass this. `Some` ⟹ at least one
-    /// inner leg is `Some` (collapsed otherwise).
+    /// Staged fee *increase*, auto-promoted on next `configure` once
+    /// `ready_slot` elapses. Decreases bypass this.
     pub pending_fee: Option<PendingFee>,
 }
 
@@ -36,13 +33,11 @@ pub struct PendingFee {
 
     pub withdraw_fee_bps: Option<u16>,
 
-    /// `now + FEE_TIMELOCK_SLOTS` at proposal time, MAX-extended on any
-    /// later raise so a follow-up never shortens the window.
+    /// MAX-extended on later raises so a follow-up never shortens the window.
     pub ready_slot: u64,
 }
 
 impl PendingFee {
-    /// Surrounding `Option` collapses to `None` when this returns true.
     pub fn is_empty(&self) -> bool {
         self.deposit_fee_bps.is_none() && self.withdraw_fee_bps.is_none()
     }
@@ -80,9 +75,8 @@ impl RelayerConfig {
         apply_fee_bps(gross, self.withdraw_fee_bps)
     }
 
-    /// Move ready legs onto live fields. Run at the top of
-    /// `configure::handler` so a same-call decrease compares against the
-    /// just-promoted value rather than the stale one.
+    /// Run at the top of `configure::handler` so a same-call decrease
+    /// compares against the just-promoted value, not the stale one.
     pub fn promote_pending_fee_if_ready(&mut self, now: u64) {
         let Some(p) = self.pending_fee else { return };
         if now < p.ready_slot {
@@ -118,10 +112,10 @@ impl RelayerConfig {
     }
 }
 
-/// Asymmetric in-place mutation:
-/// - `proposed <= *live`: apply instantly, clear this leg in the bundle.
-/// - `proposed >  *live`: stage in the bundle; `ready_slot` MAX-extends
-///   so a follow-up raise can't shorten an in-flight window.
+/// Asymmetric:
+/// - `proposed <= live`: apply instantly, clear this leg.
+/// - `proposed >  live`: stage; `ready_slot` MAX-extends so a follow-up
+///   raise can't shorten an in-flight window.
 fn propose_fee_change(
     proposed: u16,
     live: &mut u16,
@@ -155,9 +149,8 @@ fn propose_fee_change(
 }
 
 /// Returns `(net, fee)` with `fee = floor(gross * bps / 10_000)`.
-/// `try_from` is defense-in-depth: under `validate()`'s bps≤MAX invariant
-/// the cast can't overflow today, but enforcing locally turns a future
-/// invariant break into `FeeOverflow` instead of silent truncation.
+/// `try_from` defense-in-depth: surfaces a future invariant break as
+/// `FeeOverflow` instead of silent truncation.
 pub(crate) fn apply_fee_bps(gross: u64, bps: u16) -> Result<(u64, u64)> {
     let fee_u128 = (gross as u128)
         .checked_mul(bps as u128)
@@ -180,13 +173,12 @@ pub enum FlowStatus {
 }
 
 /// One-shot receipt binding an inbound bridge message to a FOGO wallet.
-/// Seeds: `[FLOW_*_SEED, bridge_claim_pda.key()]`. Replay protection
-/// lives in the per-VAA claim account from NTT. Field set is
-/// byte-stable — older PDAs must keep deserializing.
+/// Replay protection lives in the per-VAA NTT claim account. Field set
+/// is byte-stable — older PDAs must keep deserializing.
 #[account]
 #[derive(InitSpace)]
 pub struct Flow {
-    /// Originator on FOGO; becomes the outbound recipient on the return leg.
+    /// Originator on FOGO; outbound recipient on the return leg.
     pub fogo_sender: [u8; 32],
 
     pub status: FlowStatus,
@@ -199,20 +191,18 @@ pub struct Flow {
 }
 
 /// Singleton mutex for the in-flight withdraw-chain redemption.
-/// Seeds: `[REDEMPTION_TRACKER_SEED]`. `init` here fails if another
-/// redemption is mid-flight, blocking the USDC-delta race.
+/// `init` here fails if another redemption is mid-flight, blocking the
+/// USDC-delta race.
 #[account]
 #[derive(InitSpace)]
 pub struct RedemptionTracker {
-    /// Outbound `Flow` this tracker is bound to.
     pub flow: Pubkey,
 
-    /// OnRe `RedemptionRequest` PDA we created. Polled for closure as
-    /// the fulfillment signal.
+    /// OnRe `RedemptionRequest` PDA; polled for closure as fulfillment signal.
     pub redemption_request: Pubkey,
 
-    /// Relayer USDC ATA balance *before* `create_redemption_request`.
-    /// `claim_redemption_usdc` uses the post-fulfillment delta vs this.
+    /// Relayer USDC ATA balance pre-CPI; `claim_redemption_usdc` uses
+    /// post-fulfillment delta vs this.
     pub usdc_ata_pre_balance: u64,
 
     /// Audit-trail only — net-of-fee ONyc sent to OnRe.

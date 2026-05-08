@@ -15,16 +15,14 @@ use instructions::*;
 
 declare_id!("onrenRKgX54qtWeK3cuaTBE71xx7dWMXn82ubH61vAp");
 
-/// On-chain relayer for OnRe's cross-chain yield product.
-///
-/// OnRe issues ONyc, a tokenized reinsurance position on Solana. This
-/// program lets FOGO users hold that yield exposure without leaving
-/// FOGO: USDC.s on FOGO ↔ ONyc on Solana, both legs over Wormhole NTT.
+/// Cross-chain relayer: USDC.s on FOGO ↔ ONyc on Solana, both legs over
+/// Wormhole NTT. Lets FOGO users hold OnRe's ONyc yield exposure without
+/// leaving FOGO.
 #[program]
 pub mod fogo_onre_relayer {
     use super::*;
 
-    /// One-time setup: create config PDA + relayer-authority-owned ATAs.
+    /// One-time setup: config PDA + relayer-authority-owned ATAs.
     pub fn initialize(
         ctx: Context<Initialize>,
         deposit_fee_bps: u16,
@@ -33,9 +31,7 @@ pub mod fogo_onre_relayer {
         initialize::handler(ctx, deposit_fee_bps, withdraw_fee_bps)
     }
 
-    /// Redeem bridged USDC.s from FOGO via NTT and create an inflight `Flow`
-    /// receipt binding the eventual ONyc return to the originator's FOGO
-    /// wallet.
+    /// Redeem inbound USDC.s VAA, create inbound `Flow` receipt.
     pub fn claim_usdc<'info>(
         ctx: Context<'info, ClaimUsdc<'info>>,
         redeem_accounts_len: u8,
@@ -47,12 +43,9 @@ pub mod fogo_onre_relayer {
         swap_usdc_to_onyc::handler(ctx)
     }
 
-    /// Lock ONyc via NTT and atomically publish the outbound Wormhole VAA,
-    /// sending ONyc to `flow.fogo_sender`. Closes the PDA.
-    ///
-    /// `transfer_lock_account_count` is the boundary index in
-    /// `remaining_accounts` between the `transfer_lock` (14 entries) and
-    /// `release_wormhole_outbound` (15 entries) account lists.
+    /// Lock ONyc via NTT and atomically emit the outbound VAA.
+    /// `transfer_lock_account_count` splits `remaining_accounts` between
+    /// `transfer_lock` and `release_wormhole_outbound`.
     pub fn lock_onyc<'info>(
         ctx: Context<'info, LockOnyc<'info>>,
         transfer_lock_account_count: u8,
@@ -60,8 +53,7 @@ pub mod fogo_onre_relayer {
         lock_onyc::handler(ctx, transfer_lock_account_count)
     }
 
-    /// Release ONyc from NTT custody and record a `Flow` receipt for the
-    /// withdrawal initiator.
+    /// Release ONyc from NTT custody, create outbound `Flow` receipt.
     pub fn unlock_onyc<'info>(
         ctx: Context<'info, UnlockOnyc<'info>>,
         redeem_accounts_len: u8,
@@ -69,8 +61,7 @@ pub mod fogo_onre_relayer {
         unlock_onyc::handler(ctx, redeem_accounts_len)
     }
 
-    /// Forward flow's ONyc to OnRe via `create_redemption_request` and
-    /// init the singleton tracker. Fee taken pre-CPI.
+    /// Forward flow's ONyc to OnRe + init singleton tracker; fee taken pre-CPI.
     pub fn request_redemption_onyc<'info>(
         ctx: Context<'info, RequestRedemptionOnyc<'info>>,
     ) -> Result<()> {
@@ -81,11 +72,9 @@ pub mod fogo_onre_relayer {
         claim_redemption_usdc::handler(ctx)
     }
 
-    /// Authority-only escape hatch. Aborts an in-flight OnRe redemption
-    /// (returns ONyc to `onyc_ata`, rolls flow back to `Claimed`, frees
-    /// the singleton). Authority-gated to prevent the
-    /// request→cancel→request fee-griefing loop a permissionless cancel
-    /// would enable.
+    /// Authority-only escape hatch — rolls a stuck redemption back to
+    /// `Claimed` and frees the singleton. Authority-gated to prevent a
+    /// request→cancel fee-griefing loop.
     pub fn cancel_redemption_onyc<'info>(
         ctx: Context<'info, CancelRedemptionOnyc<'info>>,
     ) -> Result<()> {
@@ -96,10 +85,9 @@ pub mod fogo_onre_relayer {
         send_usdc_to_user::handler(ctx)
     }
 
-    /// Authority-only. `None` args leave the corresponding field unchanged.
-    /// Fee decreases apply instantly; increases stage into `pending_fee`
-    /// for `FEE_TIMELOCK_SLOTS` (~2 days), auto-promoted on the next
-    /// `configure` call after the window elapses.
+    /// Authority-only. `None` args leave fields unchanged. Fee decreases
+    /// apply instantly; increases stage for `FEE_TIMELOCK_SLOTS` (~2 days)
+    /// then auto-promote on the next `configure` after the window.
     pub fn configure(
         ctx: Context<Configure>,
         deposit_fee_bps: Option<u16>,
@@ -109,10 +97,9 @@ pub mod fogo_onre_relayer {
         configure::handler(ctx, deposit_fee_bps, withdraw_fee_bps, new_authority)
     }
 
-    /// Two-step rotation, step two. Signer must equal
-    /// `relayer_config.pending_authority`. Current authority does NOT
-    /// participate — by design, so two independent multisigs can rotate
-    /// without atomic cross-multisig coordination.
+    /// Two-step rotation, step 2. Signer must equal `pending_authority`;
+    /// current authority does not sign (lets independent multisigs rotate
+    /// without atomic co-sign).
     pub fn accept_authority(ctx: Context<AcceptAuthority>) -> Result<()> {
         accept_authority::handler(ctx)
     }

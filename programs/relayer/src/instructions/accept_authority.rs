@@ -4,10 +4,9 @@ use crate::constants::CONFIG_SEED;
 use crate::error::RelayerError;
 use crate::state::RelayerConfig;
 
-/// Step two of two-step authority rotation. The pending authority signs to
-/// promote `pending_authority` → `authority`. Current authority does not
-/// participate — by design, so two independent multisigs can rotate without
-/// atomic cross-multisig coordination.
+/// Step two of two-step authority rotation: pending authority self-promotes.
+/// Current authority does not sign — lets independent multisigs rotate
+/// without atomic cross-multisig coordination.
 pub fn handler(ctx: Context<AcceptAuthority>) -> Result<()> {
     let config = &mut ctx.accounts.relayer_config;
 

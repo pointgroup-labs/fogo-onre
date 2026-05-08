@@ -1,8 +1,3 @@
-//! Every event carries `flow: Pubkey` as the universal correlation handle
-//! to its `Flow` PDA. Bridge-step events (`UsdcClaimed`, `OnycUnlocked`)
-//! report only gross amounts — fees are taken at the swap step. Swap
-//! events expose the gross/fee/net split.
-
 use anchor_lang::prelude::*;
 
 #[event]
@@ -55,9 +50,6 @@ pub struct RedemptionRequested {
     pub usdc_ata_pre_balance: u64,
 }
 
-/// `returned_onyc_amount` is re-recorded on the flow as `flow.amount`
-/// with status rolled back to `Claimed`. The withdraw fee originally
-/// taken by `request_redemption_onyc` is NOT refunded by this path.
 #[event]
 pub struct RedemptionCancelled {
     pub flow: Pubkey,

@@ -25,11 +25,10 @@ pub fn handler<'info>(ctx: Context<'info, RequestRedemptionOnyc<'info>>) -> Resu
     // `configure`'s asymmetric timelock protects against retroactive raises.
     let (net, fee) = ctx.accounts.relayer_config.apply_withdraw_fee(gross)?;
 
-    // Defends against a cranker substituting their own pubkey at OnRe's
-    // `redeemer` slot: the post-CPI equality check below would fail and
-    // revert (including `redemption_tracker` init), so the singleton mutex
-    // is NOT left wedged. Without this the cranker could permanently DoS
-    // the withdraw chain.
+    // Pre-snapshot guards against a cranker substituting their own
+    // pubkey at OnRe's `redeemer` slot — the post-CPI delta check
+    // would revert (incl. tracker init), so the singleton mutex is
+    // never left wedged.
     ctx.accounts.onyc_ata.reload()?;
     let onyc_pre_total = ctx.accounts.onyc_ata.amount;
     require!(onyc_pre_total >= gross, RelayerError::BalanceUnderflow);
@@ -45,8 +44,8 @@ pub fn handler<'info>(ctx: Context<'info, RequestRedemptionOnyc<'info>>) -> Resu
         ctx.accounts.onyc_mint.decimals,
     )?;
 
-    // Singleton mutex + sibling-gating: OnRe is the only writer to
-    // `usdc_ata` between snapshot and post-fulfill read.
+    // Singleton mutex makes OnRe the only writer to `usdc_ata` between
+    // snapshot and post-fulfill read.
     ctx.accounts.usdc_ata.reload()?;
     let usdc_pre = ctx.accounts.usdc_ata.amount;
 
@@ -60,11 +59,11 @@ pub fn handler<'info>(ctx: Context<'info, RequestRedemptionOnyc<'info>>) -> Resu
         &ONRE_CREATE_REDEMPTION_REQUEST_IX,
         &OnreCreateRedemptionRequestArgs { amount: net },
         ctx.remaining_accounts,
-        &ctx.accounts.relayer_authority.to_account_info(),
+        Some(&ctx.accounts.relayer_authority.to_account_info()),
         ctx.accounts.relayer_config.relayer_authority_bump,
     )?;
 
-    // Enforces the role-slot invariant; see pre-snapshot above.
+    // Enforce role-slot invariant.
     ctx.accounts.onyc_ata.reload()?;
     let onyc_consumed = onyc_pre_total
         .checked_sub(ctx.accounts.onyc_ata.amount)
@@ -74,8 +73,7 @@ pub fn handler<'info>(ctx: Context<'info, RequestRedemptionOnyc<'info>>) -> Resu
         RelayerError::UnexpectedOnycConsumed
     );
 
-    // Sourced from the CPI's actual remaining account — OnRe's `init` has
-    // seed-validated this key, so a successful CPI proves it's the real PDA.
+    // OnRe's `init` seed-validated this key; successful CPI proves it.
     let redemption_request_key =
         *ctx.remaining_accounts[ONRE_CREATE_REDEMPTION_REQUEST_REDEMPTION_REQUEST_INDEX].key;
 
@@ -124,8 +122,7 @@ pub struct RequestRedemptionOnyc<'info> {
     pub usdc_mint: InterfaceAccount<'info, Mint>,
     pub onyc_mint: InterfaceAccount<'info, Mint>,
 
-    /// Pre-balance snapshot source for the `claim_redemption_usdc` delta.
-    /// Boxed for stack budget.
+    /// Pre-balance snapshot for `claim_redemption_usdc` delta.
     #[account(
         mut,
         associated_token::mint = usdc_mint,
@@ -134,8 +131,7 @@ pub struct RequestRedemptionOnyc<'info> {
     )]
     pub usdc_ata: Box<InterfaceAccount<'info, TokenAccount>>,
 
-    /// Source of the fee transfer; OnRe's CPI also pulls from here. Boxed
-    /// for stack budget.
+    /// Source for fee transfer; OnRe's CPI also pulls from here.
     #[account(
         mut,
         associated_token::mint = onyc_mint,
@@ -161,7 +157,7 @@ pub struct RequestRedemptionOnyc<'info> {
     )]
     pub outflight_flow: Account<'info, Flow>,
 
-    /// Singleton init — fails if any prior redemption is still in flight.
+    /// Singleton init — fails if a prior redemption is mid-flight.
     /// On-chain mutex that makes the ATA-delta math safe.
     #[account(
         init,

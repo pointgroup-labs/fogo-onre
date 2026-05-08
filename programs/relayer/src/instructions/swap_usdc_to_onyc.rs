@@ -11,10 +11,8 @@ use crate::events::OnycSwapped;
 use crate::onre::OnreTakeOfferArgs;
 use crate::state::{Flow, FlowStatus, RelayerConfig};
 
-/// Permissionless. Swaps the flow's USDC into ONyc via OnRe, then takes the
-/// deposit-leg fee from the ONyc output and routes it to `fee_vault`.
-/// Operates on `flow.amount` (not full ATA balance) so concurrent flows
-/// stay isolated.
+/// Permissionless. Swaps `flow.amount` USDC into ONyc via OnRe, then
+/// skims the deposit-leg fee from the ONyc output to `fee_vault`.
 pub fn handler<'info>(ctx: Context<'info, SwapUsdcToOnyc<'info>>) -> Result<()> {
     let flow_key = ctx.accounts.inflight_flow.key();
 
@@ -37,7 +35,7 @@ pub fn handler<'info>(ctx: Context<'info, SwapUsdcToOnyc<'info>>) -> Result<()> 
             approval_message: None,
         },
         ctx.remaining_accounts,
-        &ctx.accounts.relayer_authority.to_account_info(),
+        Some(&ctx.accounts.relayer_authority.to_account_info()),
         ctx.accounts.relayer_config.relayer_authority_bump,
     )?;
 
@@ -50,8 +48,7 @@ pub fn handler<'info>(ctx: Context<'info, SwapUsdcToOnyc<'info>>) -> Result<()> 
         .ok_or(RelayerError::BalanceUnderflow)?;
     require!(gross > 0, RelayerError::ZeroAmountFlow);
 
-    // Live `deposit_fee_bps`; `configure`'s asymmetric timelock protects
-    // against retroactive raises.
+    // `configure`'s asymmetric timelock prevents retroactive raises.
     let (net, fee) = ctx.accounts.relayer_config.apply_deposit_fee(gross)?;
 
     relayer_signed_transfer_checked(
@@ -90,14 +87,13 @@ pub struct SwapUsdcToOnyc<'info> {
     )]
     pub relayer_config: Account<'info, RelayerConfig>,
 
-    /// CHECK: PDA derived from RELAYER_SEED. Signs the OnRe CPI.
+    /// CHECK: PDA seeds enforce identity; signs OnRe CPI.
     #[account(seeds = [RELAYER_SEED], bump = relayer_config.relayer_authority_bump)]
     pub relayer_authority: UncheckedAccount<'info>,
 
     pub usdc_mint: InterfaceAccount<'info, Mint>,
     pub onyc_mint: InterfaceAccount<'info, Mint>,
 
-    /// Boxed for stack budget.
     #[account(
         mut,
         associated_token::mint = usdc_mint,
@@ -121,9 +117,7 @@ pub struct SwapUsdcToOnyc<'info> {
     )]
     pub fee_vault: Box<InterfaceAccount<'info, TokenAccount>>,
 
-    /// Withdraw-chain mutex gate. While a withdraw redemption is in flight
-    /// this fails, pausing deposits so `claim_redemption_usdc`'s
-    /// snapshot/delta math stays correct.
+    /// Withdraw-chain mutex gate (see `claim_usdc`).
     #[account(
         seeds = [REDEMPTION_TRACKER_SEED],
         bump,

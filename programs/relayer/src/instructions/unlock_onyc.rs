@@ -2,66 +2,28 @@ use anchor_lang::prelude::*;
 use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};
 
 use crate::constants::{
-    CONFIG_SEED, FLOW_OUTBOUND_SEED, FOGO_WORMHOLE_CHAIN_ID, NTT_ONYC_PROGRAM_ID, NTT_REDEEM_IX,
+    CONFIG_SEED, FLOW_OUTBOUND_SEED, NTT_ONYC_PROGRAM_ID, NTT_REDEEM_IX,
     NTT_RELEASE_INBOUND_UNLOCK_IX, RELAYER_SEED,
 };
 use crate::cpi::invoke_relayer_signed;
 use crate::error::RelayerError;
 use crate::events::OnycUnlocked;
 use crate::ntt::{
-    derive_ntt_inbox_rate_limit, derive_ntt_peer, NttRedeemArgs, NttReleaseInboundArgs,
-    TRANSCEIVER_MESSAGE_SENDER_OFFSET, VALIDATED_TRANSCEIVER_MESSAGE_DISC,
+    parse_fogo_sender_from_vtm, validate_ntt_redeem_release_accounts, NttRedeemArgs,
+    NttReleaseInboundArgs,
 };
 use crate::state::{Flow, FlowStatus, RelayerConfig};
 
-// NTT's `redeem` / `release_inbound_unlock` consume accounts *positionally*.
-// If upstream reorders its `#[derive(Accounts)]` fields, these constants
-// MUST move in lockstep — otherwise the position-pinning checks would
-// silently guard the wrong slots, re-opening the
-// decouple-sender-from-recipient attack.
-
-const REDEEM_ACCOUNTS_MIN_LEN: usize = 10;
-const RELEASE_ACCOUNTS_MIN_LEN: usize = 8;
-
-const REDEEM_IDX_PEER: usize = 2;
-const REDEEM_IDX_TRANSCEIVER_MESSAGE: usize = 3;
-const REDEEM_IDX_INBOX_ITEM: usize = 6;
-const REDEEM_IDX_INBOX_RATE_LIMIT: usize = 7;
-const RELEASE_IDX_INBOX_ITEM: usize = 2;
-const RELEASE_IDX_RECIPIENT_ATA: usize = 3;
-
 /// Release ONyc from NTT custody for an inbound VAA from FOGO and create
-/// the outbound `Flow` receipt binding the eventual USDC return to the
-/// withdrawing FOGO user.
+/// the outbound `Flow` receipt for the eventual USDC return.
+/// Permissionless; NTT redeem validates guardian sigs.
 ///
-/// Permissionless. Safety:
-/// - NTT `redeem` validates guardian sigs via `ValidatedTransceiverMessage`
-///   (whose owner must equal the registered transceiver).
-/// - `fogo_sender` is `NttManagerMessage.sender` parsed from on-chain
-///   transceiver-message data; Anchor `owner = NTT_ONYC_PROGRAM_ID` plus the
-///   discriminator check reject impostors.
-///
-/// `remaining_accounts` = redeem accounts ++ release accounts;
-/// `redeem_accounts_len` is the split point.
+/// `remaining_accounts` = redeem ++ release; `redeem_accounts_len` splits.
 pub fn handler<'info>(
     ctx: Context<'info, UnlockOnyc<'info>>,
     redeem_accounts_len: u8,
 ) -> Result<()> {
-    let data = ctx.accounts.ntt_transceiver_message.try_borrow_data()?;
-    require!(
-        data.len() >= TRANSCEIVER_MESSAGE_SENDER_OFFSET + 32,
-        RelayerError::InvalidTransceiverMessage
-    );
-    require!(
-        data[..8] == VALIDATED_TRANSCEIVER_MESSAGE_DISC,
-        RelayerError::InvalidTransceiverMessage
-    );
-    let mut fogo_sender = [0u8; 32];
-    fogo_sender.copy_from_slice(
-        &data[TRANSCEIVER_MESSAGE_SENDER_OFFSET..TRANSCEIVER_MESSAGE_SENDER_OFFSET + 32],
-    );
-    require!(fogo_sender != [0u8; 32], RelayerError::ZeroFogoSender);
-    drop(data);
+    let fogo_sender = parse_fogo_sender_from_vtm(&ctx.accounts.ntt_transceiver_message)?;
 
     let split = redeem_accounts_len as usize;
     let total = ctx.remaining_accounts.len();
@@ -71,43 +33,14 @@ pub fn handler<'info>(
     );
     let (redeem_accs, release_accs) = ctx.remaining_accounts.split_at(split);
 
-    require!(
-        redeem_accs.len() >= REDEEM_ACCOUNTS_MIN_LEN
-            && release_accs.len() >= RELEASE_ACCOUNTS_MIN_LEN,
-        RelayerError::InvalidAccountSplit
-    );
-    require!(
-        redeem_accs[REDEEM_IDX_TRANSCEIVER_MESSAGE].key()
-            == ctx.accounts.ntt_transceiver_message.key(),
-        RelayerError::TransceiverMessageMismatch
-    );
-    require!(
-        redeem_accs[REDEEM_IDX_INBOX_ITEM].key() == ctx.accounts.ntt_inbox_item.key(),
-        RelayerError::InboxItemMismatch
-    );
-    // Pin the inbound origin to FOGO. Without this, a future non-FOGO peer
-    // registration on the NTT manager would let foreign-chain VAAs create
-    // Flow PDAs that the outbound legs blindly bridge back to FOGO.
-    let (expected_peer, _) = derive_ntt_peer(&NTT_ONYC_PROGRAM_ID, FOGO_WORMHOLE_CHAIN_ID);
-    let (expected_inbox_rl, _) = derive_ntt_inbox_rate_limit(&NTT_ONYC_PROGRAM_ID, FOGO_WORMHOLE_CHAIN_ID);
-    require_keys_eq!(
-        redeem_accs[REDEEM_IDX_PEER].key(),
-        expected_peer,
-        RelayerError::WrongOriginChain
-    );
-    require_keys_eq!(
-        redeem_accs[REDEEM_IDX_INBOX_RATE_LIMIT].key(),
-        expected_inbox_rl,
-        RelayerError::WrongOriginChain
-    );
-    require!(
-        release_accs[RELEASE_IDX_INBOX_ITEM].key() == ctx.accounts.ntt_inbox_item.key(),
-        RelayerError::InboxItemMismatch
-    );
-    require!(
-        release_accs[RELEASE_IDX_RECIPIENT_ATA].key() == ctx.accounts.onyc_ata.key(),
-        RelayerError::RecipientAtaMismatch
-    );
+    validate_ntt_redeem_release_accounts(
+        redeem_accs,
+        release_accs,
+        &NTT_ONYC_PROGRAM_ID,
+        ctx.accounts.ntt_transceiver_message.key(),
+        ctx.accounts.ntt_inbox_item.key(),
+        ctx.accounts.onyc_ata.key(),
+    )?;
 
     let bump = ctx.accounts.relayer_config.relayer_authority_bump;
     let authority = ctx.accounts.relayer_authority.to_account_info();
@@ -119,7 +52,7 @@ pub fn handler<'info>(
         &NTT_REDEEM_IX,
         &NttRedeemArgs {},
         redeem_accs,
-        &authority,
+        Some(&authority),
         bump,
     )?;
 
@@ -130,7 +63,7 @@ pub fn handler<'info>(
             revert_on_delay: false,
         },
         release_accs,
-        &authority,
+        Some(&authority),
         bump,
     )?;
 
@@ -188,13 +121,10 @@ pub struct UnlockOnyc<'info> {
     )]
     pub onyc_ata: InterfaceAccount<'info, TokenAccount>,
 
-    /// Per-VAA NTT inbox-item PDA — its pubkey seeds the flow PDA.
-    /// CHECK: validated by the NTT CPI.
+    /// CHECK: validated by NTT CPI; seeds the flow PDA.
     pub ntt_inbox_item: UncheckedAccount<'info>,
 
-    /// `owner = NTT_ONYC_PROGRAM_ID` pins the writer; nothing outside NTT can
-    /// have crafted this data.
-    /// CHECK: owner + discriminator + offset checks in the handler.
+    /// CHECK: owner pin + discriminator/offset checks in handler.
     #[account(owner = NTT_ONYC_PROGRAM_ID)]
     pub ntt_transceiver_message: UncheckedAccount<'info>,
 

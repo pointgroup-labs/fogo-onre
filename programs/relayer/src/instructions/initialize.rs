@@ -23,8 +23,7 @@ pub fn handler(
     config.relayer_authority_bump = ctx.bumps.relayer_authority;
     config.deposit_fee_bps = deposit_fee_bps;
     config.withdraw_fee_bps = withdraw_fee_bps;
-    // Explicit even though `init` zero-fills: makes the "no proposal in
-    // flight at deploy" invariant visible at the call site.
+    // Explicit even though `init` zero-fills.
     config.pending_fee = None;
     config.validate()?;
 
@@ -81,9 +80,8 @@ pub struct Initialize<'info> {
     )]
     pub onyc_ata: Box<InterfaceAccount<'info, TokenAccount>>,
 
-    /// Anti-aliasing constraint: forbidding `fee_vault == onyc_ata`
-    /// prevents silent self-transfer no-ops that would commingle user
-    /// funds with fees and defeat the vault split.
+    /// Forbid `fee_vault == onyc_ata` to prevent self-transfer no-ops
+    /// that would commingle user funds with fees.
     #[account(
         token::mint = onyc_mint,
         token::token_program = token_program,

@@ -83,40 +83,117 @@ pub const TRANSCEIVER_MESSAGE_TO_CHAIN_OFFSET: usize = 179;
 pub const TRANSCEIVER_MESSAGE_TO_OFFSET: usize = 181;
 pub const TRANSCEIVER_MESSAGE_TOTAL_LEN: usize = 213;
 
+/// NTT consumes `redeem` / `release_inbound` accounts positionally. Slot
+/// indices below MUST move in lockstep with upstream `#[derive(Accounts)]`
+/// reorders, otherwise position-pinning checks guard the wrong slots.
+pub const REDEEM_ACCOUNTS_MIN_LEN: usize = 10;
+pub const RELEASE_ACCOUNTS_MIN_LEN: usize = 8;
+pub const REDEEM_IDX_PEER: usize = 2;
+pub const REDEEM_IDX_TRANSCEIVER_MESSAGE: usize = 3;
+pub const REDEEM_IDX_INBOX_ITEM: usize = 6;
+pub const REDEEM_IDX_INBOX_RATE_LIMIT: usize = 7;
+pub const RELEASE_IDX_INBOX_ITEM: usize = 2;
+pub const RELEASE_IDX_RECIPIENT_ATA: usize = 3;
+
+/// Length-check + discriminator-check the supplied `ValidatedTransceiverMessage`
+/// account, then extract `NttManagerMessage.sender` (the FOGO-side originator
+/// pubkey) at offset 106. Rejects the all-zero address.
+pub fn parse_fogo_sender_from_vtm(vtm: &AccountInfo) -> Result<[u8; 32]> {
+    use crate::error::RelayerError;
+    let data = vtm.try_borrow_data()?;
+    require!(
+        data.len() >= TRANSCEIVER_MESSAGE_SENDER_OFFSET + 32,
+        RelayerError::InvalidTransceiverMessage
+    );
+    require!(
+        data[..8] == VALIDATED_TRANSCEIVER_MESSAGE_DISC,
+        RelayerError::InvalidTransceiverMessage
+    );
+    let mut out = [0u8; 32];
+    out.copy_from_slice(
+        &data[TRANSCEIVER_MESSAGE_SENDER_OFFSET..TRANSCEIVER_MESSAGE_SENDER_OFFSET + 32],
+    );
+    require!(out != [0u8; 32], RelayerError::ZeroFogoSender);
+    Ok(out)
+}
+
+/// Pin `transceiver_message`, `inbox_item`, FOGO peer/rate-limit, and
+/// `recipient_ata` slots in NTT's `redeem` + `release_inbound` lists.
+/// Centralizes slot indices so an upstream reorder lands in one place.
+pub fn validate_ntt_redeem_release_accounts<'info>(
+    redeem_accs: &[AccountInfo<'info>],
+    release_accs: &[AccountInfo<'info>],
+    ntt_program: &Pubkey,
+    expected_transceiver_message: Pubkey,
+    expected_inbox_item: Pubkey,
+    expected_recipient_ata: Pubkey,
+) -> Result<()> {
+    use crate::constants::FOGO_WORMHOLE_CHAIN_ID;
+    use crate::error::RelayerError;
+
+    require!(
+        redeem_accs.len() >= REDEEM_ACCOUNTS_MIN_LEN
+            && release_accs.len() >= RELEASE_ACCOUNTS_MIN_LEN,
+        RelayerError::InvalidAccountSplit
+    );
+    require!(
+        redeem_accs[REDEEM_IDX_TRANSCEIVER_MESSAGE].key() == expected_transceiver_message,
+        RelayerError::TransceiverMessageMismatch
+    );
+    require!(
+        redeem_accs[REDEEM_IDX_INBOX_ITEM].key() == expected_inbox_item,
+        RelayerError::InboxItemMismatch
+    );
+
+    // Pin inbound origin to FOGO. Without this, a future non-FOGO peer
+    // registration would let foreign-chain VAAs create Flow PDAs that
+    // outbound legs blindly bridge back to FOGO.
+    let (expected_peer, _) = derive_ntt_peer(ntt_program, FOGO_WORMHOLE_CHAIN_ID);
+    let (expected_inbox_rl, _) =
+        derive_ntt_inbox_rate_limit(ntt_program, FOGO_WORMHOLE_CHAIN_ID);
+    require_keys_eq!(
+        redeem_accs[REDEEM_IDX_PEER].key(),
+        expected_peer,
+        RelayerError::WrongOriginChain
+    );
+    require_keys_eq!(
+        redeem_accs[REDEEM_IDX_INBOX_RATE_LIMIT].key(),
+        expected_inbox_rl,
+        RelayerError::WrongOriginChain
+    );
+
+    require!(
+        release_accs[RELEASE_IDX_INBOX_ITEM].key() == expected_inbox_item,
+        RelayerError::InboxItemMismatch
+    );
+    require!(
+        release_accs[RELEASE_IDX_RECIPIENT_ATA].key() == expected_recipient_ata,
+        RelayerError::RecipientAtaMismatch
+    );
+
+    Ok(())
+}
+
 const INBOX_ITEM_SEED: &[u8] = b"inbox_item";
 
 /// Wire prefix for `NativeTokenTransfer` (`0x99 N T T`). Pinned upstream;
 /// keccak input below depends on it.
 const NTT_WIRE_PREFIX: [u8; 4] = [0x99, b'N', b'T', b'T'];
 
-/// Re-derive the `InboxItem` PDA from the on-disk
-/// `ValidatedTransceiverMessage` bytes, matching the seed and hash NTT
-/// itself uses inside `redeem`:
+/// Re-derive the `InboxItem` PDA from `ValidatedTransceiverMessage` bytes,
+/// matching the seed and hash NTT itself uses inside `redeem`:
+/// `pda = find_program_address([b"inbox_item", keccak256(from_chain_BE ||
+/// NttManagerMessage_wire)], ntt_program)`. Wire encoding differs from
+/// on-disk Borsh: integers are big-endian, `NttManagerMessage` adds a
+/// `payload_len: u16 BE`, `NativeTokenTransfer` carries a `0x99 N T T`
+/// prefix.
 ///
-/// ```text
-///   pda = find_program_address(
-///       [b"inbox_item", keccak256(from_chain_BE || NttManagerMessage_wire_bytes)],
-///       ntt_manager_program_id,
-///   )
-/// ```
-///
-/// The wire encoding differs from the on-disk Borsh layout: integers are
-/// big-endian, `NttManagerMessage` includes a `payload_len: u16 BE`
-/// field, and `NativeTokenTransfer` carries a `0x99 N T T` prefix. We
-/// transcode here so the on-chain check matches whatever NTT redeem
-/// would have computed had it been called.
-///
-/// **Why this is security-critical on the `claim_usdc` skip path:**
-/// when `inbox_item.release_status == Released`, the NTT redeem CPI is
-/// bypassed entirely; without this re-derivation the relayer has no
-/// proof that the supplied `ntt_transceiver_message` is the message
-/// that produced the supplied `ntt_inbox_item`. A cranker could
-/// otherwise pair any setter-originated VTM with an attacker-controlled
-/// InboxItem (e.g. one created by a *direct* NTT bridge to a per-user
-/// PDA, bypassing intent_transfer's fee path on FOGO) and the skip
-/// path would happily sweep the funds and mint a `Flow` for them.
-///
-/// Returns `InvalidTransceiverMessage` if the data is too short.
+/// SECURITY-CRITICAL on the `claim_usdc` skip path: when
+/// `inbox_item.release_status == Released` we bypass the NTT redeem CPI
+/// and lose its seed-validation linking VTM ↔ InboxItem. Re-deriving here
+/// reproduces exactly what redeem's Anchor seed constraint would have
+/// enforced — without it, a cranker could pair a real intent_transfer VTM
+/// with an unrelated already-released InboxItem.
 pub fn derive_inbox_item_pda_from_vtm(
     program_id: &Pubkey,
     vtm_data: &[u8],
@@ -186,30 +263,17 @@ pub fn derive_inbox_item_pda_from_vtm(
     ))
 }
 
-/// Anchor account discriminator for NTT v1 `InboxItem`. Empirically
-/// captured from `nttu74Cd…ZSdGk.so`'s post-redeem account write — do
-/// NOT trust upstream source comments to derive this; the
-/// `sha256("account:InboxItem")[..8]` formula matched neither prior
-/// guess.
+/// NTT v1 `InboxItem` Anchor discriminator — **empirically captured** from
+/// `nttu74Cd…ZSdGk.so` post-redeem writes. The standard
+/// `sha256("account:InboxItem")[..8]` formula does NOT match.
 pub const INBOX_ITEM_DISC: [u8; 8] = [0xED, 0x8D, 0xCC, 0x67, 0xBB, 0x7A, 0x39, 0x5C];
 
-/// Vendored mirror of NTT v1's `InboxItem` account body (mirrored from
-/// upstream `example-native-token-transfers/solana/programs/example-native-token-transfers/src/queue/inbox.rs`).
-///
-/// We deserialize via plain borsh + a manual discriminator strip
-/// instead of `#[account]`, because Anchor's `#[account]` derive would
-/// generate `sha256("account:InboxItem")[..8]` as the discriminator —
-/// which empirically does NOT match the bytes upstream actually
-/// writes. Holding both the discriminator AND the layout in one place
-/// keeps drift detection localized: if upstream ever changes either,
-/// the borsh deserialize fails (catching layout drift) or the disc
-/// check fails (catching discriminator drift), and the sha256 binary
-/// pin in `pinBinaryFixtures()` confirms which.
-///
-/// Total on-disk space (informational, not enforced here): 8 (disc) +
-/// 1 + 1 + 8 + 32 + 16 + 9 (max-variant enum slot) = 75 bytes. Borsh
-/// silently ignores trailing bytes after the active enum variant, so
-/// reading `Released` (no payload) leaves 8 trailing bytes untouched.
+/// Vendored NTT v1 `InboxItem` body. We deserialize via plain borsh + manual
+/// disc strip rather than Anchor `#[account]` because the standard
+/// `sha256("account:InboxItem")[..8]` discriminator does NOT match upstream.
+/// Drift detection: borsh fails on layout drift, disc check fails on
+/// discriminator drift, sha256 binary pin in `pinBinaryFixtures()` resolves
+/// which.
 #[derive(AnchorDeserialize, AnchorSerialize, Clone)]
 pub struct InboxItem {
     pub init: bool,
@@ -230,17 +294,13 @@ pub enum ReleaseStatus {
 }
 
 impl InboxItem {
-    /// Strip the 8-byte discriminator (asserting it matches upstream)
-    /// and borsh-deserialize the remainder. Uses the non-strict
-    /// reader-cursor API (`deserialize`, not `try_from_slice`) because
-    /// upstream's `release_status` field reserves 9 bytes on disk
-    /// (max-variant size for `ReleaseAfterDelay(u64)`), but the
-    /// `Released` variant consumes only 1 — the strict variant would
-    /// reject every released InboxItem with `NotAllBytesRead`. Returns
-    /// `RelayerError::InvalidInboxItem` for any failure mode (account
-    /// too short, wrong discriminator, malformed body) so callers can
-    /// distinguish "fresh, run the CPIs" from "fatal, abort" via
-    /// `try_load(...).ok()`.
+    /// Strips the 8-byte disc, then borsh-deserializes via the cursor API
+    /// (`deserialize`, not `try_from_slice`) — upstream reserves 9 bytes
+    /// for `release_status` (max-variant size for `ReleaseAfterDelay(u64)`)
+    /// but `Released` consumes only 1, so strict `try_from_slice` would
+    /// reject every released InboxItem with `NotAllBytesRead`. All failure
+    /// modes collapse to `InvalidInboxItem` so callers can use
+    /// `try_load(...).ok()` to distinguish "fresh" from "fatal".
     pub fn try_load(account: &AccountInfo) -> Result<Self> {
         let data = account.try_borrow_data()?;
         require!(
@@ -256,12 +316,8 @@ impl InboxItem {
 const NTT_MANAGER_PEER_SEED: &[u8] = b"peer";
 const NTT_INBOX_RATE_LIMIT_SEED: &[u8] = b"inbox_rate_limit";
 
-/// Derive the NTT manager's `peer` PDA for a given Wormhole chain id.
-/// The relayer pins this against `FOGO_WORMHOLE_CHAIN_ID` to refuse
-/// inbound NTT messages whose origin chain isn't FOGO — without this
-/// check, a future non-FOGO peer registration on the NTT manager would
-/// let foreign-chain VAAs create Flow PDAs that the relayer would then
-/// blindly bridge back to FOGO.
+/// NTT manager `peer` PDA for a Wormhole chain id. Pinned against
+/// `FOGO_WORMHOLE_CHAIN_ID` to refuse non-FOGO inbound VAAs.
 pub fn derive_ntt_peer(program_id: &Pubkey, chain_id: u16) -> (Pubkey, u8) {
     Pubkey::find_program_address(
         &[NTT_MANAGER_PEER_SEED, &chain_id.to_be_bytes()],
@@ -269,8 +325,7 @@ pub fn derive_ntt_peer(program_id: &Pubkey, chain_id: u16) -> (Pubkey, u8) {
     )
 }
 
-/// Derive the NTT manager's per-chain `inbox_rate_limit` PDA. Same
-/// chain-pinning rationale as `derive_ntt_peer`.
+/// NTT manager per-chain `inbox_rate_limit` PDA. Same chain-pinning rationale.
 pub fn derive_ntt_inbox_rate_limit(program_id: &Pubkey, chain_id: u16) -> (Pubkey, u8) {
     Pubkey::find_program_address(
         &[NTT_INBOX_RATE_LIMIT_SEED, &chain_id.to_be_bytes()],

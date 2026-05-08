@@ -1,14 +1,6 @@
-//! Withdraw chain, step 3 of 3 (relayer-side step 2 of 2).
-//!
-//! Replaces the back half of the deleted `swap_onyc_to_usdc`. Pre:
-//! `flow.status == RedemptionPending`, OnRe's `redemption_admin` has
-//! fulfilled our `RedemptionRequest` (signal: PDA closed). Post:
-//! `flow.status == Swapped`, `flow.amount = USDC delta`, singleton tracker
-//! closed and rent returned to whoever paid for the request.
-//!
-//! No CPI is issued here — this is a pure on-chain bookkeeping update on
-//! evidence of OnRe's off-chain action. After this, `send_usdc_to_user`
-//! works unchanged.
+//! Withdraw chain, step 3 of 3. Pure on-chain bookkeeping (no CPI):
+//! verifies OnRe fulfilled the request (signal: PDA closed), books the
+//! USDC delta onto the flow, closes the singleton tracker.
 
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::system_program;
@@ -19,8 +11,7 @@ use crate::error::RelayerError;
 use crate::events::RedemptionClaimed;
 use crate::state::{Flow, FlowStatus, RedemptionTracker, RelayerConfig};
 
-/// Permissionless. Verifies fulfillment, books the USDC delta onto the
-/// flow, and closes the singleton.
+/// Permissionless. Verifies fulfillment, books USDC delta, closes singleton.
 pub fn handler(ctx: Context<ClaimRedemptionUsdc>) -> Result<()> {
     let flow_key = ctx.accounts.outflight_flow.key();
     let tracker = &ctx.accounts.redemption_tracker;
@@ -43,16 +34,15 @@ pub fn handler(ctx: Context<ClaimRedemptionUsdc>) -> Result<()> {
     );
 
     // Fulfillment signal: OnRe's `fulfill_redemption_request` closes the
-    // PDA — zero lamports, empty data, ownership reverts to system program.
+    // PDA — zero lamports, empty data, owner reverts to system program.
     let req = &ctx.accounts.redemption_request;
     require!(
         req.lamports() == 0 && req.data_is_empty() && req.owner == &system_program::ID,
         RelayerError::RedemptionNotFulfilled
     );
 
-    // Delta is exact because the singleton mutex + sibling `SystemAccount`
-    // gates ensure OnRe is the only writer to `usdc_ata` between snapshot
-    // and read.
+    // Singleton mutex + sibling gates ensure OnRe is the only writer to
+    // `usdc_ata` between snapshot and read — delta is exact.
     ctx.accounts.usdc_ata.reload()?;
     let delta = ctx
         .accounts
@@ -81,8 +71,8 @@ pub fn handler(ctx: Context<ClaimRedemptionUsdc>) -> Result<()> {
 
 #[derive(Accounts)]
 pub struct ClaimRedemptionUsdc<'info> {
-    /// Receives rent from the closed `redemption_tracker`. Need not equal
-    /// `tracker.payer` — close-target is pinned by `payer_for_close` below.
+    /// Receives rent from closed `redemption_tracker`. Need not equal
+    /// `tracker.payer` — close-target is `payer_for_close` below.
     #[account(mut)]
     pub cranker: Signer<'info>,
 
@@ -128,8 +118,8 @@ pub struct ClaimRedemptionUsdc<'info> {
     #[account(mut, address = redemption_tracker.payer)]
     pub payer_for_close: UncheckedAccount<'info>,
 
-    /// CHECK: must equal `tracker.redemption_request`. The handler verifies
-    /// it has been closed by OnRe's `fulfill_redemption_request`.
+    /// CHECK: must equal `tracker.redemption_request`; handler verifies
+    /// it has been closed by OnRe.
     pub redemption_request: UncheckedAccount<'info>,
 
     pub token_program: Interface<'info, TokenInterface>,

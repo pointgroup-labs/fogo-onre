@@ -14,9 +14,8 @@ pub fn handler(
     let config = &mut ctx.accounts.relayer_config;
     let now = Clock::get()?.slot;
 
-    // Promote ripe staged changes BEFORE merging new args so a follow-up
-    // "decrease" compares against the just-promoted (higher) value rather
-    // than the stale live one.
+    // Promote ripe staged changes BEFORE merging new args, so a same-call
+    // decrease compares against the just-promoted value, not the stale live one.
     config.promote_pending_fee_if_ready(now);
 
     if let Some(proposed) = deposit_fee_bps {
@@ -90,8 +89,7 @@ pub struct Configure<'info> {
     )]
     pub onyc_ata: InterfaceAccount<'info, TokenAccount>,
 
-    /// `None` leaves the stored vault unchanged; anti-aliasing check runs
-    /// in the handler.
+    /// `None` leaves the stored vault unchanged.
     #[account(
         token::mint = onyc_mint,
         token::token_program = token_program,

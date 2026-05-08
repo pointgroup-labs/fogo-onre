@@ -731,9 +731,9 @@
             "here: on a fresh claim the account doesn't exist yet (the NTT",
             "redeem CPI inside the handler creates it), so Anchor's",
             "pre-handler owner constraint would fail every first-time claim.",
-            "The owner check is enforced inside the handler's",
-            "`inbox_already_released` skip branch — the *only* path where",
-            "no NTT CPI runs and forgery is therefore possible."
+            "The owner check is enforced inside `validate_skip_path_inbox_item`",
+            "— the *only* path where no NTT CPI runs and forgery is therefore",
+            "possible."
           ]
         },
         {
