@@ -1,5 +1,5 @@
 import type { AdvanceContext, AdvanceResult } from './types'
-import { findAuthorityPda, findInboxRateLimitPda, findNttPeerPda, findSessionAuthorityPda, FOGO_WORMHOLE_CHAIN_ID, NTT_ONYC_PROGRAM_ID, NTT_USDC_PROGRAM_ID, nttTransferArgsHash } from '@fogo-onre/sdk'
+import { findAuthorityPda, findNttPeerPda, findSessionAuthorityPda, FOGO_WORMHOLE_CHAIN_ID, NTT_ONYC_PROGRAM_ID, NTT_USDC_PROGRAM_ID, nttTransferArgsHash } from '@fogo-onre/sdk'
 import { Keypair, PublicKey, SystemProgram } from '@solana/web3.js'
 import { resolveNttVaa } from '../vaa'
 import { DEFAULT_NTT_VERSION, deriveLockOnycReleaseAccounts, describeStatus, fetchVaaBytes, makeSolanaNtt, WORMHOLE_CORE_MAINNET } from './helpers'
@@ -71,24 +71,25 @@ export async function lockOnyc(
 
     const outboxItem = Keypair.generate()
 
-    // Pre-flight: FOGO chain registered on ONyc NTT manager (deploy gate)
-    const [fogoPeerPda] = findNttPeerPda(FOGO_WORMHOLE_CHAIN_ID, NTT_ONYC_PROGRAM_ID)
-    const [fogoInboxRateLimitPda] = findInboxRateLimitPda(FOGO_WORMHOLE_CHAIN_ID, NTT_ONYC_PROGRAM_ID)
-    const [peerInfo, inboxRateLimitInfo] = await Promise.all([
-      connection.getAccountInfo(fogoPeerPda).catch(() => null),
-      connection.getAccountInfo(fogoInboxRateLimitPda).catch(() => null),
-    ])
-    if (!peerInfo || !inboxRateLimitInfo) {
-      const missing: string[] = []
-      if (!peerInfo) {
-        missing.push(`peer (${fogoPeerPda.toBase58()})`)
-      }
-      if (!inboxRateLimitInfo) {
-        missing.push(`inbox_rate_limit (${fogoInboxRateLimitPda.toBase58()})`)
-      }
+    // Pre-flight: ONyc NTT manager must be deployed (constants split). While
+    // NTT_ONYC_PROGRAM_ID still aliases NTT_USDC_PROGRAM_ID per CLAUDE.md,
+    // the USDC manager doesn't custody ONyc — the CPI cannot succeed.
+    if (NTT_ONYC_PROGRAM_ID.equals(NTT_USDC_PROGRAM_ID)) {
       return {
         kind: 'noop',
-        reason: `FOGO chain not registered on ONyc NTT manager: missing ${missing.join(' and ')}. Awaiting ONyc deploy.`,
+        reason: 'ONyc NTT manager not deployed (NTT_ONYC_PROGRAM_ID == NTT_USDC_PROGRAM_ID placeholder)',
+      }
+    }
+
+    // Pre-flight: FOGO peer registered on the ONyc NTT manager. The peer is
+    // the only per-destination-chain account `transfer_lock` requires; outbox
+    // rate limit is a singleton and inbox rate limit is irrelevant outbound.
+    const [fogoPeerPda] = findNttPeerPda(FOGO_WORMHOLE_CHAIN_ID, NTT_ONYC_PROGRAM_ID)
+    const peerInfo = await connection.getAccountInfo(fogoPeerPda).catch(() => null)
+    if (!peerInfo) {
+      return {
+        kind: 'noop',
+        reason: `FOGO peer not registered on ONyc NTT manager (${fogoPeerPda.toBase58()})`,
       }
     }
 
