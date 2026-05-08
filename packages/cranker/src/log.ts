@@ -19,11 +19,69 @@ export type Logger = {
 }
 
 export function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err)
+  if (!(err instanceof Error)) {
+    return String(err)
+  }
+
+  // Anchor `AnchorError`: structurally `{ error: { errorCode: { code,
+  // number }, errorMessage } }`. Constructed via `super()` with no arg,
+  // so `.message` is "". Produces e.g.
+  // "AnchorError InsufficientInboxBalance (6024): user inbox ata balance
+  // is insufficient" — meaningful enough for class dedup.
+  const anchorErr = err as {
+    error?: {
+      errorCode?: { code?: unknown, number?: unknown }
+      errorMessage?: unknown
+    }
+  }
+  const code = anchorErr.error?.errorCode?.code
+  const number = anchorErr.error?.errorCode?.number
+  if (typeof code === 'string') {
+    const num = typeof number === 'number' ? ` (${number})` : ''
+    const msg = typeof anchorErr.error?.errorMessage === 'string' && anchorErr.error.errorMessage
+      ? `: ${anchorErr.error.errorMessage}`
+      : ''
+    return `AnchorError ${code}${num}${msg}`
+  }
+
+  // Anchor `ProgramError`: structurally `{ code: number, msg: string }`.
+  // Same empty-`.message` problem.
+  const programErr = err as { code?: unknown, msg?: unknown }
+  if (typeof programErr.code === 'number' && typeof programErr.msg === 'string') {
+    return `ProgramError ${programErr.code}: ${programErr.msg}`
+  }
+
+  if (err.message) {
+    return err.message
+  }
+  // Last resort: an Error with no message and no Anchor shape. Surface
+  // the constructor name so dedup at least separates by error class.
+  return err.constructor === Error ? '<empty error>' : `<${err.constructor.name} with no message>`
 }
 
 export function errorFields(err: unknown): LogFields {
-  return { err: err instanceof Error ? err : String(err) }
+  if (!(err instanceof Error)) {
+    return { err: String(err) }
+  }
+  // Send a normalized error envelope so the JSON encoder doesn't have to
+  // guess: explicit message (Anchor-aware), name, stack, plus any
+  // program-side logs that Anchor attaches. Without this the operator
+  // sees `message: ""` and zero context for on-chain failures.
+  const fields: LogFields = {
+    err: {
+      name: err.name,
+      message: errorMessage(err),
+      stack: err.stack,
+    },
+  }
+  const withLogs = err as { logs?: unknown, errorLogs?: unknown }
+  if (Array.isArray(withLogs.logs) && withLogs.logs.length > 0) {
+    fields.programLogs = withLogs.logs
+  }
+  if (Array.isArray(withLogs.errorLogs) && withLogs.errorLogs.length > 0) {
+    fields.errorLogs = withLogs.errorLogs
+  }
+  return fields
 }
 
 // Base58 (32–44 chars, Solana pubkey/signature alphabet) and hex (64+ chars).
