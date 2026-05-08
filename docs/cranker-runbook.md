@@ -81,7 +81,7 @@ Operator-facing guide: take a clean Hetzner CX22 from blank to running cranker; 
 ```sh
 cd /opt/cranker
 # Edit docker-compose.yml: pin cranker image to a prior sha tag, e.g.
-#   image: ghcr.io/pointgroup-labs/cranker:sha-<oldsha>
+#   image: ghcr.io/pointgroup-labs/fogo-onre-cranker:sha-<oldsha>
 docker compose pull cranker
 docker compose up -d cranker
 ```
@@ -137,7 +137,7 @@ The cranker has **no fund-redirect powers** — `ValidatedTransceiverMessage` in
 ## 6. Disaster recovery
 
 - **Host loss:** Provision a fresh CX22 and re-run §1 + §2. RTO ~1 hour. The cranker is stateless; the only meaningful loss is Prometheus tsdb history (we accept that).
-- **ghcr.io outage:** If you have a host with a recent image cached, `docker save ghcr.io/pointgroup-labs/cranker:sha-<x> | ssh new-host docker load`, then pin the loaded tag in compose.
+- **ghcr.io outage:** If you have a host with a recent image cached, `docker save ghcr.io/pointgroup-labs/fogo-onre-cranker:sha-<x> | ssh new-host docker load`, then pin the loaded tag in compose.
 - **RPC provider outage:** Edit `cranker.env`, swap to a fallback URL, `docker compose restart cranker`.
 - **All paid RPC outages simultaneously:** the cranker is permissionless — anyone can advance flows manually with the CLI. Operate from the CLI on a dev machine until RPC returns.
 
