@@ -26,6 +26,34 @@ export function errorFields(err: unknown): LogFields {
   return { err: err instanceof Error ? err : String(err) }
 }
 
+// Base58 (32–44 chars, Solana pubkey/signature alphabet) and hex (64+ chars).
+// Used by errorClass() to collapse 100 "cannot derive userWallet for VAA
+// recipient <pubkey>" failures into one class with stable identity.
+const BASE58_RE = /\b[1-9A-HJ-NP-Za-km-z]{32,88}\b/g
+const HEX_RE = /\b[0-9a-fA-F]{32,}\b/g
+
+/**
+ * Stable class fingerprint for an error: message text with variable
+ * identifiers (pubkeys, signatures, hex hashes) redacted. Two failures
+ * whose messages differ only in pubkey are the same recurring class —
+ * dedup on this so a sender-side encoding bug affecting 100 distinct
+ * flows produces one warn, not 100.
+ */
+export function errorClass(err: unknown): string {
+  const msg = errorMessage(err)
+  return msg.replace(BASE58_RE, '<pubkey>').replace(HEX_RE, '<hex>')
+}
+
+/**
+ * Compact, single-line error fields for high-frequency debug paths
+ * (e.g. routine VAA-skip in enumerate). Drops the stack trace —
+ * stacks are useful for warns/errors, but they triple the log volume
+ * for known-routine debug-level events.
+ */
+export function errorFieldsCompact(err: unknown): LogFields {
+  return { err: errorMessage(err) }
+}
+
 function safeStringify(value: unknown): string {
   try {
     return JSON.stringify(value, (_k, v) => {

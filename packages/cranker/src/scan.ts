@@ -1,7 +1,7 @@
 import type { PublicKey } from '@solana/web3.js'
 import type { AdvanceContext, AdvanceResult } from './advance/types'
 import * as advance from './advance'
-import { errorFields } from './log'
+import { errorClass, errorFields, errorMessage } from './log'
 import { withTimeout } from './rpc'
 
 export type AdvanceFns = {
@@ -35,10 +35,17 @@ export type ScanOptions = {
   skipCounter?: { inc: (labels: { reason: string }) => void }
   /**
    * Cross-iteration dedup state for `flow advance failed` warnings.
-   * Without this, an unrecoverable flow re-emits the same warning every
-   * scan interval forever (e.g. a deposit whose VAA recipient encoding
-   * is broken — see "cannot derive userWallet"). With it, the first
-   * (flow, error-fingerprint) sighting logs at warn; repeats log at debug.
+   * Keyed on **error class** (message with pubkeys/hex redacted), not
+   * per-flow exact match — a single sender-side encoding bug can affect
+   * 100 distinct flows whose error messages differ only in pubkey, and
+   * we don't want 100 first-sighting warns. The first sighting of a
+   * class anywhere in the process logs at warn (with example flow);
+   * every subsequent hit logs at debug. The per-iteration rollup
+   * (emitted after `runBounded`) keeps the operator informed of how
+   * many flows are still hitting each known class.
+   *
+   * Value = the flow key where this class was first observed (kept so
+   * the warn line includes a concrete pointer for triage).
    *
    * Owned by the daemon (one Map per process); passed in so this module
    * stays free of module-level mutable state and stays unit-testable.
@@ -77,6 +84,18 @@ export async function scanAndAdvance(
 
   ctx.log.debug('flows enumerated', { total: flows.length })
 
+  // Per-iteration class → {count, sampleFlow, sampleMessage}. Built up by
+  // logAdvanceResult during dispatch; emitted as one rollup per class
+  // after runBounded.
+  const iterationFailures = new Map<string, { count: number, sampleFlow: string, sampleMessage: string }>()
+
+  // Snapshot of the cross-iter memo's class set BEFORE this scan. Used to
+  // distinguish classes that were observed for the first time this scan
+  // (rollup at info — novel signal worth surfacing) from classes the
+  // operator was already notified about on a prior scan (rollup at debug —
+  // suppress recurring noise; if they want the count they can grep).
+  const knownClassesAtStart = new Set(opts.seenAdvanceErrors?.keys() ?? [])
+
   const tasks: Array<() => Promise<AdvanceResult>> = []
   for (const flow of flows) {
     const dispatch = pickAdvanceForStatus(flow.status, fns)
@@ -92,12 +111,34 @@ export async function scanAndAdvance(
     tasks.push(async () => {
       ctx.log.debug('dispatching advance', { flow: flowKey, status: flow.status })
       const result = await dispatch(ctx, { fogoTx: flow.fogoTx, vaaHex: flow.vaaHex })
-      logAdvanceResult(ctx, flowKey, flow.status, result, opts.seenAdvanceErrors)
+      logAdvanceResult(ctx, flowKey, flow.status, result, opts.seenAdvanceErrors, iterationFailures)
       return result
     })
   }
 
   await runBounded(tasks, opts.maxConcurrentAdvances, ctx.abortSignal, ctx.log)
+
+  // Iteration-level rollup. New classes (first appearance this process)
+  // promote to info — pairs with the inline first-sighting warn so the
+  // operator gets "this is the failure + here's how widespread it is in
+  // this scan". Already-known classes drop to debug; per-scan recurrence
+  // is the boring case and shouldn't keep paging into the operator's eye.
+  for (const [klass, agg] of iterationFailures) {
+    if (agg.count <= 1) {
+      continue
+    }
+    const fields = {
+      class: klass,
+      count: agg.count,
+      sampleFlow: agg.sampleFlow,
+      sampleMessage: agg.sampleMessage,
+    }
+    if (knownClassesAtStart.has(klass)) {
+      ctx.log.debug('advance failure class observed (known)', fields)
+    } else {
+      ctx.log.info('advance failure class observed', fields)
+    }
+  }
 }
 
 function logAdvanceResult(
@@ -106,6 +147,7 @@ function logAdvanceResult(
   fromStatus: string,
   result: AdvanceResult,
   seenErrors?: Map<string, string>,
+  iterationFailures?: Map<string, { count: number, sampleFlow: string, sampleMessage: string }>,
 ): void {
   switch (result.kind) {
     case 'advanced':
@@ -115,9 +157,10 @@ function logAdvanceResult(
         to: result.toStatus,
         signatures: result.signatures,
       })
-      // A successful advance clears the dedup memo: if the flow ever
-      // fails again with the same error, we want to hear about it again.
-      seenErrors?.delete(flow)
+      // No memo touch: class-level dedup means success on flow X doesn't
+      // imply class C is gone — other flows may still be hitting it. The
+      // per-iteration rollup is the operator's signal that the class is
+      // (or isn't) recurring.
       return
     case 'noop':
       // Routine: another cranker advanced first, or pre-flight rejected.
@@ -126,35 +169,37 @@ function logAdvanceResult(
     case 'error': {
       // Per-flow failures are warnings, not errors — the next scan retries.
       // The scan-loop-level `error` log is reserved for whole-iteration failures.
-      // Dedup: same (flow, error-message) pair downgrades to debug after the
-      // first sighting in this process. Different error → re-emit at warn.
-      const fingerprint = errorFingerprint(result.error)
-      const previously = seenErrors?.get(flow)
-      const isRepeat = previously === fingerprint
+      // Class-level dedup: pubkeys/hex redacted from the message so 100
+      // distinct flows hitting the same sender-side bug produce one warn,
+      // not 100. Subsequent hits log debug; rollup surfaces total count.
+      const klass = errorClass(result.error)
+      const previously = seenErrors?.get(klass)
+      const isKnownClass = previously !== undefined
       const fields = {
         flow,
         status: fromStatus,
         partialSignatures: result.partialSignatures,
+        class: klass,
         ...errorFields(result.error),
       }
-      if (isRepeat) {
-        ctx.log.debug('flow advance failed (repeat)', fields)
+      if (isKnownClass) {
+        ctx.log.debug('flow advance failed (known class)', { ...fields, firstSeenOn: previously })
       } else {
         ctx.log.warn('flow advance failed', fields)
-        seenErrors?.set(flow, fingerprint)
+        seenErrors?.set(klass, flow)
+      }
+      const agg = iterationFailures?.get(klass)
+      if (agg) {
+        agg.count += 1
+      } else {
+        iterationFailures?.set(klass, {
+          count: 1,
+          sampleFlow: flow,
+          sampleMessage: errorMessage(result.error),
+        })
       }
     }
   }
-}
-
-/**
- * Stable identity for an error: its message text. We deliberately don't
- * include stack frames (line numbers churn across builds) or pubkeys
- * (already part of `flow`). Two failures with identical messages on the
- * same flow are treated as the same recurring problem.
- */
-function errorFingerprint(err: Error): string {
-  return err.message
 }
 
 type DispatchFn = (

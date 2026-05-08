@@ -4,7 +4,7 @@ import type { ResolvedNttVaa } from './vaa'
 import type { WormholescanVaa } from './wormholescan'
 import { NTT_ONYC_PROGRAM_ID, NTT_USDC_PROGRAM_ID } from '@fogo-onre/sdk'
 import { describeStatus } from './advance/helpers'
-import { errorFields } from './log'
+import { errorFields, errorFieldsCompact } from './log'
 import { resolveNttVaa } from './vaa'
 import { WormholescanClient } from './wormholescan'
 
@@ -140,7 +140,10 @@ function resolveVaaForLeg(ctx: AdvanceContext, vaaBytes: Uint8Array, leg: VaaLeg
   } catch (err) {
     // Non-NTT VAAs from the same emitter (or malformed bytes) are skipped
     // silently in production-info mode; debug surfaces them for triage.
-    ctx.log.debug('resolveNttVaa skipped', { leg, ...errorFields(err) })
+    // Use compact error fields (message only, no stack) — these fire on
+    // every non-NTT VAA the emitter has ever published, often hundreds
+    // per page, and the stack is identical/uninformative for all of them.
+    ctx.log.debug('resolveNttVaa skipped', { leg, ...errorFieldsCompact(err) })
     return null
   }
 }

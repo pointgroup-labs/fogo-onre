@@ -150,12 +150,12 @@ describe('scanAndAdvance', () => {
     await scanAndAdvance(makeCtx(undefined, recorder.log), opts)
 
     const warns = recorder.calls.filter(c => c.msg === 'flow advance failed')
-    const debugs = recorder.calls.filter(c => c.msg === 'flow advance failed (repeat)')
+    const debugs = recorder.calls.filter(c => c.msg === 'flow advance failed (known class)')
     expect(warns).toHaveLength(1) // first sighting only
     expect(debugs).toHaveLength(2) // subsequent repeats
   })
 
-  it('re-emits warn when the error message changes for the same flow', async () => {
+  it('re-emits warn when the error class changes', async () => {
     const recorder = recordingLogger()
     const seenAdvanceErrors = new Map<string, string>()
     let attempt = 0
@@ -185,28 +185,35 @@ describe('scanAndAdvance', () => {
     await scanAndAdvance(makeCtx(undefined, recorder.log), opts)
 
     const warns = recorder.calls.filter(c => c.msg === 'flow advance failed')
-    expect(warns).toHaveLength(2) // both sightings warn — different fingerprints
+    expect(warns).toHaveLength(2) // both sightings warn — different classes
   })
 
-  it('clears dedup memo when a flow finally advances', async () => {
+  it('class-level dedup collapses 100 distinct flows w/ pubkey-only message variation into one warn', async () => {
     const recorder = recordingLogger()
     const seenAdvanceErrors = new Map<string, string>()
-    let attempt = 0
-    const claimUsdc = vi.fn().mockImplementation(async () => {
-      const n = attempt++
-      if (n === 0) {
-        return { kind: 'error' as const, error: new Error('transient RPC blip'), partialSignatures: [] }
-      }
-      if (n === 1) {
-        return { kind: 'advanced' as const, signatures: ['sig'], fromStatus: 'Pending', toStatus: 'Claimed' }
-      }
-      return { kind: 'error' as const, error: new Error('transient RPC blip'), partialSignatures: [] }
-    })
+    // Each flow fails with a message whose only variation is a base58
+    // pubkey — exactly the production "cannot derive userWallet for VAA
+    // recipient <X>" pattern that motivated class-level dedup.
+    const flows = Array.from({ length: 100 }, (_, i) => ({
+      pubkey: PUBKEY,
+      status: 'Pending',
+      fogoTx: `tx-${i}`,
+    }))
+    let i = 0
+    const fakePubkeys = Array.from({ length: 100 }, (_, k) =>
+      // 32-char base58-shaped strings; errorClass() should redact each.
+      // Avoid '0' — not in base58 alphabet, would slip through redaction.
+      `Recipient${k.toString().replace(/0/g, '1').padStart(23, 'A')}`)
+    const claimUsdc = vi.fn().mockImplementation(async () => ({
+      kind: 'error' as const,
+      error: new Error(`cannot derive userWallet for VAA recipient ${fakePubkeys[i++]}`),
+      partialSignatures: [],
+    }))
 
-    const opts = {
+    await scanAndAdvance(makeCtx(undefined, recorder.log), {
       maxConcurrentAdvances: 1,
       rpcTimeoutMs: 5000,
-      enumerateFlows: async () => [{ pubkey: PUBKEY, status: 'Pending', fogoTx: 'tx-A' }],
+      enumerateFlows: async () => flows,
       advanceFns: {
         claimUsdc,
         swapUsdcToOnyc: vi.fn(),
@@ -217,14 +224,13 @@ describe('scanAndAdvance', () => {
         sendUsdcToUser: vi.fn(),
       },
       seenAdvanceErrors,
-    }
-
-    await scanAndAdvance(makeCtx(undefined, recorder.log), opts) // warn (first failure)
-    await scanAndAdvance(makeCtx(undefined, recorder.log), opts) // info advanced — clears memo
-    await scanAndAdvance(makeCtx(undefined, recorder.log), opts) // warn again (memo was cleared)
+    })
 
     const warns = recorder.calls.filter(c => c.msg === 'flow advance failed')
-    expect(warns).toHaveLength(2)
-    expect(seenAdvanceErrors.get(PUBKEY.toBase58())).toBe('transient RPC blip')
+    const debugs = recorder.calls.filter(c => c.msg === 'flow advance failed (known class)')
+    const rollups = recorder.calls.filter(c => c.msg === 'advance failure class observed')
+    expect(warns).toHaveLength(1) // 100 flows → 1 first-sighting warn
+    expect(debugs).toHaveLength(99) // remaining 99 demoted to debug
+    expect(rollups).toHaveLength(1) // info-rollup at end of iteration
   })
 })
