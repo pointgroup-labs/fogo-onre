@@ -1,4 +1,12 @@
+import { findNttEmitterPda, FOGO_WORMHOLE_CHAIN_ID, NTT_ONYC_PROGRAM_ID, NTT_USDC_PROGRAM_ID } from '@fogo-onre/sdk'
 import { z } from 'zod'
+
+// Defaults derived from the SDK so the cranker stays in lockstep with
+// the published manager program IDs and chain ID. Single source of truth.
+const [DEFAULT_USDC_EMITTER] = findNttEmitterPda(NTT_USDC_PROGRAM_ID)
+const [DEFAULT_ONYC_EMITTER] = findNttEmitterPda(NTT_ONYC_PROGRAM_ID)
+const DEFAULT_USDC_EMITTER_HEX = Buffer.from(DEFAULT_USDC_EMITTER.toBytes()).toString('hex')
+const DEFAULT_ONYC_EMITTER_HEX = Buffer.from(DEFAULT_ONYC_EMITTER.toBytes()).toString('hex')
 
 const schema = z.object({
   SOLANA_RPC_URL: z.string().url().refine(
@@ -11,12 +19,12 @@ const schema = z.object({
   WORMHOLESCAN_URL: z.string().url().default('https://api.wormholescan.io'),
   WORMHOLESCAN_PAGE_SIZE: z.coerce.number().int().min(1).max(200).default(50),
   WORMHOLESCAN_MAX_PAGES: z.coerce.number().int().min(1).max(20).default(2),
-  /** FOGO Wormhole chain ID (source chain for VAA polling). */
-  FOGO_WORMHOLE_CHAIN_ID: z.coerce.number().int().min(1).default(28),
-  /** Hex emitter address (32 bytes, no 0x) for the FOGO USDC NTT manager. */
-  FOGO_USDC_EMITTER_HEX: z.string().regex(/^[0-9a-f]{64}$/i).optional(),
-  /** Hex emitter address for the FOGO ONyc NTT manager (placeholder until deployed). */
-  FOGO_ONYC_EMITTER_HEX: z.string().regex(/^[0-9a-f]{64}$/i).optional(),
+  /** FOGO Wormhole chain ID (source chain for VAA polling). Defaults to SDK constant. */
+  FOGO_WORMHOLE_CHAIN_ID: z.coerce.number().int().min(1).default(FOGO_WORMHOLE_CHAIN_ID),
+  /** Hex emitter (32 bytes, no 0x) for the FOGO USDC NTT manager. Defaults to PDA derived from SDK's NTT_USDC_PROGRAM_ID. */
+  FOGO_USDC_EMITTER_HEX: z.string().regex(/^[0-9a-f]{64}$/i).default(DEFAULT_USDC_EMITTER_HEX),
+  /** Hex emitter for the FOGO ONyc NTT manager. Defaults to PDA derived from SDK's NTT_ONYC_PROGRAM_ID. */
+  FOGO_ONYC_EMITTER_HEX: z.string().regex(/^[0-9a-f]{64}$/i).default(DEFAULT_ONYC_EMITTER_HEX),
   METRICS_PORT: z.coerce.number().int().min(1).max(65535).default(9090),
   SCAN_INTERVAL_MS: z.coerce.number().int().min(1000).default(30_000),
   SCAN_MAX_BACKOFF_MS: z.coerce.number().int().min(1000).default(300_000),
@@ -38,8 +46,8 @@ export type CrankerConfig = {
   wormholescanPageSize: number
   wormholescanMaxPages: number
   fogoWormholeChainId: number
-  fogoUsdcEmitterHex?: string
-  fogoOnycEmitterHex?: string
+  fogoUsdcEmitterHex: string
+  fogoOnycEmitterHex: string
   metricsPort: number
   scanIntervalMs: number
   scanMaxBackoffMs: number

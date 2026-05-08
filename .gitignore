@@ -55,3 +55,5 @@ tmp
 
 # Next.js build output
 **/.next/
+
+/deploy/**/*.env
