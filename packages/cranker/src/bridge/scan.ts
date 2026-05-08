@@ -1,6 +1,7 @@
+import type { ClassRollupAgg } from '../log'
 import type { BridgeContext, BridgeRedeemResult, BridgeRedeemTarget } from './types'
 import { WormholescanClient } from '@fogo-onre/sdk'
-import { errorClass, errorFields, errorMessage } from '../log'
+import { errorFields, recordErrorClass, rollupErrorClasses } from '../log'
 import { executeBridgePlan, planBridgeRedeem } from './redeem'
 
 export interface BridgeScanOptions {
@@ -40,7 +41,7 @@ export async function scanAndRedeemBridge(
   }
 
   const ws = new WormholescanClient({ baseUrl: ctx.wormholescanUrl })
-  const iterFailures = new Map<string, { count: number, sampleSeq: string, sampleMessage: string }>()
+  const iterFailures = new Map<string, ClassRollupAgg>()
   const knownClasses = new Set(opts.seenRedeemErrors?.keys() ?? [])
 
   // Collect work first — keeps Wormholescan paging linear and lets the
@@ -80,18 +81,15 @@ export async function scanAndRedeemBridge(
     logBridgeResult(ctx, target.name, seqLabel, item.txHash, result, opts.seenRedeemErrors, iterFailures)
   })
 
-  for (const [klass, agg] of iterFailures) {
-    if (agg.count <= 1) {
-      continue
-    }
+  for (const { klass, agg, isKnown } of rollupErrorClasses(iterFailures, knownClasses)) {
     const fields = {
       target: target.name,
       class: klass,
       count: agg.count,
-      sampleSequence: agg.sampleSeq,
+      sampleSequence: agg.sampleKey,
       sampleMessage: agg.sampleMessage,
     }
-    if (knownClasses.has(klass)) {
+    if (isKnown) {
       ctx.log.debug('bridge failure class observed (known)', fields)
     } else {
       ctx.log.info('bridge failure class observed', fields)
@@ -115,7 +113,7 @@ function logBridgeResult(
   txHash: string | null,
   result: BridgeRedeemResult,
   seenErrors: Map<string, string> | undefined,
-  iterFailures: Map<string, { count: number, sampleSeq: string, sampleMessage: string }>,
+  iterFailures: Map<string, ClassRollupAgg>,
 ): void {
   switch (result.kind) {
     case 'submitted':
@@ -131,8 +129,12 @@ function logBridgeResult(
       ctx.log.debug('bridge vaa noop', { target, sequence, reason: result.reason })
       return
     case 'error': {
-      const klass = errorClass(result.error)
-      const previously = seenErrors?.get(klass)
+      const { klass, firstSeenOn } = recordErrorClass({
+        err: result.error,
+        sampleKey: sequence,
+        seenErrors,
+        iterFailures,
+      })
       const fields = {
         target,
         sequence,
@@ -140,21 +142,10 @@ function logBridgeResult(
         class: klass,
         ...errorFields(result.error),
       }
-      if (previously !== undefined) {
-        ctx.log.debug('bridge vaa redeem failed (known class)', { ...fields, firstSeenOn: previously })
+      if (firstSeenOn !== undefined) {
+        ctx.log.debug('bridge vaa redeem failed (known class)', { ...fields, firstSeenOn })
       } else {
         ctx.log.warn('bridge vaa redeem failed', fields)
-        seenErrors?.set(klass, sequence)
-      }
-      const agg = iterFailures.get(klass)
-      if (agg) {
-        agg.count += 1
-      } else {
-        iterFailures.set(klass, {
-          count: 1,
-          sampleSeq: sequence,
-          sampleMessage: errorMessage(result.error),
-        })
       }
     }
   }

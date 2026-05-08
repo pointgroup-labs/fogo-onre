@@ -1,7 +1,8 @@
 import type { PublicKey } from '@solana/web3.js'
 import type { AdvanceContext, AdvanceResult } from './advance/types'
+import type { ClassRollupAgg } from './log'
 import * as advance from './advance'
-import { errorClass, errorFields, errorMessage } from './log'
+import { errorFields, recordErrorClass, rollupErrorClasses } from './log'
 import { withTimeout } from './rpc'
 
 export type AdvanceFns = {
@@ -76,10 +77,9 @@ export async function scanAndAdvance(
 
   ctx.log.debug('flows enumerated', { total: flows.length })
 
-  // Per-iteration class → {count, sampleFlow, sampleMessage}. Built up by
-  // logAdvanceResult during dispatch; emitted as one rollup per class
-  // after runBounded.
-  const iterationFailures = new Map<string, { count: number, sampleFlow: string, sampleMessage: string }>()
+  // Per-iteration class → ClassRollupAgg, populated by logAdvanceResult
+  // during dispatch and emitted as one rollup per class after runBounded.
+  const iterationFailures = new Map<string, ClassRollupAgg>()
 
   // Snapshot of the cross-iter memo's class set BEFORE this scan. Used to
   // distinguish classes that were observed for the first time this scan
@@ -115,17 +115,14 @@ export async function scanAndAdvance(
   // operator gets "this is the failure + here's how widespread it is in
   // this scan". Already-known classes drop to debug; per-scan recurrence
   // is the boring case and shouldn't keep paging into the operator's eye.
-  for (const [klass, agg] of iterationFailures) {
-    if (agg.count <= 1) {
-      continue
-    }
+  for (const { klass, agg, isKnown } of rollupErrorClasses(iterationFailures, knownClassesAtStart)) {
     const fields = {
       class: klass,
       count: agg.count,
-      sampleFlow: agg.sampleFlow,
+      sampleFlow: agg.sampleKey,
       sampleMessage: agg.sampleMessage,
     }
-    if (knownClassesAtStart.has(klass)) {
+    if (isKnown) {
       ctx.log.debug('advance failure class observed (known)', fields)
     } else {
       ctx.log.info('advance failure class observed', fields)
@@ -139,7 +136,7 @@ function logAdvanceResult(
   fromStatus: string,
   result: AdvanceResult,
   seenErrors?: Map<string, string>,
-  iterationFailures?: Map<string, { count: number, sampleFlow: string, sampleMessage: string }>,
+  iterationFailures?: Map<string, ClassRollupAgg>,
 ): void {
   switch (result.kind) {
     case 'advanced':
@@ -164,9 +161,15 @@ function logAdvanceResult(
       // Class-level dedup: pubkeys/hex redacted from the message so 100
       // distinct flows hitting the same sender-side bug produce one warn,
       // not 100. Subsequent hits log debug; rollup surfaces total count.
-      const klass = errorClass(result.error)
-      const previously = seenErrors?.get(klass)
-      const isKnownClass = previously !== undefined
+      if (!iterationFailures) {
+        return
+      }
+      const { klass, firstSeenOn } = recordErrorClass({
+        err: result.error,
+        sampleKey: flow,
+        seenErrors,
+        iterFailures: iterationFailures,
+      })
       const fields = {
         flow,
         status: fromStatus,
@@ -174,21 +177,10 @@ function logAdvanceResult(
         class: klass,
         ...errorFields(result.error),
       }
-      if (isKnownClass) {
-        ctx.log.debug('flow advance failed (known class)', { ...fields, firstSeenOn: previously })
+      if (firstSeenOn !== undefined) {
+        ctx.log.debug('flow advance failed (known class)', { ...fields, firstSeenOn })
       } else {
         ctx.log.warn('flow advance failed', fields)
-        seenErrors?.set(klass, flow)
-      }
-      const agg = iterationFailures?.get(klass)
-      if (agg) {
-        agg.count += 1
-      } else {
-        iterationFailures?.set(klass, {
-          count: 1,
-          sampleFlow: flow,
-          sampleMessage: errorMessage(result.error),
-        })
       }
     }
   }

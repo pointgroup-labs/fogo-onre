@@ -116,3 +116,71 @@ export function silentLogger(): Logger {
   }
   return self
 }
+
+/**
+ * Per-iteration aggregator entry for class-keyed error dedup. The
+ * `sampleKey` is opaque to the helper — Flow scanner uses the flow
+ * pubkey, bridge scanner uses the sequence string. Each call site maps
+ * it to its preferred public field name in the rollup log line.
+ */
+export type ClassRollupAgg = {
+  count: number
+  sampleKey: string
+  sampleMessage: string
+}
+
+/**
+ * Records an error in both the cross-iteration "first-seen" memo and the
+ * per-iteration aggregator. Returns enough context for the caller to
+ * pick the log level + format the log fields itself.
+ *
+ *   - `firstSeenOn === undefined` → first sighting; caller logs at warn,
+ *     and the memo has been populated with `sampleKey`.
+ *   - `firstSeenOn !== undefined` → known class; caller logs at debug
+ *     and may include `firstSeenOn` for triage.
+ *
+ * The two scanners (Flow and bridge) share this bookkeeping verbatim;
+ * only the log message text and the public field name for `sampleKey`
+ * differ.
+ */
+export function recordErrorClass(args: {
+  err: Error
+  sampleKey: string
+  seenErrors: Map<string, string> | undefined
+  iterFailures: Map<string, ClassRollupAgg>
+}): { klass: string, firstSeenOn: string | undefined } {
+  const klass = errorClass(args.err)
+  const firstSeenOn = args.seenErrors?.get(klass)
+  if (firstSeenOn === undefined) {
+    args.seenErrors?.set(klass, args.sampleKey)
+  }
+  const agg = args.iterFailures.get(klass)
+  if (agg) {
+    agg.count += 1
+  } else {
+    args.iterFailures.set(klass, {
+      count: 1,
+      sampleKey: args.sampleKey,
+      sampleMessage: errorMessage(args.err),
+    })
+  }
+  return { klass, firstSeenOn }
+}
+
+/**
+ * Yields per-iteration rollup entries for classes hit more than once.
+ * `isKnown` reflects whether the class was already in `seenErrors` at
+ * the start of the scan — the caller uses it to pick log level
+ * (debug for known, info for novel).
+ */
+export function* rollupErrorClasses(
+  iterFailures: Map<string, ClassRollupAgg>,
+  knownAtStart: Set<string>,
+): Generator<{ klass: string, agg: ClassRollupAgg, isKnown: boolean }> {
+  for (const [klass, agg] of iterFailures) {
+    if (agg.count <= 1) {
+      continue
+    }
+    yield { klass, agg, isKnown: knownAtStart.has(klass) }
+  }
+}
