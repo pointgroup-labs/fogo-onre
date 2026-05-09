@@ -3,6 +3,7 @@
 import { SessionButton } from '@fogo/sessions-sdk-react'
 import dynamic from 'next/dynamic'
 import { APP_NAME } from '@/constants'
+import ThemeToggle from './ThemeToggle'
 
 const SettingsSheet = dynamic(() => import('./SettingsSheet'), { ssr: false })
 
@@ -12,6 +13,7 @@ export default function Header() {
       <span className="overflow-hidden text-lg font-semibold tracking-tight">{APP_NAME}</span>
       <div className="flex items-stretch gap-3">
         <SessionButton />
+        <ThemeToggle />
         <SettingsSheet />
       </div>
     </header>
