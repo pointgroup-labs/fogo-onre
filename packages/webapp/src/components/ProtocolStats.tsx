@@ -1,5 +1,9 @@
 'use client'
 
+import { Suspense } from 'react'
+import Statistic from '@/components/Statistic'
+import { Card, CardContent } from '@/components/ui/card'
+import { Skeleton } from '@/components/ui/skeleton'
 import { FOGO_ONYC_DECIMALS, USDC_DECIMALS } from '@/constants'
 import { useProtocolState } from '@/hooks/useProtocolState'
 
@@ -18,32 +22,34 @@ import { useProtocolState } from '@/hooks/useProtocolState'
  * trust the moment a user cross-checked it on-chain.
  */
 export default function ProtocolStats() {
-  const protocol = useProtocolState()
+  return (
+    <Suspense fallback={<ProtocolStatsSkeleton />}>
+      <ProtocolStatsInner />
+    </Suspense>
+  )
+}
 
-  const apy = formatApy(protocol?.price.aprBps ?? null)
-  const nav = formatNav(protocol?.onycPrice ?? null, protocol?.price.priceScale ?? null)
-  const preview = protocol?.priceIsPreview === true
+function ProtocolStatsInner() {
+  const protocol = useProtocolState()
+  const apy = formatApy(protocol.price.aprBps)
+  const nav = formatNav(protocol.onycPrice, protocol.price.priceScale)
+  const preview = protocol.priceIsPreview && nav !== '—'
 
   return (
     <div className="grid grid-cols-3 gap-3">
-      <Stat label="APY" value={apy} />
-      <Stat label="AUM" value="—" />
-      <Stat label="NAV" value={nav} preview={preview && nav !== '—'} />
+      <Card><CardContent className="p-4"><Statistic label="APY" value={apy} /></CardContent></Card>
+      <Card><CardContent className="p-4"><Statistic label="AUM" value="—" /></CardContent></Card>
+      <Card><CardContent className="p-4"><Statistic label="NAV" value={nav} preview={preview} /></CardContent></Card>
     </div>
   )
 }
 
-function Stat({ label, value, preview }: { label: string, value: string, preview?: boolean }) {
+function ProtocolStatsSkeleton() {
   return (
-    <div className="flex flex-col gap-0.5 rounded-xl border border-neutral-800 bg-neutral-950 px-4 py-3">
-      <span className="text-[10px] font-medium uppercase tracking-wider text-neutral-500">{label}</span>
-      <span
-        className={`text-lg font-semibold tracking-tight tabular-nums ${
-          value === '—' ? 'text-neutral-600' : preview ? 'text-amber-300' : 'text-neutral-100'
-        }`}
-      >
-        {value}
-      </span>
+    <div className="grid grid-cols-3 gap-3">
+      {[0, 1, 2].map(i => (
+        <Card key={i}><CardContent className="p-4"><Skeleton className="h-12" /></CardContent></Card>
+      ))}
     </div>
   )
 }

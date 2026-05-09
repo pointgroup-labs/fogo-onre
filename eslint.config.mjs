@@ -59,4 +59,20 @@ export default antfu(
       'react-refresh/only-export-components': 'off',
     },
   },
+  {
+    // shadcn/ui primitives are vendored as-is from the upstream registry.
+    // They co-export variant helpers (`buttonVariants`, `useFormField`)
+    // alongside components by design, and use forward-declared contexts.
+    // Linting them surfaces upstream patterns we don't own; relax the
+    // most opinionated rules so updates from `pnpm dlx shadcn add` apply
+    // cleanly without local diff noise.
+    files: ['packages/webapp/src/components/ui/**/*.{ts,tsx}'],
+    rules: {
+      'react-refresh/only-export-components': 'off',
+      'react/no-context-provider': 'off',
+      'react/no-use-context': 'off',
+      'react/no-forward-ref': 'off',
+      'ts/no-use-before-define': 'off',
+    },
+  },
 )

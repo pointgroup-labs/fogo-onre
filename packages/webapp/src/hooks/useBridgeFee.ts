@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { USDC_DECIMALS, USDC_S_MINT } from '@/constants'
 import { useDocumentVisible } from '@/hooks/useDocumentVisible'
 import { findFeeConfigPda, readBridgeTransferFee } from '@/lib/bridge/feeConfig'
@@ -23,8 +23,6 @@ import { getFogoConnection } from '@/utils/connections'
  * gone entirely.
  */
 
-const REFRESH_MS = 60_000
-
 export interface BridgeFeePreview {
   /** Fee amount in USDC.s base units (6 decimals). `null` while loading. */
   feeRaw: bigint | null
@@ -34,44 +32,24 @@ export interface BridgeFeePreview {
 }
 
 export function useBridgeFee(): BridgeFeePreview {
-  const [feeRaw, setFeeRaw] = useState<bigint | null>(null)
-  const [error, setError] = useState<string | null>(null)
   const visible = useDocumentVisible()
   const { fogoRpcUrl } = useSettings()
 
-  useEffect(() => {
-    let cancelled = false
+  const query = useQuery({
+    queryKey: ['bridge-fee', fogoRpcUrl] as const,
+    staleTime: 30_000,
+    refetchInterval: visible ? 60_000 : false,
+    queryFn: async (): Promise<bigint> => {
+      const feeConfig = findFeeConfigPda(USDC_S_MINT)
+      const conn = getFogoConnection(fogoRpcUrl)
+      return readBridgeTransferFee(conn, feeConfig)
+    },
+  })
 
-    async function refresh() {
-      try {
-        const feeConfig = findFeeConfigPda(USDC_S_MINT)
-        const conn = getFogoConnection(fogoRpcUrl)
-        const fee = await readBridgeTransferFee(conn, feeConfig)
-        if (cancelled) {
-          return
-        }
-        setFeeRaw(fee)
-        setError(null)
-      } catch (err) {
-        if (cancelled) {
-          return
-        }
-        setError(err instanceof Error ? err.message : 'Failed to read bridge fee')
-      }
-    }
-
-    refresh()
-    if (!visible) {
-      return () => {
-        cancelled = true
-      }
-    }
-    const id = setInterval(refresh, REFRESH_MS)
-    return () => {
-      cancelled = true
-      clearInterval(id)
-    }
-  }, [visible, fogoRpcUrl])
-
-  return { feeRaw, feeDecimals: USDC_DECIMALS, feeSymbol: 'USDC.s', error }
+  return {
+    feeRaw: query.data ?? null,
+    feeDecimals: USDC_DECIMALS,
+    feeSymbol: 'USDC.s',
+    error: query.error?.message ?? null,
+  }
 }

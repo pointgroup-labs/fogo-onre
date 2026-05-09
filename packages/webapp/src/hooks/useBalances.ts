@@ -4,7 +4,8 @@ import type { SessionState } from '@fogo/sessions-sdk-react'
 import { isEstablished } from '@fogo/sessions-sdk-react'
 import { getAssociatedTokenAddressSync } from '@solana/spl-token'
 import { Connection, PublicKey } from '@solana/web3.js'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { useCallback } from 'react'
 import { FOGO_ONYC_MINT, USDC_S_MINT } from '@/constants'
 import { useDocumentVisible } from '@/hooks/useDocumentVisible'
 import { useSettings } from '@/store/settings'
@@ -22,7 +23,7 @@ export interface BalanceSnapshot {
   fogoOnyc: bigint | null
 }
 
-const REFRESH_MS = 15_000
+const EMPTY_SNAPSHOT: BalanceSnapshot = { usdc: null, fogoOnyc: null }
 
 async function fetchTokenBalance(connection: Connection, ata: PublicKey): Promise<bigint> {
   try {
@@ -37,7 +38,7 @@ export interface UseBalancesResult {
   snapshot: BalanceSnapshot
   /**
    * Force an immediate refetch — call after a successful tx so the UI
-   * doesn't show stale numbers for up to `REFRESH_MS` while the next poll
+   * doesn't show stale numbers for up to the poll interval while the next
    * tick fires.
    */
   refresh: () => void
@@ -46,55 +47,37 @@ export interface UseBalancesResult {
 export function useBalances(sessionState: SessionState): UseBalancesResult {
   const owner = isEstablished(sessionState) ? sessionState.walletPublicKey : null
   const ownerKey = owner?.toBase58() ?? null
-  const [snapshot, setSnapshot] = useState<BalanceSnapshot>({ usdc: null, fogoOnyc: null })
   const visible = useDocumentVisible()
-  // Subscribe to the resolved RPC URL so a settings change re-runs the
-  // effect against the new endpoint immediately.
   const { fogoRpcUrl } = useSettings()
-  const [refreshTick, setRefreshTick] = useState(0)
-  const refresh = useCallback(() => setRefreshTick(t => t + 1), [])
 
-  // Keep the latest fetch alive in a ref so a manual refresh can run even
-  // while the interval is paused (e.g. a tx submitted while the tab is
-  // backgrounded — we still want the post-success refetch to fire).
-  const refetchRef = useRef<(() => Promise<void>) | null>(null)
-
-  useEffect(() => {
-    if (ownerKey === null) {
-      setSnapshot({ usdc: null, fogoOnyc: null })
-      refetchRef.current = null
-      return
-    }
-
-    let cancelled = false
-    const ownerPk = new PublicKey(ownerKey)
-    const connection = getFogoConnection(fogoRpcUrl)
-    const usdcAta = getAssociatedTokenAddressSync(USDC_S_MINT, ownerPk)
-    const fogoOnycAta = getAssociatedTokenAddressSync(FOGO_ONYC_MINT, ownerPk)
-
-    const refetch = async () => {
+  const query = useQuery({
+    queryKey: ['balances', ownerKey, fogoRpcUrl] as const,
+    enabled: ownerKey !== null,
+    staleTime: 10_000,
+    refetchInterval: visible ? 15_000 : false,
+    queryFn: async (): Promise<BalanceSnapshot> => {
+      if (ownerKey === null) {
+        return EMPTY_SNAPSHOT
+      }
+      const ownerPk = new PublicKey(ownerKey)
+      const connection = getFogoConnection(fogoRpcUrl)
+      const usdcAta = getAssociatedTokenAddressSync(USDC_S_MINT, ownerPk)
+      const fogoOnycAta = getAssociatedTokenAddressSync(FOGO_ONYC_MINT, ownerPk)
       const [usdc, fogoOnyc] = await Promise.all([
         fetchTokenBalance(connection, usdcAta),
         fetchTokenBalance(connection, fogoOnycAta),
       ])
-      if (!cancelled) {
-        setSnapshot({ usdc, fogoOnyc })
-      }
-    }
-    refetchRef.current = refetch
+      return { usdc, fogoOnyc }
+    },
+  })
 
-    refetch()
-    if (!visible) {
-      return () => {
-        cancelled = true
-      }
-    }
-    const id = setInterval(refetch, REFRESH_MS)
-    return () => {
-      cancelled = true
-      clearInterval(id)
-    }
-  }, [ownerKey, visible, refreshTick, fogoRpcUrl])
+  const refetch = query.refetch
+  const refresh = useCallback(() => {
+    void refetch()
+  }, [refetch])
 
-  return { snapshot, refresh }
+  return {
+    snapshot: query.data ?? EMPTY_SNAPSHOT,
+    refresh,
+  }
 }

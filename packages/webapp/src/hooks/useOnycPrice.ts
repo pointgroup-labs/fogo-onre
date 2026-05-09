@@ -1,7 +1,7 @@
 'use client'
 
 import { findOnreOfferPda, ONYC_MINT } from '@fogo-onre/sdk'
-import { useEffect, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { SOLANA_USDC_MINT } from '@/constants'
 import { useDocumentVisible } from '@/hooks/useDocumentVisible'
 import { useSettings } from '@/store/settings'
@@ -36,70 +36,43 @@ export interface OnycPriceState {
   fetchedAt: number
 }
 
-const REFRESH_MS = 30_000
-
 export function useOnycPrice(): { price: OnycPriceState | null, error: string | null } {
-  const [price, setPrice] = useState<OnycPriceState | null>(null)
-  const [error, setError] = useState<string | null>(null)
   const visible = useDocumentVisible()
-  // Subscribe so a settings change rebinds the polling loop against the
-  // new endpoint immediately.
   const { solanaRpcUrl } = useSettings()
 
-  useEffect(() => {
-    let cancelled = false
-    const connection = getSolanaConnection(solanaRpcUrl)
-    const [offerPda] = findOnreOfferPda(SOLANA_USDC_MINT, ONYC_MINT)
-
-    async function refresh() {
-      try {
-        const account = await connection.getAccountInfo(offerPda, 'confirmed')
-        if (cancelled) {
-          return
-        }
-        if (account === null) {
-          setError(`OnRe offer account ${offerPda.toBase58()} not found`)
-          return
-        }
-        const vectors = decodeOnreOfferPriceVectors(account.data)
-        if (vectors.length === 0) {
-          setError('OnRe offer contains no price vectors')
-          return
-        }
-        const now = BigInt(Math.floor(Date.now() / 1000))
-        const active = selectActiveVector(vectors, now)
-        if (active === null) {
-          setError('Could not select an active price vector')
-          return
-        }
-        const onycPrice = computeOnycPriceFromVector(active, now)
-        setPrice({
-          onycPrice,
-          priceScale: ONRE_PRICE_SCALE,
-          aprBps: Number(active.apr / 100n),
-          fetchedAt: Date.now(),
-        })
-        setError(null)
-      } catch (err) {
-        if (cancelled) {
-          return
-        }
-        setError(err instanceof Error ? err.message : 'Failed to fetch OnRe price')
+  const query = useQuery({
+    queryKey: ['onyc-price', solanaRpcUrl] as const,
+    staleTime: 60_000,
+    refetchInterval: visible ? 5 * 60_000 : false,
+    queryFn: async (): Promise<OnycPriceState> => {
+      const connection = getSolanaConnection(solanaRpcUrl)
+      const [offerPda] = findOnreOfferPda(SOLANA_USDC_MINT, ONYC_MINT)
+      const account = await connection.getAccountInfo(offerPda, 'confirmed')
+      if (account === null) {
+        throw new Error(`OnRe offer account ${offerPda.toBase58()} not found`)
       }
-    }
-
-    refresh()
-    if (!visible) {
-      return () => {
-        cancelled = true
+      const vectors = decodeOnreOfferPriceVectors(account.data)
+      if (vectors.length === 0) {
+        throw new Error('OnRe offer contains no price vectors')
       }
-    }
-    const id = setInterval(refresh, REFRESH_MS)
-    return () => {
-      cancelled = true
-      clearInterval(id)
-    }
-  }, [visible, solanaRpcUrl])
+      const now = BigInt(Math.floor(Date.now() / 1000))
+      const active = selectActiveVector(vectors, now)
+      if (active === null) {
+        throw new Error('Could not select an active price vector')
+      }
+      const onycPrice = computeOnycPriceFromVector(active, now)
+      return {
+        onycPrice,
+        priceScale: ONRE_PRICE_SCALE,
+        aprBps: Number(active.apr / 100n),
+        fetchedAt: Date.now(),
+      }
+    },
+  })
 
-  return { price, error }
+  const error = query.error
+    ? (query.error instanceof Error ? query.error.message : 'Failed to fetch OnRe price')
+    : null
+
+  return { price: query.data ?? null, error }
 }
