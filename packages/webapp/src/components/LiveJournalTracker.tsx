@@ -88,6 +88,18 @@ function TrackerRow({ flowId }: { flowId: string }) {
       return
     }
     const liveStatus = statusFromPhase(flow.phase)
+    // Promote 'pending' → 'in-progress' on first non-`'submitted'`
+    // phase, so the BridgeHistory row shows "Bridging" instead of
+    // staying stuck on "Submitting" until terminal. Without this, the
+    // journal status only ever advances when the flow finishes,
+    // which makes long withdraw chains look frozen even when the
+    // cross-chain progress is healthy.
+    if (
+      liveStatus === 'in-progress'
+      && persisted.status === 'pending'
+    ) {
+      patchFlow(qc, flowId, { status: 'in-progress' })
+    }
     if (isTerminal(liveStatus) && !persisted.notified) {
       patchFlow(qc, flowId, { status: liveStatus, notified: true })
       const action = {
