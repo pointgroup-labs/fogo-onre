@@ -52,13 +52,13 @@ function configFor(kind: FlowKind): KindConfig {
     return {
       srcMintB58: USDC_S_MINT.toBase58(),
       destMintB58: FOGO_ONYC_MINT.toBase58(),
-      srcSymbol: 'USDC.s',
+      srcSymbol: 'USDC',
       destSymbol: 'ONyc',
       srcDecimals: USDC_DECIMALS,
       destDecimals: FOGO_ONYC_DECIMALS,
       submitLabel: 'Deposit',
       submittingLabel: 'Depositing…',
-      insufficientLabel: 'Insufficient USDC.s',
+      insufficientLabel: 'Insufficient USDC',
       ready: true,
       unavailable: null,
     }
@@ -67,7 +67,7 @@ function configFor(kind: FlowKind): KindConfig {
     srcMintB58: FOGO_ONYC_MINT.toBase58(),
     destMintB58: USDC_S_MINT.toBase58(),
     srcSymbol: 'ONyc',
-    destSymbol: 'USDC.s',
+    destSymbol: 'USDC',
     srcDecimals: FOGO_ONYC_DECIMALS,
     destDecimals: USDC_DECIMALS,
     submitLabel: 'Withdraw',
@@ -394,7 +394,6 @@ interface BalanceChipProps {
 
 function BalanceChip({ sessionEstablished, loading, maxAmountStr, maxRaw, onMax }: BalanceChipProps) {
   const interactive = sessionEstablished && !loading && maxRaw > 0n
-  const showMaxBadge = sessionEstablished && !loading && maxRaw > 0n
   const numberSlot = !sessionEstablished
     ? '—'
     : loading
@@ -409,8 +408,10 @@ function BalanceChip({ sessionEstablished, loading, maxAmountStr, maxRaw, onMax 
       className="inline-flex items-center gap-1.5 rounded-md border border-transparent px-1.5 py-0.5 transition-colors hover:border-border hover:text-foreground disabled:cursor-default disabled:opacity-70 disabled:hover:border-transparent disabled:hover:text-muted-foreground"
     >
       <WalletIcon />
-      <span className="min-w-[3ch] text-right tabular-nums">{numberSlot}</span>
-      <span className={`font-semibold uppercase tracking-wide text-[10px] text-foreground/70 transition-opacity ${showMaxBadge ? 'opacity-100' : 'opacity-0'}`}>Max</span>
+      <span className="tabular-nums">{numberSlot}</span>
+      {interactive && (
+        <span className="font-semibold uppercase tracking-wide text-[10px] text-foreground/70">Max</span>
+      )}
     </button>
   )
 }
@@ -435,7 +436,7 @@ function DestBalanceReadout({ sessionEstablished, loading, amountStr }: DestBala
   return (
     <span className="inline-flex items-center gap-1.5 px-1.5 py-0.5">
       <WalletIcon />
-      <span className="min-w-[3ch] text-right tabular-nums">
+      <span className="tabular-nums">
         {!sessionEstablished
           ? '—'
           : loading
