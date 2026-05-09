@@ -18,19 +18,10 @@
  */
 
 const FOGOSCAN_BASE = 'https://fogoscan.com'
-const SOLSCAN_BASE = 'https://solscan.io'
 const WORMHOLESCAN_BASE = 'https://wormholescan.io'
 
 export function fogoTxUrl(signature: string): string {
   return `${FOGOSCAN_BASE}/tx/${signature}`
-}
-
-/**
- * Solscan link for a Solana-side tx — used for the destination leg of
- * a bridge flow (NTT delivery into the relayer on Solana).
- */
-export function solanaTxUrl(signature: string): string {
-  return `${SOLSCAN_BASE}/tx/${signature}`
 }
 
 /**
