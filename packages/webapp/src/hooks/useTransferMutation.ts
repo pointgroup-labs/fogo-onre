@@ -162,7 +162,7 @@ export function useTransferMutation(options: UseTransferMutationOptions = {}) {
           id: status.flowId,
           description: `Tx ${shortSig(status.signature)}`,
           action: {
-            label: 'View',
+            label: 'Explorer',
             onClick: () => {
               window.open(fogoTxUrl(status.signature), '_blank', 'noopener,noreferrer')
             },

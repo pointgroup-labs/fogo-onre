@@ -190,3 +190,35 @@
 .dark [data-slot='tabs-trigger']:not([data-state='active']) {
   color: var(--muted-foreground);
 }
+
+/* ============================================================
+   Sonner toast — action button. With `richColors`, Sonner's
+   default styling paints the action button white-on-color, which
+   reads as a primary CTA inside what is supposed to be passive
+   chrome. Override to a ghost/secondary look that matches the
+   toast's own palette: transparent surface, border carries the
+   shape, hover lifts subtly.
+   ============================================================ */
+
+[data-sonner-toaster] [data-sonner-toast] [data-button]:not([data-close-button]) {
+  background: transparent;
+  color: var(--foreground);
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) - 4px);
+  padding: 0.25rem 0.625rem;
+  font-weight: 500;
+  transition:
+    color 120ms ease,
+    background-color 120ms ease,
+    border-color 120ms ease;
+}
+
+[data-sonner-toaster] [data-sonner-toast] [data-button]:not([data-close-button]):hover {
+  background: var(--muted);
+  border-color: var(--foreground);
+}
+
+[data-sonner-toaster] [data-sonner-toast] [data-button]:not([data-close-button]):focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
