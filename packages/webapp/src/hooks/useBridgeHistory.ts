@@ -9,6 +9,7 @@ import { fetchBurnPage, getCanonicalAtas } from '@/lib/bridgeHistory/rpc'
 import { fetchOperationStatus } from '@/lib/bridgeHistory/wormholescan'
 import { useSettings } from '@/store/settings'
 import { getFogoConnection } from '@/utils/connections'
+import { useBridgeFee } from './useBridgeFee'
 
 interface BurnPageGroup {
   cursors: { usdcS: string | undefined, onyc: string | undefined }
@@ -29,6 +30,7 @@ export interface UseBridgeHistoryResult {
 export function useBridgeHistory(owner: PublicKey | null): UseBridgeHistoryResult {
   const { fogoRpcUrl } = useSettings()
   const qc = useQueryClient()
+  const { feeRaw } = useBridgeFee()
 
   const ownerB58 = owner?.toBase58() ?? null
 
@@ -109,9 +111,9 @@ export function useBridgeHistory(owner: PublicKey | null): UseBridgeHistoryResul
     return allBurns.map((burn, i) => {
       const op = opQueries[i]?.data ?? null
       const journal = findJournalEntryBySignature(qc, burn.signature)
-      return mergeRow(burn, op, journal)
+      return mergeRow(burn, op, journal, feeRaw)
     })
-  }, [allBurns, opQueries, qc])
+  }, [allBurns, opQueries, qc, feeRaw])
 
   return {
     rows,

@@ -31,20 +31,23 @@ export function findJournalEntryBySignature(
 }
 
 /**
- * Pure: given the three inputs, produce one TimelineRow. Must be
+ * Pure: given the four inputs, produce one TimelineRow. Must be
  * deterministic — same inputs always yield the same output.
  *
- * Amount precedence: journal principal > on-chain burn delta. The
- * journal stores what the user typed (e.g. "1 USDC.s"); the on-chain
- * delta is principal + bridge fee (e.g. 3 USDC.s burned). Cross-
- * session/device rows have no journal — they fall back to the gross
- * delta, an accepted v1 limitation since on-chain data alone cannot
- * decompose principal vs. fee.
+ * Amount precedence:
+ *   1. Journal principal (exact — what the user typed).
+ *   2. Deposit + on-chain bridge fee known: `gross - fee` (approximate).
+ *   3. Otherwise: on-chain burn delta as-is (withdraws never deduct;
+ *      gross IS principal, so non-approximate).
+ *
+ * `feeRaw` is the live `FeeConfig.bridge_transfer_fee` for USDC.s,
+ * `null` while still loading or if RPC failed.
  */
 export function mergeRow(
   burn: BurnRow,
   op: OperationStatus | null,
   journal: PersistedFlowStatus | null,
+  feeRaw: bigint | null,
 ): TimelineRow {
   const isDeposit = burn.mint.equals(USDC_S_MINT)
   const decimals = isDeposit ? USDC_DECIMALS : FOGO_ONYC_DECIMALS
@@ -52,14 +55,30 @@ export function mergeRow(
     ? parseAmountForDisplay(journal.amountStr, decimals)
     : null
 
+  let amountRaw: bigint
+  let amountIsApproximate: boolean
+  if (principalFromJournal !== null) {
+    amountRaw = principalFromJournal
+    amountIsApproximate = false
+  } else if (isDeposit && feeRaw !== null && burn.amountRaw > feeRaw) {
+    amountRaw = burn.amountRaw - feeRaw
+    amountIsApproximate = true
+  } else {
+    // Withdraw without journal: no fee deduction, gross IS principal.
+    // Deposit without journal AND without known fee: best we can do is
+    // gross; flag approximate so the UI prefixes `~`.
+    amountRaw = burn.amountRaw
+    amountIsApproximate = isDeposit
+  }
+
   return {
     signature: burn.signature,
     // The user's burn mint determines the flow direction. Burning
     // USDC.s on FOGO = depositing into the protocol. Burning ONyc
     // on FOGO = withdrawing.
     kind: isDeposit ? 'deposit' : 'withdraw',
-    amountRaw: principalFromJournal ?? burn.amountRaw,
-    amountIsGross: principalFromJournal === null,
+    amountRaw,
+    amountIsApproximate,
     mintB58: burn.mint.toBase58(),
     blockTime: burn.blockTime,
     status: op?.kind ?? 'unknown',

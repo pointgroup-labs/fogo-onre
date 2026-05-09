@@ -38,13 +38,14 @@ export interface TimelineRow {
   kind: FlowKind
   amountRaw: bigint
   /**
-   * True when `amountRaw` is the on-chain burn delta (gross =
-   * principal + bridge fee), not the user's typed principal. Cross-
-   * session/device deposits hit this path because no journal entry
-   * exists; the UI surfaces it with an "incl. fee" annotation so the
-   * user isn't misled.
+   * True when `amountRaw` is reconstructed (no journal entry exists for
+   * this signature on this device), not lifted directly from the user's
+   * typed input. Cross-session/device deposits hit this path; we
+   * back-derive principal as `gross - bridge_transfer_fee` when the
+   * on-chain fee is known. The UI prefixes `~` to signal the value is
+   * approximate.
    */
-  amountIsGross: boolean
+  amountIsApproximate: boolean
   mintB58: string
   blockTime: number
   status: OperationStatus['kind']
