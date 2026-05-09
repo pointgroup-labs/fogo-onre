@@ -87,7 +87,7 @@ function SkeletonList({ count }: { count: number }) {
   return (
     <div className="flex flex-col gap-2">
       {Array.from({ length: count }, (_, i) => (
-        <Skeleton key={i} className="h-[68px] rounded-lg" />
+        <Skeleton key={i} className="h-[52px] rounded-xl" />
       ))}
     </div>
   )
@@ -108,12 +108,12 @@ function BridgeRow({ row, nowMs }: { row: TimelineRow, nowMs: number }) {
   const DirectionIcon = isDeposit ? ArrowUpRight : ArrowDownLeft
 
   return (
-    <Card>
-      <CardContent className="flex items-center gap-3 p-3">
-        <span aria-hidden className="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
-          <DirectionIcon className="size-4" />
+    <Card className="py-0">
+      <CardContent className="flex items-center gap-3 px-3 py-2.5">
+        <span aria-hidden className="flex size-7 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
+          <DirectionIcon className="size-3.5" />
         </span>
-        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <div className="flex min-w-0 flex-1 flex-col leading-tight">
           <div className="flex items-center justify-between gap-2">
             <span className="truncate text-sm">
               <span className="text-muted-foreground">{label}</span>
