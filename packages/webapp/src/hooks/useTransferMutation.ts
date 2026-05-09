@@ -119,10 +119,18 @@ export function useTransferMutation(options: UseTransferMutationOptions = {}) {
       if (built.addressLookupTable) {
         sendOptions.addressLookupTable = built.addressLookupTable.toBase58()
       }
-      if (args.kind === 'deposit') {
-        sendOptions.paymasterDomain = FOGO_BRIDGE_PAYMASTER_DOMAIN
-        sendOptions.variation = FOGO_BRIDGE_VARIATION
-      }
+      // Route both deposit and withdraw through the same paymaster
+      // variation. Deposit uses `intent_transfer.bridge_ntt_tokens`,
+      // which the variation was designed for; withdraw uses raw NTT
+      // `transfer_burn` against the ONyc manager. Whether the variation
+      // accepts the raw shape is an empirical question — see
+      // `docs/superpowers/specs` discussion. Without this, withdraw hits
+      // the default-origin paymaster rule, which rejects the ephemeral
+      // `outboxItem` extra signer with a 400 "Missing or invalid
+      // signature" because it either rewrites the blockhash (breaking
+      // the pre-attached sig) or doesn't allowlist non-session signers.
+      sendOptions.paymasterDomain = FOGO_BRIDGE_PAYMASTER_DOMAIN
+      sendOptions.variation = FOGO_BRIDGE_VARIATION
 
       const result = await sessionState.sendTransaction(built.ixs, sendOptions)
       if (result.type === TransactionResultType.Failed) {
