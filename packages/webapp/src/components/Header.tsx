@@ -9,14 +9,12 @@ const SettingsSheet = dynamic(() => import('./SettingsSheet'), { ssr: false })
 
 export default function Header() {
   return (
-    <header className="border-b">
-      <div className="mx-auto flex max-w-screen-md items-center justify-between px-4 py-3">
-        <div className="font-semibold tracking-tight">{APP_NAME}</div>
-        <div className="flex items-center gap-1">
-          <ThemeToggle />
-          <SettingsSheet />
-          <WalletButton />
-        </div>
+    <header className="flex items-center justify-between gap-3 border-b border-border px-4 py-4 sm:px-6">
+      <span className="overflow-hidden text-lg font-semibold tracking-tight">{APP_NAME}</span>
+      <div className="flex items-center gap-2">
+        <ThemeToggle />
+        <SettingsSheet />
+        <WalletButton />
       </div>
     </header>
   )

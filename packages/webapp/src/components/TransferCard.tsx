@@ -7,8 +7,8 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { Loader2 } from 'lucide-react'
 import { useEffect, useMemo } from 'react'
 import { useForm } from 'react-hook-form'
+import SymbolPill from '@/components/SymbolPill'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
@@ -221,12 +221,9 @@ export default function TransferCard({ kind }: TransferCardProps) {
                         disabled={submitting || !sessionEstablished}
                         {...field}
                       />
-                      <Badge
-                        variant="secondary"
-                        className="absolute right-2 top-1/2 -translate-y-1/2"
-                      >
-                        {ui.srcSymbol}
-                      </Badge>
+                      <div className="absolute right-2 top-1/2 -translate-y-1/2">
+                        <SymbolPill symbol={ui.srcSymbol} />
+                      </div>
                     </div>
                   </FormControl>
                   <FormMessage />
@@ -329,7 +326,7 @@ function Receive({ kind, parsed, destSymbol, destDecimals, protocol }: ReceivePr
           <span className={`flex-1 text-sm ${haveQuote ? '' : 'text-muted-foreground'}`}>
             {display}
           </span>
-          <Badge variant="secondary">{destSymbol}</Badge>
+          <SymbolPill symbol={destSymbol} />
         </div>
       </div>
       {protocol.priceIsPreview && haveQuote && (
