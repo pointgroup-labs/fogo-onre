@@ -29,6 +29,7 @@ import {
   FOGO_ONYC_NTT_MANAGER_ID,
 } from '@/constants'
 import { findFeeConfigPda, readBridgeTransferFee } from '@/lib/bridge/feeConfig'
+import { buildFogoReleaseOnycOutboundIx } from '@/lib/bridge/releaseFogoOutbound'
 import { addFlow, pendingWithdrawExists } from '@/lib/flow-status/store'
 import { useSettings } from '@/store/settings'
 import { getFogoConnection } from '@/utils/connections'
@@ -365,8 +366,20 @@ function buildWithdrawIxs(args: {
     amount,
     recipientOnSolana,
   })
+  // NTT v1 splits outbound into stage + publish: `transfer_burn` only
+  // creates the OutboxItem PDA, it does NOT call wormhole_core
+  // post_message. Without an explicit `release_wormhole_outbound`
+  // here, the burn lands but no VAA ever appears — the user's funds
+  // get stuck in custody on FOGO and the Solana side has nothing to
+  // redeem. Deposit hides this split inside
+  // `intent_transfer.bridge_ntt_tokens`; withdraw must do it manually
+  // until `FeeConfig(ONyc)` is registered with intent_transfer.
+  const releaseIx = buildFogoReleaseOnycOutboundIx({
+    payer: sessionState.walletPublicKey,
+    outboxItem: outboxItemKp.publicKey,
+  })
   return {
-    ixs: [approveIx, transferBurnIx],
+    ixs: [approveIx, transferBurnIx, releaseIx],
     extraSigners: [outboxItemKp],
     addressLookupTable: undefined as PublicKey | undefined,
   }

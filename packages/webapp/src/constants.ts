@@ -81,6 +81,13 @@ export const FOGO_USDC_S_NTT_MANAGER_ID = new PublicKey('nttu74CdAmsErx5daJVCQNo
 // ONyc: same program ID deployed on both Solana (locking) and FOGO (burning).
 export const FOGO_ONYC_NTT_MANAGER_ID = new PublicKey('nttpna5vXW7BN2Aa4AfTbkCncJWTEoBsnWvjS87Xgsd')
 
+// FOGO Wormhole Core program ID (mainnet). Mirrors the cli's
+// `FOGO_WORMHOLE_CORE_MAINNET` constant — pinned here so the webapp can
+// build `release_wormhole_outbound` against it without pulling in the
+// cli/cranker. Source: `@wormhole-foundation/sdk-base` core contracts
+// table (chain="Fogo", network="Mainnet").
+export const FOGO_WORMHOLE_CORE_PROGRAM_ID = new PublicKey('worm2mrQkG1B1KTz37erMfWN8anHkSK24nzca7UD8BB')
+
 // Custom LUT deployed via `scripts/deploy-fogo-deposit-lut.mjs`. Strict
 // superset of the Sessions-SDK bridging LUT (`7hmMz3…`) plus the 7
 // globals (ComputeBudget, Ed25519, Xfry4dW…, So11…112, and 3
