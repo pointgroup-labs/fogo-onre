@@ -194,7 +194,7 @@ export default function TransferCard({ kind }: TransferCardProps) {
     <Card>
       <CardContent className="pt-1">
         <Form {...form}>
-          <form onSubmit={form.handleSubmit(onSubmit)} className="flex flex-col gap-3">
+          <form onSubmit={form.handleSubmit(onSubmit)} className="flex flex-col gap-5">
             <FormField
               control={form.control}
               name="amount"
@@ -235,9 +235,13 @@ export default function TransferCard({ kind }: TransferCardProps) {
               protocol={protocol}
             />
 
-            {kind === 'deposit' && <BridgeFeeRow fee={bridgeFee} />}
+            {kind === 'deposit' && (
+              <div className="-mt-3">
+                <BridgeFeeRow fee={bridgeFee} />
+              </div>
+            )}
 
-            <Button type="submit" size="lg" className="mt-1 h-12 text-base" disabled={submitDisabled}>
+            <Button type="submit" size="lg" className="-mt-2 h-12 text-base" disabled={submitDisabled}>
               {submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               {buttonLabel}
             </Button>
