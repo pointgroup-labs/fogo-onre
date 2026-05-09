@@ -142,15 +142,25 @@ export default function TransferCard({ kind }: TransferCardProps) {
     if (!sessionEstablished) {
       return
     }
-    submit.mutate({
-      kind,
-      amountStr: values.amount,
-      decimals: ui.srcDecimals,
-      mintB58: ui.srcMintB58,
-      destOwnerB58: sessionState.walletPublicKey.toBase58(),
-      destMintB58: ui.destMintB58,
-    })
-    form.reset({ amount: '' })
+    submit.mutate(
+      {
+        kind,
+        amountStr: values.amount,
+        decimals: ui.srcDecimals,
+        mintB58: ui.srcMintB58,
+        destOwnerB58: sessionState.walletPublicKey.toBase58(),
+        destMintB58: ui.destMintB58,
+      },
+      {
+        // Only clear the field once the bridge has actually been
+        // submitted on-chain. Resetting eagerly inside the click
+        // handler discards the user's input on wallet rejection,
+        // network error, or any pre-flight validation failure.
+        onSuccess: () => {
+          form.reset({ amount: '' })
+        },
+      },
+    )
   }
 
   function onMax() {
