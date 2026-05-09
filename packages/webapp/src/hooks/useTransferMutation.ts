@@ -10,17 +10,21 @@ import {
   buildFogoNttWithdrawIx,
   buildIntentVerifierIx,
   findAuthorityPda,
+  findSessionAuthorityPda,
   findUserInboxAuthorityPda,
+  nttTransferArgsHash,
   RELAYER_PROGRAM_ID,
+  SOLANA_WORMHOLE_CHAIN_ID,
 } from '@fogo-onre/sdk'
 import { isEstablished, TransactionResultType, useSession } from '@fogo/sessions-sdk-react'
-import { getAssociatedTokenAddressSync } from '@solana/spl-token'
+import { createApproveCheckedInstruction, getAssociatedTokenAddressSync } from '@solana/spl-token'
 import { ComputeBudgetProgram, Keypair, PublicKey, TransactionInstruction, TransactionMessage, VersionedTransaction } from '@solana/web3.js'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
   FOGO_BRIDGE_PAYMASTER_DOMAIN,
   FOGO_BRIDGE_VARIATION,
+  FOGO_ONYC_DECIMALS,
   FOGO_ONYC_MINT,
   FOGO_ONYC_NTT_MANAGER_ID,
 } from '@/constants'
@@ -321,7 +325,39 @@ function buildWithdrawIxs(args: {
   const { sessionState, amount } = args
   const [recipientOnSolana] = findAuthorityPda(RELAYER_PROGRAM_ID)
   const outboxItemKp = Keypair.generate()
-  const ix = buildFogoNttWithdrawIx({
+  // NTT v1 `transfer_burn` invokes SPL `TransferChecked` from the
+  // user's ATA into the manager's custody, with a `session_authority`
+  // PDA as the spend authority. That PDA isn't the ATA owner, so the
+  // ATA owner (the user wallet) must first approve the PDA as a
+  // delegate for `amount`. Without this approve, the Token program
+  // returns `OwnerMismatch` (custom error 0x4) at the TransferChecked
+  // CPI. Deposit doesn't need this step because `bridge_ntt_tokens`
+  // runs the approve internally, gated on the intent verifier's
+  // signed-message proof.
+  const transferArgsHash = nttTransferArgsHash({
+    amount,
+    recipientChain: SOLANA_WORMHOLE_CHAIN_ID,
+    recipientAddress: recipientOnSolana.toBuffer(),
+    shouldQueue: false,
+  })
+  const [sessionAuthorityPda] = findSessionAuthorityPda(
+    sessionState.walletPublicKey,
+    transferArgsHash,
+    FOGO_ONYC_NTT_MANAGER_ID,
+  )
+  const userAta = getAssociatedTokenAddressSync(
+    FOGO_ONYC_MINT,
+    sessionState.walletPublicKey,
+  )
+  const approveIx = createApproveCheckedInstruction(
+    userAta,
+    FOGO_ONYC_MINT,
+    sessionAuthorityPda,
+    sessionState.walletPublicKey,
+    amount,
+    FOGO_ONYC_DECIMALS,
+  )
+  const transferBurnIx = buildFogoNttWithdrawIx({
     payer: sessionState.walletPublicKey,
     nttManagerProgramId: FOGO_ONYC_NTT_MANAGER_ID,
     mint: FOGO_ONYC_MINT,
@@ -330,7 +366,7 @@ function buildWithdrawIxs(args: {
     recipientOnSolana,
   })
   return {
-    ixs: [ix],
+    ixs: [approveIx, transferBurnIx],
     extraSigners: [outboxItemKp],
     addressLookupTable: undefined as PublicKey | undefined,
   }
