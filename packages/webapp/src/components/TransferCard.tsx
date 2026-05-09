@@ -1,5 +1,6 @@
 'use client'
 
+import type { ReactNode, Ref } from 'react'
 import type { FlowKind } from '@/lib/flow-status/types'
 import type { TransferFormValues } from '@/lib/forms/transfer-schema'
 import { isEstablished, useSession } from '@fogo/sessions-sdk-react'
@@ -11,8 +12,7 @@ import SymbolPill from '@/components/SymbolPill'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
-import { Input } from '@/components/ui/input'
+import { Form, FormField, FormItem, FormMessage } from '@/components/ui/form'
 import {
   FOGO_ONYC_DECIMALS,
   FOGO_ONYC_DEPLOYMENT_READY,
@@ -194,38 +194,27 @@ export default function TransferCard({ kind }: TransferCardProps) {
       </CardHeader>
       <CardContent>
         <Form {...form}>
-          <form onSubmit={form.handleSubmit(onSubmit)} className="flex flex-col gap-4">
+          <form onSubmit={form.handleSubmit(onSubmit)} className="flex flex-col gap-3">
             <FormField
               control={form.control}
               name="amount"
               render={({ field }) => (
-                <FormItem>
-                  <div className="flex items-center justify-between">
-                    <FormLabel>You pay</FormLabel>
-                    <button
-                      type="button"
-                      onClick={onMax}
-                      disabled={!sessionEstablished || maxRaw === 0n}
-                      className="text-xs text-muted-foreground hover:text-foreground disabled:opacity-50"
-                    >
-                      Max:
-                      {' '}
-                      {maxAmountStr}
-                    </button>
-                  </div>
-                  <FormControl>
-                    <div className="relative">
-                      <Input
-                        inputMode="decimal"
-                        placeholder="0.0"
-                        disabled={submitting || !sessionEstablished}
-                        {...field}
+                <FormItem className="space-y-1.5">
+                  <AmountPanel
+                    label="You pay"
+                    symbol={ui.srcSymbol}
+                    placeholder="0.0"
+                    disabled={submitting || !sessionEstablished}
+                    field={field}
+                    balanceChip={(
+                      <BalanceChip
+                        sessionEstablished={sessionEstablished}
+                        maxAmountStr={maxAmountStr}
+                        maxRaw={maxRaw}
+                        onMax={onMax}
                       />
-                      <div className="absolute right-2 top-1/2 -translate-y-1/2">
-                        <SymbolPill symbol={ui.srcSymbol} />
-                      </div>
-                    </div>
-                  </FormControl>
+                    )}
+                  />
                   <FormMessage />
                 </FormItem>
               )}
@@ -274,9 +263,9 @@ function BridgeFeeRow({ fee }: { fee: ReturnType<typeof useBridgeFee> }) {
     ? '—'
     : `${formatAmount(fee.feeRaw, fee.feeDecimals)} ${fee.feeSymbol}`
   return (
-    <div className="flex items-center justify-between rounded-md border px-3 py-2 text-xs">
+    <div className="flex items-center justify-between px-1 text-xs">
       <span className="text-muted-foreground">Bridge fee</span>
-      <span className={fee.error ? 'text-amber-500/80' : ''}>
+      <span className={fee.error ? 'text-amber-500/80' : 'text-foreground/80 tabular-nums'}>
         {fee.error ? 'unavailable' : display}
       </span>
     </div>
@@ -318,24 +307,104 @@ function Receive({ kind, parsed, destSymbol, destDecimals, protocol }: ReceivePr
 
   return (
     <div className="flex flex-col gap-1.5">
-      <div className="flex flex-col gap-1.5">
-        <div className="flex items-center justify-between">
-          <span className="text-sm font-medium">You receive</span>
+      <div className="rounded-xl border border-border bg-card/60 px-4 py-3">
+        <div className="flex items-center justify-between text-xs text-muted-foreground">
+          <span>You receive</span>
         </div>
-        <div className="relative flex items-center rounded-md border bg-muted/30 px-3 py-2">
-          <span className={`flex-1 text-sm ${haveQuote ? '' : 'text-muted-foreground'}`}>
+        <div className="mt-1 flex items-center gap-3">
+          <span
+            className={`min-w-0 flex-1 truncate text-2xl font-medium tracking-tight ${
+              haveQuote
+                ? protocol.priceIsPreview ? 'text-amber-300' : 'text-foreground'
+                : 'text-muted-foreground/60'
+            }`}
+          >
             {display}
           </span>
           <SymbolPill symbol={destSymbol} />
         </div>
       </div>
       {protocol.priceIsPreview && haveQuote && (
-        <p className="text-[10px] text-amber-500/80">
+        <p className="px-1 text-[10px] text-amber-500/80">
           Quote uses a preview ONyc price (
           {protocol.priceFetchError ? `live read failed: ${protocol.priceFetchError}` : 'live price loading…'}
           ).
         </p>
       )}
     </div>
+  )
+}
+
+interface AmountPanelProps {
+  label: string
+  symbol: string
+  placeholder: string
+  disabled: boolean
+  field: {
+    value: string
+    onChange: (...args: unknown[]) => void
+    onBlur: (...args: unknown[]) => void
+    name: string
+    ref: Ref<HTMLInputElement>
+  }
+  balanceChip: ReactNode
+}
+
+function AmountPanel({ label, symbol, placeholder, disabled, field, balanceChip }: AmountPanelProps) {
+  return (
+    <div className="rounded-xl border border-border bg-card/60 px-4 py-3 transition-colors focus-within:border-foreground/40">
+      <div className="flex items-center justify-between text-xs text-muted-foreground">
+        <span>{label}</span>
+        {balanceChip}
+      </div>
+      <div className="mt-1 flex items-center gap-3">
+        <input
+          inputMode="decimal"
+          autoComplete="off"
+          spellCheck={false}
+          placeholder={placeholder}
+          disabled={disabled}
+          className="min-w-0 flex-1 bg-transparent text-2xl font-medium tracking-tight outline-none placeholder:text-muted-foreground/40 disabled:opacity-50"
+          {...field}
+        />
+        <SymbolPill symbol={symbol} />
+      </div>
+    </div>
+  )
+}
+
+interface BalanceChipProps {
+  sessionEstablished: boolean
+  maxAmountStr: string
+  maxRaw: bigint
+  onMax: () => void
+}
+
+function BalanceChip({ sessionEstablished, maxAmountStr, maxRaw, onMax }: BalanceChipProps) {
+  if (!sessionEstablished) {
+    return <span className="opacity-60">Connect wallet</span>
+  }
+  const disabled = maxRaw === 0n
+  return (
+    <button
+      type="button"
+      onClick={onMax}
+      disabled={disabled}
+      className="inline-flex items-center gap-1.5 rounded-md border border-transparent px-1.5 py-0.5 transition-colors hover:border-border hover:text-foreground disabled:opacity-50 disabled:hover:border-transparent disabled:hover:text-muted-foreground"
+    >
+      <WalletIcon />
+      <span className="tabular-nums">{maxAmountStr}</span>
+      <span className="font-semibold uppercase tracking-wide text-[10px] text-foreground/70">Max</span>
+    </button>
+  )
+}
+
+function WalletIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M21 12V7a2 2 0 0 0-2-2H5a2 2 0 0 0 0 4h16v4" />
+      <path d="M21 12v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7" />
+      <circle cx="17" cy="14" r="1" />
+    </svg>
   )
 }
