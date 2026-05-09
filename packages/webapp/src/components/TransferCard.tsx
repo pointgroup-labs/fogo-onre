@@ -194,12 +194,12 @@ export default function TransferCard({ kind }: TransferCardProps) {
     <Card>
       <CardContent className="pt-1">
         <Form {...form}>
-          <form onSubmit={form.handleSubmit(onSubmit)} className="flex flex-col gap-2.5">
+          <form onSubmit={form.handleSubmit(onSubmit)} className="flex flex-col gap-3">
             <FormField
               control={form.control}
               name="amount"
               render={({ field, fieldState }) => (
-                <FormItem className="space-y-0">
+                <FormItem className="relative space-y-0">
                   <AmountPanel
                     label="You pay"
                     symbol={ui.srcSymbol}
@@ -392,7 +392,7 @@ function AmountPanel({ label, symbol, placeholder, disabled, invalid, field, bal
 
 function ErrorSlot({ message }: { message: string | undefined }) {
   return (
-    <div className="h-6 overflow-hidden px-1 pt-1.5" aria-live="polite">
+    <div className="pointer-events-none absolute left-0 top-full z-20 mt-0.5 max-w-[55%] overflow-hidden pl-1" aria-live="polite">
       <p
         role="alert"
         className={`flex items-center gap-1.5 text-xs font-medium text-destructive transition-all duration-200 ${
