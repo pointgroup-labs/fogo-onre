@@ -3,7 +3,8 @@
 import type { TimelineRow } from '@/lib/bridgeHistory/types'
 import { isEstablished, useSession } from '@fogo/sessions-sdk-react'
 import { useIsRestoring } from '@tanstack/react-query'
-import { useEffect, useState } from 'react'
+import { ArrowDownLeft, ArrowUpRight, Check, ExternalLink, Inbox, Loader2 } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -23,6 +24,10 @@ export default function BridgeHistory() {
   }, [])
   const restoring = useIsRestoring()
 
+  // 60s ticker drives relative-time labels in every row from a single
+  // source of truth — keeps row renders pure and avoids N timers.
+  const nowMs = useNowTicker(60_000)
+
   const session = useSession()
   const owner = isEstablished(session) ? session.walletPublicKey : null
   const { rows, isLoading, isError, hasNextPage, fetchNextPage, isFetchingNextPage } = useBridgeHistory(owner)
@@ -32,22 +37,11 @@ export default function BridgeHistory() {
   }
 
   if (mounted && restoring) {
-    return (
-      <div className="flex flex-col gap-2">
-        <Skeleton className="h-16" />
-        <Skeleton className="h-16" />
-      </div>
-    )
+    return <SkeletonList count={2} />
   }
 
   if (isLoading) {
-    return (
-      <div className="flex flex-col gap-2">
-        <Skeleton className="h-16" />
-        <Skeleton className="h-16" />
-        <Skeleton className="h-16" />
-      </div>
-    )
+    return <SkeletonList count={3} />
   }
 
   if (isError && rows.length === 0) {
@@ -61,17 +55,18 @@ export default function BridgeHistory() {
 
   if (rows.length === 0) {
     return (
-      <Alert>
-        <AlertTitle>No bridges yet</AlertTitle>
-        <AlertDescription>Your bridge history will appear here.</AlertDescription>
-      </Alert>
+      <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed py-8 text-center">
+        <Inbox aria-hidden className="size-6 text-muted-foreground" />
+        <p className="text-sm font-medium">No bridges yet</p>
+        <p className="text-xs text-muted-foreground">Your deposits and withdrawals will appear here.</p>
+      </div>
     )
   }
 
   return (
     <div className="flex flex-col gap-3">
       <ul aria-label="Bridge history" className="flex flex-col gap-2">
-        {rows.map(r => <li key={r.signature}><BridgeRow row={r} /></li>)}
+        {rows.map(r => <li key={r.signature}><BridgeRow row={r} nowMs={nowMs} /></li>)}
       </ul>
       {hasNextPage && (
         <Button
@@ -88,40 +83,73 @@ export default function BridgeHistory() {
   )
 }
 
-function BridgeRow({ row }: { row: TimelineRow }) {
-  const decimals = row.kind === 'deposit' ? USDC_DECIMALS : FOGO_ONYC_DECIMALS
-  const ticker = row.kind === 'deposit' ? 'USDC.s' : 'ONyc'
-  const directionIcon = row.kind === 'deposit' ? '↗' : '↘'
-  const label = row.kind === 'deposit' ? 'Deposit' : 'Withdraw'
+function SkeletonList({ count }: { count: number }) {
+  return (
+    <div className="flex flex-col gap-2">
+      {Array.from({ length: count }, (_, i) => (
+        <Skeleton key={i} className="h-[68px] rounded-lg" />
+      ))}
+    </div>
+  )
+}
+
+function BridgeRow({ row, nowMs }: { row: TimelineRow, nowMs: number }) {
+  const isDeposit = row.kind === 'deposit'
+  const decimals = isDeposit ? USDC_DECIMALS : FOGO_ONYC_DECIMALS
+  const ticker = isDeposit ? 'USDC.s' : 'ONyc'
+  const label = isDeposit ? 'Deposit' : 'Withdraw'
   const amount = formatAmount(row.amountRaw, decimals)
-  const time = new Date(row.blockTime * 1000).toLocaleString()
-  // `amountIsApproximate` means we have no journal entry on this device,
-  // so the displayed principal was reconstructed from the on-chain burn
-  // delta (and the bridge fee, when known). Prefix `~` to flag that the
-  // value is best-effort, not the user's typed input.
-  const amountDisplay = row.amountIsApproximate ? `~${amount}` : amount
+  const blockMs = row.blockTime * 1000
+  const relTime = formatRelativeTime(blockMs, nowMs)
+  const { absTime, isoTime } = useMemo(() => {
+    const d = new Date(blockMs)
+    return { absTime: d.toLocaleString(), isoTime: d.toISOString() }
+  }, [blockMs])
+  const DirectionIcon = isDeposit ? ArrowUpRight : ArrowDownLeft
 
   return (
-    <Card>
-      <CardContent className="flex flex-col gap-1 p-3">
-        <div className="flex items-center justify-between gap-3 text-sm">
-          <span className="font-medium">
-            <span aria-hidden className="mr-1 text-muted-foreground">{directionIcon}</span>
-            {label}
-            {' · '}
-            {amountDisplay}
-            {' '}
-            {ticker}
-          </span>
-          <StatusBadge row={row} />
+    <Card className="transition-colors hover:border-foreground/20">
+      <CardContent className="flex items-center gap-3 p-3">
+        <div
+          aria-hidden
+          className={`flex size-9 shrink-0 items-center justify-center rounded-full ${
+            isDeposit ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
+          }`}
+        >
+          <DirectionIcon className="size-4" />
         </div>
-        <div className="flex items-center justify-between text-xs text-muted-foreground">
-          <span>{time}</span>
-          <span className="flex items-center gap-2">
-            <a href={fogoTxUrl(row.signature)} target="_blank" rel="noreferrer noopener" className="hover:underline">
-              source ↗
+        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <div className="flex items-center justify-between gap-2">
+            <span className="truncate text-sm font-medium">
+              <span className="text-muted-foreground">{label}</span>
+              {' · '}
+              {row.amountIsApproximate
+                ? (
+                    <span title="Approximate — reconstructed from on-chain data, may differ slightly from your typed amount">
+                      ~
+                      {amount}
+                    </span>
+                  )
+                : amount}
+              {' '}
+              <span className="text-muted-foreground">{ticker}</span>
+            </span>
+            <StatusBadge row={row} />
+          </div>
+          <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+            <time dateTime={isoTime} title={absTime}>
+              {relTime}
+            </time>
+            <a
+              href={fogoTxUrl(row.signature)}
+              target="_blank"
+              rel="noreferrer noopener"
+              className="inline-flex items-center gap-1 hover:text-foreground hover:underline"
+            >
+              source
+              <ExternalLink aria-hidden className="size-3" />
             </a>
-          </span>
+          </div>
         </div>
       </CardContent>
     </Card>
@@ -131,15 +159,74 @@ function BridgeRow({ row }: { row: TimelineRow }) {
 function StatusBadge({ row }: { row: TimelineRow }) {
   // Precedence: phase > status. `unknown` renders no badge (graceful degrade).
   if (row.phase !== null) {
-    return <Badge variant="secondary" aria-label={`status: ${row.phase}`}>{row.phase}</Badge>
+    return (
+      <Badge variant="secondary" aria-label={`status: ${row.phase}`} className="gap-1">
+        <Loader2 aria-hidden className="size-3 animate-spin" />
+        {row.phase}
+      </Badge>
+    )
   }
   if (row.status === 'delivered') {
-    return <Badge variant="default" aria-label="status: delivered">Delivered</Badge>
+    return (
+      <Badge variant="default" aria-label="status: delivered" className="gap-1">
+        <Check aria-hidden className="size-3" />
+        Delivered
+      </Badge>
+    )
   }
   if (row.status === 'pending') {
-    return <Badge variant="secondary" aria-label="status: bridging">Bridging…</Badge>
+    return (
+      <Badge variant="secondary" aria-label="status: bridging" className="gap-1">
+        <Loader2 aria-hidden className="size-3 animate-spin" />
+        Bridging
+      </Badge>
+    )
   }
   return null
+}
+
+/**
+ * Re-renders subscribers every `intervalMs`. Cheaper than per-row
+ * timers; the component using this can pass `nowMs` to children so
+ * their renders stay pure.
+ */
+function useNowTicker(intervalMs: number): number {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const id = setInterval(() => {
+      setNow(Date.now())
+    }, intervalMs)
+    return () => {
+      clearInterval(id)
+    }
+  }, [intervalMs])
+  return now
+}
+
+/**
+ * Compact relative-time label. Falls back to "MMM D" past a week to
+ * avoid "37 days ago" looking sloppy. Caller threads `nowMs` so this
+ * stays pure.
+ */
+function formatRelativeTime(thenMs: number, nowMs: number): string {
+  const diff = Math.max(0, nowMs - thenMs)
+  const sec = Math.floor(diff / 1000)
+  if (sec < 45) {
+    return 'just now'
+  }
+  const min = Math.floor(sec / 60)
+  if (min < 60) {
+    return `${min}m ago`
+  }
+  const hr = Math.floor(min / 60)
+  if (hr < 24) {
+    return `${hr}h ago`
+  }
+  const day = Math.floor(hr / 24)
+  if (day < 7) {
+    return `${day}d ago`
+  }
+  return new Date(thenMs).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
 }
 
 function formatAmount(raw: bigint, decimals: number): string {
