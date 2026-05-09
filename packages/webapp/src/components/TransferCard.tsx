@@ -5,7 +5,7 @@ import type { FlowKind } from '@/lib/flow-status/types'
 import type { TransferFormValues } from '@/lib/forms/transfer-schema'
 import { isEstablished, useSession } from '@fogo/sessions-sdk-react'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { Loader2 } from 'lucide-react'
+import { ArrowDown, Loader2 } from 'lucide-react'
 import { useEffect, useMemo } from 'react'
 import { useForm } from 'react-hook-form'
 import SymbolPill from '@/components/SymbolPill'
@@ -95,6 +95,9 @@ export default function TransferCard({ kind }: TransferCardProps) {
   // from the same ATA, so the schema's max must net out the fee. For
   // withdraw the fee is deducted Solana-side, so 0 there.
   const sourceBalance = kind === 'deposit' ? balances.usdc : balances.fogoOnyc
+  const destBalance = kind === 'deposit' ? balances.fogoOnyc : balances.usdc
+  const balanceLoading = sessionEstablished && sourceBalance === null
+  const destBalanceLoading = sessionEstablished && destBalance === null
   const feeForGate = kind === 'deposit' ? (bridgeFee.feeRaw ?? 0n) : 0n
   const maxRaw = sourceBalance !== null
     ? (sourceBalance > feeForGate ? sourceBalance - feeForGate : 0n)
@@ -207,6 +210,7 @@ export default function TransferCard({ kind }: TransferCardProps) {
                     balanceChip={(
                       <BalanceChip
                         sessionEstablished={sessionEstablished}
+                        loading={balanceLoading}
                         maxAmountStr={maxAmountStr}
                         maxRaw={maxRaw}
                         onMax={onMax}
@@ -225,6 +229,9 @@ export default function TransferCard({ kind }: TransferCardProps) {
               parsed={parsed.value}
               destSymbol={ui.destSymbol}
               destDecimals={ui.destDecimals}
+              destBalance={destBalance}
+              destLoading={destBalanceLoading}
+              sessionEstablished={sessionEstablished}
               protocol={protocol}
             />
 
@@ -243,12 +250,9 @@ export default function TransferCard({ kind }: TransferCardProps) {
 
 function DownConnector() {
   return (
-    <div className="pointer-events-none relative -my-2.5 flex h-0 items-center justify-center">
+    <div className="pointer-events-none relative -my-3 flex h-0 items-center justify-center">
       <div className="flex h-9 w-9 items-center justify-center rounded-full border border-border bg-background text-muted-foreground shadow-sm">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <path d="M12 5v14" />
-          <path d="m6 13 6 6 6-6" />
-        </svg>
+        <ArrowDown className="h-4 w-4" strokeWidth={2} aria-hidden="true" />
       </div>
     </div>
   )
@@ -273,10 +277,13 @@ interface ReceiveProps {
   parsed: bigint | null
   destSymbol: string
   destDecimals: number
+  destBalance: bigint | null
+  destLoading: boolean
+  sessionEstablished: boolean
   protocol: ReturnType<typeof useProtocolState>
 }
 
-function Receive({ kind, parsed, destSymbol, destDecimals, protocol }: ReceiveProps) {
+function Receive({ kind, parsed, destSymbol, destDecimals, destBalance, destLoading, sessionEstablished, protocol }: ReceiveProps) {
   const haveAmount = parsed !== null && parsed > 0n
   const depositQuote = haveAmount && kind === 'deposit'
     ? safeQuoteDeposit({
@@ -300,16 +307,22 @@ function Receive({ kind, parsed, destSymbol, destDecimals, protocol }: ReceivePr
     : withdrawQuote?.outputUsdc ?? null
   const haveQuote = outputAmount !== null
   const display = haveQuote ? formatAmount(outputAmount!, destDecimals) : '—'
+  const destBalanceStr = destBalance !== null ? formatAmount(destBalance, destDecimals) : '0'
 
   return (
     <div className="flex flex-col gap-1.5">
       <div className="rounded-xl border border-border bg-card/60 px-4 py-3.5">
         <div className="flex items-center justify-between text-xs text-muted-foreground">
           <span>You receive</span>
+          <DestBalanceReadout
+            sessionEstablished={sessionEstablished}
+            loading={destLoading}
+            amountStr={destBalanceStr}
+          />
         </div>
-        <div className="mt-1 flex items-center gap-3">
+        <div className="mt-2 flex items-center gap-3">
           <span
-            className={`min-w-0 flex-1 truncate text-2xl font-medium tracking-tight ${
+            className={`min-w-0 flex-1 truncate text-2xl font-medium tracking-tight tabular-nums ${
               haveQuote
                 ? protocol.priceIsPreview ? 'text-amber-300' : 'text-foreground'
                 : 'text-muted-foreground/60'
@@ -360,7 +373,7 @@ function AmountPanel({ label, symbol, placeholder, disabled, invalid, field, bal
         <span>{label}</span>
         {balanceChip}
       </div>
-      <div className="mt-1 flex items-center gap-3">
+      <div className="mt-2 flex items-center gap-3">
         <input
           inputMode="decimal"
           autoComplete="off"
@@ -368,7 +381,7 @@ function AmountPanel({ label, symbol, placeholder, disabled, invalid, field, bal
           placeholder={placeholder}
           disabled={disabled}
           aria-invalid={invalid || undefined}
-          className="min-w-0 flex-1 bg-transparent text-2xl font-medium tracking-tight outline-none placeholder:text-muted-foreground/40 disabled:opacity-50"
+          className="min-w-0 flex-1 bg-transparent text-2xl font-medium tracking-tight tabular-nums outline-none placeholder:text-muted-foreground/40 disabled:opacity-50"
           {...field}
         />
         <SymbolPill symbol={symbol} />
@@ -379,11 +392,11 @@ function AmountPanel({ label, symbol, placeholder, disabled, invalid, field, bal
 
 function ErrorSlot({ message }: { message: string | undefined }) {
   return (
-    <div className="h-5 px-1 pt-1" aria-live="polite">
+    <div className="h-6 overflow-hidden px-1 pt-1.5" aria-live="polite">
       <p
         role="alert"
-        className={`flex items-center gap-1.5 text-xs font-medium text-destructive transition-opacity duration-150 ${
-          message ? 'opacity-100' : 'opacity-0'
+        className={`flex items-center gap-1.5 text-xs font-medium text-destructive transition-all duration-200 ${
+          message ? 'translate-y-0 opacity-100' : '-translate-y-1 opacity-0'
         }`}
       >
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -399,26 +412,31 @@ function ErrorSlot({ message }: { message: string | undefined }) {
 
 interface BalanceChipProps {
   sessionEstablished: boolean
+  loading: boolean
   maxAmountStr: string
   maxRaw: bigint
   onMax: () => void
 }
 
-function BalanceChip({ sessionEstablished, maxAmountStr, maxRaw, onMax }: BalanceChipProps) {
-  if (!sessionEstablished) {
-    return <span className="opacity-60">Connect wallet</span>
-  }
-  const disabled = maxRaw === 0n
+function BalanceChip({ sessionEstablished, loading, maxAmountStr, maxRaw, onMax }: BalanceChipProps) {
+  const interactive = sessionEstablished && !loading && maxRaw > 0n
+  const showMaxBadge = sessionEstablished && !loading && maxRaw > 0n
+  const numberSlot = !sessionEstablished
+    ? '—'
+    : loading
+      ? <span className="inline-block h-3 w-12 animate-pulse rounded bg-muted-foreground/20 align-middle" />
+      : maxAmountStr
   return (
     <button
       type="button"
       onClick={onMax}
-      disabled={disabled}
-      className="inline-flex items-center gap-1.5 rounded-md border border-transparent px-1.5 py-0.5 transition-colors hover:border-border hover:text-foreground disabled:opacity-50 disabled:hover:border-transparent disabled:hover:text-muted-foreground"
+      disabled={!interactive}
+      aria-label={interactive ? `Set max ${maxAmountStr}` : undefined}
+      className="inline-flex items-center gap-1.5 rounded-md border border-transparent px-1.5 py-0.5 transition-colors hover:border-border hover:text-foreground disabled:cursor-default disabled:opacity-70 disabled:hover:border-transparent disabled:hover:text-muted-foreground"
     >
       <WalletIcon />
-      <span className="tabular-nums">{maxAmountStr}</span>
-      <span className="font-semibold uppercase tracking-wide text-[10px] text-foreground/70">Max</span>
+      <span className="min-w-[3ch] text-right tabular-nums">{numberSlot}</span>
+      <span className={`font-semibold uppercase tracking-wide text-[10px] text-foreground/70 transition-opacity ${showMaxBadge ? 'opacity-100' : 'opacity-0'}`}>Max</span>
     </button>
   )
 }
@@ -430,5 +448,26 @@ function WalletIcon() {
       <path d="M21 12v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7" />
       <circle cx="17" cy="14" r="1" />
     </svg>
+  )
+}
+
+interface DestBalanceReadoutProps {
+  sessionEstablished: boolean
+  loading: boolean
+  amountStr: string
+}
+
+function DestBalanceReadout({ sessionEstablished, loading, amountStr }: DestBalanceReadoutProps) {
+  return (
+    <span className="inline-flex items-center gap-1.5 px-1.5 py-0.5">
+      <WalletIcon />
+      <span className="min-w-[3ch] text-right tabular-nums">
+        {!sessionEstablished
+          ? '—'
+          : loading
+            ? <span className="inline-block h-3 w-12 animate-pulse rounded bg-muted-foreground/20 align-middle" />
+            : amountStr}
+      </span>
+    </span>
   )
 }

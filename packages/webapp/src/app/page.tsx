@@ -21,9 +21,9 @@ export default function Page() {
           </div>
           <ErrorBoundary label="protocol stats"><ProtocolStats /></ErrorBoundary>
           <Tabs defaultValue="deposit" className="gap-4">
-            <TabsList className="grid h-11 w-full grid-cols-2 p-1">
-              <TabsTrigger value="deposit" className="h-full text-sm">Deposit</TabsTrigger>
-              <TabsTrigger value="withdraw" className="h-full text-sm">Withdraw</TabsTrigger>
+            <TabsList className="grid w-full grid-cols-2 p-1.5 group-data-horizontal/tabs:h-12">
+              <TabsTrigger value="deposit" className="h-full text-sm font-semibold">Deposit</TabsTrigger>
+              <TabsTrigger value="withdraw" className="h-full text-sm font-semibold">Withdraw</TabsTrigger>
             </TabsList>
             <TabsContent value="deposit">
               <ErrorBoundary label="deposit"><TransferCard kind="deposit" /></ErrorBoundary>
