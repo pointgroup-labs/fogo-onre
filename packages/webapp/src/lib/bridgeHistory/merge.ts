@@ -1,7 +1,7 @@
 import type { QueryClient } from '@tanstack/react-query'
 import type { BurnRow, OperationStatus, TimelineRow } from './types'
 import type { PersistedFlowStatus } from '@/lib/flow-status/types'
-import { FOGO_ONYC_DECIMALS, USDC_DECIMALS, USDC_S_MINT } from '@/constants'
+import { FOGO_ONYC_DECIMALS, FOGO_ONYC_MINT, USDC_DECIMALS, USDC_S_MINT } from '@/constants'
 import { readFlow, readIndex } from '@/lib/flow-status/store'
 
 /**
@@ -84,6 +84,34 @@ export function mergeRow(
     status: op?.kind ?? 'unknown',
     destinationSignature: op !== null && op.kind === 'delivered' ? op.destinationTxHash : null,
     phase: journal !== null ? humanPhaseFromStatus(journal) : null,
+  }
+}
+
+/**
+ * Synthesize an optimistic TimelineRow from a journal entry whose
+ * burn tx hasn't surfaced via FOGO `getSignaturesForAddress` yet.
+ * RPC indexing typically lags submission by several seconds, and the
+ * burn-page query has a 30s staleTime, so without this the user sees
+ * an empty history for ~30s after clicking Deposit. The journal has
+ * everything we need to render a "Submitting" / "Bridging" row in
+ * the meantime; once the real burn appears, dedup by signature drops
+ * this synthetic copy in favor of the canonical merged row.
+ */
+export function rowFromJournal(j: PersistedFlowStatus): TimelineRow {
+  const isDeposit = j.kind === 'deposit'
+  const decimals = isDeposit ? USDC_DECIMALS : FOGO_ONYC_DECIMALS
+  const principal = parseAmountForDisplay(j.amountStr, decimals) ?? 0n
+  const mintB58 = isDeposit ? USDC_S_MINT.toBase58() : FOGO_ONYC_MINT.toBase58()
+  return {
+    signature: j.signature,
+    kind: j.kind,
+    amountRaw: principal,
+    amountIsApproximate: false,
+    mintB58,
+    blockTime: Math.floor(j.startedAt / 1000),
+    status: 'unknown',
+    destinationSignature: null,
+    phase: humanPhaseFromStatus(j),
   }
 }
 

@@ -2,9 +2,10 @@
 
 import type { PublicKey } from '@solana/web3.js'
 import type { BurnRow, OperationStatus, TimelineRow } from '@/lib/bridgeHistory/types'
-import { useInfiniteQuery, useQueries, useQueryClient } from '@tanstack/react-query'
+import type { PersistedFlowStatus } from '@/lib/flow-status/types'
+import { useInfiniteQuery, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useMemo } from 'react'
-import { findJournalEntryBySignature, mergeRow } from '@/lib/bridgeHistory/merge'
+import { findJournalEntryBySignature, mergeRow, rowFromJournal } from '@/lib/bridgeHistory/merge'
 import { fetchBurnPage, getCanonicalAtas } from '@/lib/bridgeHistory/rpc'
 import { fetchOperationStatus } from '@/lib/bridgeHistory/wormholescan'
 import { useSettings } from '@/store/settings'
@@ -107,13 +108,59 @@ export function useBridgeHistory(owner: PublicKey | null): UseBridgeHistoryResul
     })),
   })
 
+  // Subscribe to the journal index. The mutation pipeline writes to
+  // `['pending-flow-ids']` via `setQueryData` whenever a new flow is
+  // added or removed; mirroring it through `useQuery` lets this hook
+  // re-render the moment a deposit/withdraw is submitted instead of
+  // waiting on the 30s burn-page staleTime.
+  const indexQuery = useQuery<string[]>({
+    queryKey: ['pending-flow-ids'],
+    queryFn: () => [],
+    enabled: false,
+    staleTime: Infinity,
+    gcTime: Infinity,
+    initialData: [],
+  })
+  const journalIds = indexQuery.data ?? []
+
+  // Per-flow subscription so phase transitions ('Submitting' →
+  // 'Bridging' → terminal) re-render `rows` even before the burn tx
+  // surfaces on RPC. Each entry's queryKey matches the one
+  // `LiveJournalTracker` writes via `patchFlow`.
+  const flowQueries = useQueries({
+    queries: journalIds.map(id => ({
+      queryKey: ['flow-status', id],
+      queryFn: () => undefined as PersistedFlowStatus | undefined,
+      enabled: false,
+      staleTime: Infinity,
+      gcTime: Infinity,
+    })),
+  })
+
   const rows: TimelineRow[] = useMemo(() => {
-    return allBurns.map((burn, i) => {
+    const burnRows = allBurns.map((burn, i) => {
       const op = opQueries[i]?.data ?? null
       const journal = findJournalEntryBySignature(qc, burn.signature)
       return mergeRow(burn, op, journal, feeRaw)
     })
-  }, [allBurns, opQueries, qc, feeRaw])
+    // Synthesize optimistic rows for journal entries whose burn tx
+    // hasn't been indexed by FOGO RPC yet. Filter to entries owned by
+    // the current viewer and skip any that already have a canonical
+    // row from the burn stream — the real row wins once it appears.
+    const burnSigs = new Set(burnRows.map(r => r.signature))
+    const synthetic: TimelineRow[] = []
+    for (const fq of flowQueries) {
+      const j = fq.data
+      if (j === undefined || burnSigs.has(j.signature)) {
+        continue
+      }
+      if (ownerB58 !== null && j.ownerB58 !== ownerB58) {
+        continue
+      }
+      synthetic.push(rowFromJournal(j))
+    }
+    return [...synthetic, ...burnRows].sort((a, b) => b.blockTime - a.blockTime)
+  }, [allBurns, opQueries, qc, feeRaw, flowQueries, ownerB58])
 
   return {
     rows,
