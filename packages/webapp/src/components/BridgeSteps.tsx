@@ -2,8 +2,8 @@ import type { FlowKind, FlowStatusValue } from '@/lib/flow-status/types'
 import { Check, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
-const DEPOSIT_STEPS = ['Burn USDC.s', 'Claim', 'Swap', 'Mint ONyc'] as const
-const WITHDRAW_STEPS = ['Burn ONyc', 'Unlock', 'Redeem', 'Receive USDC.s'] as const
+const DEPOSIT_STEPS = ['Burn USDC', 'Claim', 'Swap', 'Mint ONyc'] as const
+const WITHDRAW_STEPS = ['Burn ONyc', 'Unlock', 'Redeem', 'Receive USDC'] as const
 
 interface Props {
   kind: FlowKind

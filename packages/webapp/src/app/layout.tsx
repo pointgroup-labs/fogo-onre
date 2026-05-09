@@ -5,7 +5,7 @@ import './globals.css'
 
 const TITLE = 'Fogo OnRe — yield from OnRe, on FOGO'
 const DESCRIPTION
-  = 'Deposit USDC.s on FOGO and earn yield from OnRe’s tokenized reinsurance product (ONyc) on Solana, bridged via Wormhole NTT.'
+  = 'Deposit USDC on FOGO and earn yield from OnRe’s tokenized reinsurance product (ONyc) on Solana, bridged via Wormhole NTT.'
 
 export const metadata: Metadata = {
   title: TITLE,

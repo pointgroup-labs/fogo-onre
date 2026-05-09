@@ -49,7 +49,7 @@ export function useBridgeFee(): BridgeFeePreview {
   return {
     feeRaw: query.data ?? null,
     feeDecimals: USDC_DECIMALS,
-    feeSymbol: 'USDC.s',
+    feeSymbol: 'USDC',
     error: query.error?.message ?? null,
   }
 }

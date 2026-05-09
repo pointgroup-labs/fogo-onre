@@ -16,7 +16,7 @@ export default function Page() {
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">Yield from OnRe</h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              Deposit USDC.s on FOGO and earn yield backed by real-world reinsurance premiums.
+              Deposit USDC on FOGO and earn yield backed by real-world reinsurance premiums.
             </p>
           </div>
           <ErrorBoundary label="protocol stats"><ProtocolStats /></ErrorBoundary>

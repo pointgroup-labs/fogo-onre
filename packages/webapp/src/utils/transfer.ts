@@ -32,7 +32,7 @@ export interface ParseResult {
  *   ""        → { value: null, error: null }   // user hasn't typed
  *   "abc"     → { value: null, error: 'Numbers only.' }
  *   "1.234"   → { value: 1234000n, error: null }     (decimals=6)
- *   "1.1234567" → { value: null, error: 'USDC.s only supports 6 decimals.' }
+ *   "1.1234567" → { value: null, error: 'USDC only supports 6 decimals.' }
  */
 export function parseAmount(input: string, decimals: number, symbol?: string): ParseResult {
   if (input === '') {
