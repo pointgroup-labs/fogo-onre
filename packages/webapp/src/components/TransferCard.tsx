@@ -234,7 +234,7 @@ export default function TransferCard({ kind }: TransferCardProps) {
             />
 
             {kind === 'deposit' && (
-              <div className="-mt-3">
+              <div className="-mt-1">
                 <BridgeFeeRow fee={bridgeFee} />
               </div>
             )}
