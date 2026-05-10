@@ -1472,6 +1472,27 @@ export function crankerCommands(): Command {
       const counter = offerInfo.data.readBigUInt64LE(REDEMPTION_OFFER_REQUEST_COUNTER_OFFSET)
       const [redemptionRequestPda] = findOnreRedemptionRequestPda(redemptionOfferPda, counter)
 
+      // Lamport top-up: OnRe `create_redemption_request` does Anchor
+      // `init` on `redemption_request` (~2.39M rent) debited from
+      // `relayer_authority`. Coming out of unlock_onyc the PDA holds
+      // ~1.59M, so without this top-up the OnRe CPI fails with
+      // `Transfer: insufficient lamports`. Mirrors the daemon's
+      // request-redemption-onyc.ts top-up policy (4.5M target).
+      const RELAYER_AUTH_TOPUP = 4_500_000n
+      const [relayerAuthorityPda] = findAuthorityPda(client.program.programId)
+      const relayerAuthInfo = await connection.getAccountInfo(relayerAuthorityPda).catch(() => null)
+      const relayerCurrentLamports = BigInt(relayerAuthInfo?.lamports ?? 0)
+      const fundIxs: ReturnType<typeof SystemProgram.transfer>[] = []
+      let topUpLamports = 0n
+      if (relayerCurrentLamports < RELAYER_AUTH_TOPUP) {
+        topUpLamports = RELAYER_AUTH_TOPUP - relayerCurrentLamports
+        fundIxs.push(SystemProgram.transfer({
+          fromPubkey: keypair.publicKey,
+          toPubkey: relayerAuthorityPda,
+          lamports: Number(topUpLamports),
+        }))
+      }
+
       console.log(chalk.cyan('request-redemption-onyc plan'))
       console.log(chalk.dim(`  payer (signer):         ${keypair.publicKey.toBase58()}`))
       console.log(chalk.dim(`  usdcMint:               ${usdcMint.toBase58()}`))
@@ -1483,6 +1504,9 @@ export function crankerCommands(): Command {
       console.log(chalk.dim(`  request_counter:        ${counter.toString()}`))
       console.log(chalk.dim(`  redemptionRequest:      ${redemptionRequestPda.toBase58()} (PDA, derived from counter)`))
       console.log(chalk.dim(`  redemptionTrackerPda:   ${client.redemptionTrackerPda.toBase58()} (will init)`))
+      console.log(chalk.dim(`  relayerAuthority:       ${relayerAuthorityPda.toBase58()}`))
+      console.log(chalk.dim(`  relayerAuth balance:    ${relayerCurrentLamports.toString()} lamports`))
+      console.log(chalk.dim(`  relayerAuth top-up:     ${topUpLamports.toString()} lamports (target ${RELAYER_AUTH_TOPUP.toString()})`))
 
       if (!opts.confirm) {
         console.log()
@@ -1502,6 +1526,7 @@ export function crankerCommands(): Command {
             feeVault,
             onre: { redemptionRequest: redemptionRequestPda },
           })
+          .preInstructions(fundIxs)
           .rpc(),
       )
       console.log(chalk.green('request-redemption-onyc landed'))

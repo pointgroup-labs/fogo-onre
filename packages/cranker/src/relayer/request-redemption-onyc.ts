@@ -1,13 +1,25 @@
 import type { AdvanceContext, AdvanceResult } from './types'
 import {
   describeStatus,
+  findAuthorityPda,
   findOnreRedemptionOfferPda,
   findOnreRedemptionRequestPda,
   NTT_ONYC_PROGRAM_ID,
   REDEMPTION_OFFER_REQUEST_COUNTER_OFFSET,
   resolveNttVaa,
 } from '@fogo-onre/sdk'
-import { PublicKey } from '@solana/web3.js'
+import { PublicKey, SystemProgram } from '@solana/web3.js'
+
+// OnRe `create_redemption_request` does Anchor `init` on the
+// `redemption_request` PDA, debiting rent (~2.39M lamports observed)
+// from `relayer_authority` because the relayer signs the OnRe CPI under
+// that PDA. Without this top-up the call fails with `Transfer:
+// insufficient lamports … need 2394240` (custom program 0x1) on any
+// flow where the prior unlock_onyc tx left relayer_authority near its
+// post-debit floor (~1.59M = 3M topup − 1.41M inbox_item rent). 4.5M
+// covers the OnRe rent + headroom for layout growth without bloating
+// per-flow lamport burn. Mirror in cli/src/commands/cranker.ts.
+const RELAYER_AUTH_TOPUP = 4_500_000n
 import { withTimeout } from '../utils/rpc'
 import { fetchVaaBytes } from '../utils/wormhole'
 import { isLostRace } from './race-classifier'
@@ -130,6 +142,25 @@ export async function requestRedemptionOnyc(
     const counter = offerInfo.data.readBigUInt64LE(REDEMPTION_OFFER_REQUEST_COUNTER_OFFSET)
     const [redemptionRequestPda] = findOnreRedemptionRequestPda(redemptionOfferPda, counter)
 
+    // Lamport top-up: OnRe `create_redemption_request` does Anchor
+    // `init` on `redemption_request` PDA via invoke_signed under
+    // `relayer_authority`, debiting ~2.39M from that PDA. Coming out
+    // of unlock_onyc the PDA holds ~1.59M (3M topup − 1.41M inbox_item
+    // rent), which is short. Mirror the unlock_onyc / send_usdc_to_user
+    // top-up pattern: read current balance, fund the gap only when
+    // below threshold.
+    const [relayerAuthorityPda] = findAuthorityPda(client.program.programId)
+    const relayerAuthInfo = await connection.getAccountInfo(relayerAuthorityPda).catch(() => null)
+    const relayerCurrentLamports = BigInt(relayerAuthInfo?.lamports ?? 0)
+    const fundIxs: ReturnType<typeof SystemProgram.transfer>[] = []
+    if (relayerCurrentLamports < RELAYER_AUTH_TOPUP) {
+      fundIxs.push(SystemProgram.transfer({
+        fromPubkey: keypair.publicKey,
+        toPubkey: relayerAuthorityPda,
+        lamports: Number(RELAYER_AUTH_TOPUP - relayerCurrentLamports),
+      }))
+    }
+
     const sig = await client
       .requestRedemptionOnyc({
         payer: keypair.publicKey,
@@ -147,6 +178,7 @@ export async function requestRedemptionOnyc(
           redemptionRequest: redemptionRequestPda,
         },
       })
+      .preInstructions(fundIxs)
       .rpc()
 
     metrics.txSent.inc({ instruction: 'request_redemption_onyc', result: 'ok' })
