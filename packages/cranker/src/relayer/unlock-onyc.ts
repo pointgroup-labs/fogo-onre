@@ -10,6 +10,7 @@ import {
 import { PublicKey } from '@solana/web3.js'
 import { withTimeout } from '../utils/rpc'
 import { fetchVaaBytes } from '../utils/wormhole'
+import { prepareTransceiverMessage } from './prepare-transceiver-message'
 import { isLostRace } from './race-classifier'
 
 export type UnlockOnycInput = {
@@ -123,6 +124,31 @@ export async function unlockOnyc(
       return {
         kind: 'noop',
         reason: `FOGO peer not registered on ONyc NTT manager (${fogoPeerPda.toBase58()})`,
+      }
+    }
+
+    // Pre-step: ensure ntt_transceiver_message PDA exists on Solana,
+    // owned by the ONyc NTT manager. Wormhole's auto-relayer is not
+    // subscribed to the ONyc manager (only USDC.s), so inbound VAAs
+    // must be posted by us. The on-chain unlock_onyc handler declares
+    // ntt_transceiver_message with `owner = NTT_ONYC_PROGRAM_ID` and
+    // CANNOT create it (its CPI does redeem + release_inbound_unlock,
+    // both of which read the existing transceiver_message). Skipping
+    // this step yields ConstraintOwner (2004) at submit. Idempotent.
+    const prep = await prepareTransceiverMessage({
+      connection,
+      payer: keypair,
+      vaaBytes,
+      transceiverMessagePda: resolved.nttTransceiverMessage,
+      rpcTimeoutMs: ctx.rpcTimeoutMs,
+      txConfirmTimeoutMs: ctx.rpcTimeoutMs,
+      log: ctx.log,
+    })
+    if (prep.kind === 'error') {
+      return {
+        kind: 'error',
+        error: prep.error,
+        partialSignatures: [],
       }
     }
 
