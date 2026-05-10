@@ -3,8 +3,12 @@ import type { AdvanceContext, AdvanceResult } from './types'
 import type { ClassRollupAgg } from '../utils/log'
 import type { FlowStateTracker } from '../state/flow-state'
 import { claimUsdc } from './claim-usdc'
+import { claimRedemptionUsdc } from './claim-redemption-usdc'
 import { lockOnyc } from './lock-onyc'
+import { requestRedemptionOnyc } from './request-redemption-onyc'
+import { sendUsdcToUser } from './send-usdc-to-user'
 import { swapUsdcToOnyc } from './swap-usdc-to-onyc'
+import { unlockOnyc } from './unlock-onyc'
 import { errorClass, errorFields, recordErrorClass, rollupErrorClasses } from '../utils/log'
 import { runBounded } from '../utils/concurrency'
 import { withTimeout } from '../utils/rpc'
@@ -18,13 +22,36 @@ import { withTimeout } from '../utils/rpc'
  * exact same vocabulary — typo'd statuses become compile errors instead
  * of silent skip-paths through `pickAdvanceForStatus`'s default branch.
  */
-export const FLOW_STATUSES = ['Pending', 'Claimed', 'Swapped', 'Locked', 'Closed'] as const
+export const FLOW_STATUSES = [
+  // Deposit leg
+  'Pending',
+  'Claimed',
+  'Swapped',
+  'Locked',
+  'Closed',
+  // Withdraw leg — synthetic leg-prefixed strings (spec §3.5 Option A).
+  // The on-chain `FlowStatus` enum is shared between deposit and
+  // withdraw, so a bare `Claimed` cannot pick a handler. The enumerator
+  // (`enumerate.ts:synthesizeStatus`) prefixes withdraw statuses to
+  // disambiguate, and `pickAdvanceForStatus` dispatches on these.
+  'WithdrawPending',
+  'WithdrawClaimed',
+  'RedemptionPending',
+  'WithdrawSwapped',
+  'WithdrawClosed',
+] as const
 export type FlowStatus = typeof FLOW_STATUSES[number]
 
 export type AdvanceFns = {
+  // Deposit leg
   claimUsdc: typeof claimUsdc
   swapUsdcToOnyc: typeof swapUsdcToOnyc
   lockOnyc: typeof lockOnyc
+  // Withdraw leg
+  unlockOnyc: typeof unlockOnyc
+  requestRedemptionOnyc: typeof requestRedemptionOnyc
+  claimRedemptionUsdc: typeof claimRedemptionUsdc
+  sendUsdcToUser: typeof sendUsdcToUser
 }
 
 export type ScannedFlow = {
@@ -99,6 +126,10 @@ const DEFAULT_ADVANCE_FNS: AdvanceFns = {
   claimUsdc,
   swapUsdcToOnyc,
   lockOnyc,
+  unlockOnyc,
+  requestRedemptionOnyc,
+  claimRedemptionUsdc,
+  sendUsdcToUser,
 }
 
 const defaultEnumerateFlows: EnumerateFlowsFn = async () => []
@@ -303,16 +334,31 @@ type DispatchFn = (
 
 function pickAdvanceForStatus(status: FlowStatus | string, fns: AdvanceFns): DispatchFn | undefined {
   switch (status) {
+    // Deposit leg
     case 'Pending':
       return fns.claimUsdc
     case 'Claimed':
       return fns.swapUsdcToOnyc
     case 'Swapped':
       return fns.lockOnyc
+    // Withdraw leg — synthetic leg-prefixed strings from
+    // `enumerate.ts:synthesizeStatus`. The shared on-chain `FlowStatus`
+    // (`Claimed`/`Swapped`/`RedemptionPending`) means we cannot dispatch
+    // on the bare on-chain value alone; the prefix is what lets the
+    // withdraw-leg `Claimed` route to `requestRedemptionOnyc` while the
+    // deposit-leg `Claimed` routes to `swapUsdcToOnyc`.
+    case 'WithdrawPending':
+      return fns.unlockOnyc
+    case 'WithdrawClaimed':
+      return fns.requestRedemptionOnyc
+    case 'RedemptionPending':
+      return fns.claimRedemptionUsdc
+    case 'WithdrawSwapped':
+      return fns.sendUsdcToUser
     default:
-      // 'Locked', 'Closed', or any forward-compat on-chain status the
-      // cranker doesn't drive. Caller skips + bumps the `flow_skipped`
-      // counter with `reason = status`.
+      // 'Locked', 'Closed', 'WithdrawClosed', or any forward-compat
+      // on-chain status the cranker doesn't drive. Caller skips + bumps
+      // the `flow_skipped` counter with `reason = status`.
       return undefined
   }
 }

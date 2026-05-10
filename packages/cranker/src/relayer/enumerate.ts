@@ -1,6 +1,6 @@
-import type { ResolvedNttVaa, WormholescanVaa } from '@fogo-onre/sdk'
+import type { FlowStatusName, ResolvedNttVaa, WormholescanVaa } from '@fogo-onre/sdk'
 import type { AdvanceContext } from './types'
-import type { ScannedFlow } from './scan'
+import type { FlowStatus, ScannedFlow } from './scan'
 import type { WatermarkStore } from '../state/watermarks'
 import {
   describeStatus,
@@ -146,9 +146,17 @@ async function scanWormholescanVaa(
   // initialized — that's the routine "Pending, never claimed" signal
   // and is recordable. Anything else is a transient RPC error that
   // must NOT advance the watermark.
+  //
+  // Leg-aware: deposit flows live under `findInflightFlowPda`,
+  // withdraw flows under `findOutflightFlowPda` — different seed
+  // prefix, different PDA. Fetching the wrong one for a withdraw
+  // would always 404 and stamp the VAA as `Pending` forever, even
+  // after `unlock_onyc` initialized the outflight PDA.
   let fetchOutcome: 'resolved' | 'missing' | 'rpc-error' = 'rpc-error'
-  const flow = await ctx.client
-    .fetchInflightFlow(resolved.nttInboxItem)
+  const fetchFlow = leg === 'withdraw'
+    ? ctx.client.fetchOutflightFlow.bind(ctx.client)
+    : ctx.client.fetchInflightFlow.bind(ctx.client)
+  const flow = await fetchFlow(resolved.nttInboxItem)
     .then((f) => {
       fetchOutcome = 'resolved'
       return f
@@ -158,7 +166,7 @@ async function scanWormholescanVaa(
         fetchOutcome = 'missing'
         return null
       }
-      ctx.log.warn('fetchInflightFlow failed (transient — watermark NOT advanced)', {
+      ctx.log.warn('fetchFlow failed (transient — watermark NOT advanced)', {
         leg,
         nttInboxItem: resolved.nttInboxItem.toBase58(),
         ...errorFields(err),
@@ -173,12 +181,61 @@ async function scanWormholescanVaa(
     sequence: item.sequence,
     flow: {
       pubkey: resolved.nttInboxItem,
-      status: flow ? describeStatus(flow.status) : 'Pending',
+      status: synthesizeStatus(leg, flow ? describeStatus(flow.status) : null),
       fogoTx: item.txHash ?? '',
       vaaHex: Buffer.from(item.vaa).toString('hex'),
     },
     recordable: true,
   }
+}
+
+/**
+ * Map the on-chain `(leg, FlowStatus)` pair to a synthetic status
+ * string the cranker FSM dispatches on. The on-chain `FlowStatus` enum
+ * is shared between deposit and withdraw legs (Borsh tag-stable per
+ * `state.rs`'s `flow_status_borsh_tag_invariant` test), so status
+ * alone cannot pick a handler — the deposit-leg `Claimed` means
+ * "USDC swept" and routes to `swap_usdc_to_onyc`, while the
+ * withdraw-leg `Claimed` means "ONyc unlocked" and routes to
+ * `request_redemption_onyc`. Synthesizing leg-prefixed strings here
+ * lets `pickAdvanceForStatus` stay a flat switch.
+ *
+ * `null` flow ⇒ "no Flow PDA exists yet" — the entry-point status for
+ * either leg.
+ */
+function synthesizeStatus(
+  leg: VaaLeg,
+  status: FlowStatusName | null,
+): FlowStatus {
+  if (leg === 'deposit') {
+    if (status === null) {
+      return 'Pending'
+    }
+    if (status === 'Claimed') {
+      return 'Claimed'
+    }
+    if (status === 'Swapped') {
+      return 'Swapped'
+    }
+    // RedemptionPending or Unknown on a deposit-leg Flow shouldn't
+    // happen — pass through verbatim so the dispatcher's default
+    // skip + skip-counter labels it for triage.
+    return status as FlowStatus
+  }
+  // withdraw
+  if (status === null) {
+    return 'WithdrawPending'
+  }
+  if (status === 'Claimed') {
+    return 'WithdrawClaimed'
+  }
+  if (status === 'Swapped') {
+    return 'WithdrawSwapped'
+  }
+  if (status === 'RedemptionPending') {
+    return 'RedemptionPending'
+  }
+  return status as FlowStatus
 }
 
 function isAccountMissingError(err: unknown): boolean {
