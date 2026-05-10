@@ -1,17 +1,26 @@
 import type { AdvanceContext, AdvanceResult } from './types'
 import {
   describeStatus,
+  findAuthorityPda,
   findNttPeerPda,
   FOGO_WORMHOLE_CHAIN_ID,
   NTT_ONYC_PROGRAM_ID,
   NTT_USDC_PROGRAM_ID,
   resolveNttVaa,
 } from '@fogo-onre/sdk'
-import { PublicKey } from '@solana/web3.js'
+import { PublicKey, SystemProgram } from '@solana/web3.js'
 import { withTimeout } from '../utils/rpc'
 import { fetchVaaBytes } from '../utils/wormhole'
 import { prepareTransceiverMessage } from './prepare-transceiver-message'
 import { isLostRace } from './race-classifier'
+
+// NTT `redeem` inits `inbox_item` PDA via invoke_signed under
+// `relayer_authority`, which means the PDA pays rent. Its current
+// balance is just rent-exempt for its own account; topping up to 3M
+// lamports leaves comfortable headroom for inbox_item rent
+// (~1.4M observed) plus any future NTT layout growth.
+// Same constant family as send-usdc-to-user.ts; keep in sync.
+const RELAYER_AUTH_TOPUP = 3_000_000n
 
 export type UnlockOnycInput = {
   fogoTx: string
@@ -152,6 +161,26 @@ export async function unlockOnyc(
       }
     }
 
+    // Lamport top-up: NTT `redeem` does `init` on `inbox_item` via
+    // `invoke_signed` under `relayer_authority`, debiting rent from
+    // that PDA. If relayer_authority is at its rent-exempt floor for
+    // its own data, the inbox_item rent debit underflows
+    // (`Transfer: insufficient lamports … need …`, custom error 0x1).
+    // Top up to RELAYER_AUTH_TOPUP only when below threshold —
+    // skipping the system_program transfer when not needed keeps the
+    // tx small.
+    const [relayerAuthorityPda] = findAuthorityPda(client.program.programId)
+    const relayerAuthInfo = await connection.getAccountInfo(relayerAuthorityPda).catch(() => null)
+    const relayerCurrentLamports = BigInt(relayerAuthInfo?.lamports ?? 0)
+    const fundIxs: ReturnType<typeof SystemProgram.transfer>[] = []
+    if (relayerCurrentLamports < RELAYER_AUTH_TOPUP) {
+      fundIxs.push(SystemProgram.transfer({
+        fromPubkey: keypair.publicKey,
+        toPubkey: relayerAuthorityPda,
+        lamports: Number(RELAYER_AUTH_TOPUP - relayerCurrentLamports),
+      }))
+    }
+
     const sig = await client
       .unlockOnyc({
         payer: keypair.publicKey,
@@ -165,6 +194,7 @@ export async function unlockOnyc(
         // deposit-side `claimUsdc` uses.
         ntt: { transceiverAddress: nttProgram },
       })
+      .preInstructions(fundIxs)
       .rpc()
 
     metrics.txSent.inc({ instruction: 'unlock_onyc', result: 'ok' })
