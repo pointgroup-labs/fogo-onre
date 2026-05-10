@@ -36,7 +36,7 @@
 import type { FlowAccount } from '@fogo-onre/sdk'
 import type { TransactionInstruction } from '@solana/web3.js'
 import { AnchorProvider, Wallet } from '@anchor-lang/core'
-import { describeStatus, findAuthorityPda, findInboxRateLimitPda, findInflightFlowPda, findNttPeerPda, findSessionAuthorityPda, findUserInboxAuthorityPda, FOGO_WORMHOLE_CHAIN_ID, NTT_ONYC_PROGRAM_ID, NTT_USDC_PROGRAM_ID, nttTransferArgsHash, ONYC_MINT, resolveNttVaa, USDC_MINT, WormholescanClient } from '@fogo-onre/sdk'
+import { describeStatus, findAuthorityPda, findInboxRateLimitPda, findInflightFlowPda, findNttPeerPda, findOnreRedemptionOfferPda, findOnreRedemptionRequestPda, findSessionAuthorityPda, findUserInboxAuthorityPda, FOGO_WORMHOLE_CHAIN_ID, NTT_ONYC_PROGRAM_ID, NTT_USDC_PROGRAM_ID, nttTransferArgsHash, ONYC_MINT, REDEMPTION_OFFER_REQUEST_COUNTER_OFFSET, resolveNttVaa, USDC_MINT, WormholescanClient } from '@fogo-onre/sdk'
 import { createAssociatedTokenAccountIdempotentInstruction, getAssociatedTokenAddressSync } from '@solana/spl-token'
 import { Connection, Keypair, PublicKey, SystemProgram, Transaction, VersionedTransaction } from '@solana/web3.js'
 import { deserialize } from '@wormhole-foundation/sdk-definitions'
@@ -1464,7 +1464,13 @@ export function crankerCommands(): Command {
         )
       }
 
-      const redemptionRequest = Keypair.generate()
+      const [redemptionOfferPda] = findOnreRedemptionOfferPda(onycMint, usdcMint)
+      const offerInfo = await connection.getAccountInfo(redemptionOfferPda)
+      if (!offerInfo) {
+        throw new Error(`OnRe RedemptionOffer not found at ${redemptionOfferPda.toBase58()}`)
+      }
+      const counter = offerInfo.data.readBigUInt64LE(REDEMPTION_OFFER_REQUEST_COUNTER_OFFSET)
+      const [redemptionRequestPda] = findOnreRedemptionRequestPda(redemptionOfferPda, counter)
 
       console.log(chalk.cyan('request-redemption-onyc plan'))
       console.log(chalk.dim(`  payer (signer):         ${keypair.publicKey.toBase58()}`))
@@ -1473,13 +1479,15 @@ export function crankerCommands(): Command {
       console.log(chalk.dim(`  feeVault:               ${feeVault.toBase58()}`))
       console.log(chalk.dim(`  nttInboxItem:           ${resolved.nttInboxItem.toBase58()}`))
       console.log(chalk.dim(`  flow.amount (gross):    ${flow.amount.toString()}`))
-      console.log(chalk.dim(`  redemptionRequest:      ${redemptionRequest.publicKey.toBase58()} (ephemeral keypair, signed once)`))
+      console.log(chalk.dim(`  redemptionOffer:        ${redemptionOfferPda.toBase58()}`))
+      console.log(chalk.dim(`  request_counter:        ${counter.toString()}`))
+      console.log(chalk.dim(`  redemptionRequest:      ${redemptionRequestPda.toBase58()} (PDA, derived from counter)`))
       console.log(chalk.dim(`  redemptionTrackerPda:   ${client.redemptionTrackerPda.toBase58()} (will init)`))
 
       if (!opts.confirm) {
         console.log()
         console.log(chalk.yellow('dry-run only. Re-run with --confirm to broadcast.'))
-        console.log(chalk.dim('  NOTE: the redemptionRequest pubkey above is regenerated on the next run.'))
+        console.log(chalk.dim('  NOTE: counter advances on each successful CPI; re-derive next run.'))
         return
       }
 
@@ -1492,14 +1500,13 @@ export function crankerCommands(): Command {
             onycMint,
             nttInboxItem: resolved.nttInboxItem,
             feeVault,
-            onre: { redemptionRequest: redemptionRequest.publicKey },
+            onre: { redemptionRequest: redemptionRequestPda },
           })
-          .signers([redemptionRequest])
           .rpc(),
       )
       console.log(chalk.green('request-redemption-onyc landed'))
       console.log(chalk.dim(`  tx:                     ${sig}`))
-      console.log(chalk.dim(`  redemptionRequest:      ${redemptionRequest.publicKey.toBase58()} (now persisted in tracker.redemption_request)`))
+      console.log(chalk.dim(`  redemptionRequest:      ${redemptionRequestPda.toBase58()} (now persisted in tracker.redemption_request)`))
     })
 
   cranker

@@ -1,10 +1,13 @@
 import type { AdvanceContext, AdvanceResult } from './types'
 import {
   describeStatus,
+  findOnreRedemptionOfferPda,
+  findOnreRedemptionRequestPda,
   NTT_ONYC_PROGRAM_ID,
+  REDEMPTION_OFFER_REQUEST_COUNTER_OFFSET,
   resolveNttVaa,
 } from '@fogo-onre/sdk'
-import { Keypair, PublicKey } from '@solana/web3.js'
+import { PublicKey } from '@solana/web3.js'
 import { withTimeout } from '../utils/rpc'
 import { fetchVaaBytes } from '../utils/wormhole'
 import { isLostRace } from './race-classifier'
@@ -105,12 +108,27 @@ export async function requestRedemptionOnyc(
       }
     }
 
-    // OnRe `create_redemption_request` does `init` on this account, so
-    // it must be a fresh keypair the cranker signs with. The pubkey
-    // gets persisted on-chain in `RedemptionTracker.redemption_request`,
-    // which is how `claimRedemptionUsdc` finds it again next tick — we
-    // do NOT have to remember it ourselves between scans.
-    const redemptionRequest = Keypair.generate()
+    // OnRe `create_redemption_request` does `init` on a PDA seeded by
+    // `[redemption_request, redemption_offer, request_counter_LE_u64]`.
+    // The PDA is derived from the LIVE counter on the offer (snapshotted
+    // before the CPI fires; OnRe increments inside the handler). Read
+    // the offer, extract the counter, derive the PDA. PDAs don't sign —
+    // OnRe inits via seeds, the relayer's `payer` covers rent.
+    const [redemptionOfferPda] = findOnreRedemptionOfferPda(onycMint, usdcMint)
+    const offerInfo = await withTimeout(
+      connection.getAccountInfo(redemptionOfferPda),
+      ctx.rpcTimeoutMs,
+      'getAccountInfo(OnreRedemptionOffer)',
+    ).catch(() => null)
+    if (!offerInfo) {
+      return {
+        kind: 'error',
+        error: new Error(`OnRe RedemptionOffer not found at ${redemptionOfferPda.toBase58()}`),
+        partialSignatures: [],
+      }
+    }
+    const counter = offerInfo.data.readBigUInt64LE(REDEMPTION_OFFER_REQUEST_COUNTER_OFFSET)
+    const [redemptionRequestPda] = findOnreRedemptionRequestPda(redemptionOfferPda, counter)
 
     const sig = await client
       .requestRedemptionOnyc({
@@ -126,10 +144,9 @@ export async function requestRedemptionOnyc(
         // OnRe deployment — override only if a future test rig points at
         // a non-mainnet OnRe.
         onre: {
-          redemptionRequest: redemptionRequest.publicKey,
+          redemptionRequest: redemptionRequestPda,
         },
       })
-      .signers([redemptionRequest])
       .rpc()
 
     metrics.txSent.inc({ instruction: 'request_redemption_onyc', result: 'ok' })
