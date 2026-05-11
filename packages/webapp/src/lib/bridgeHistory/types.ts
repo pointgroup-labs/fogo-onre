@@ -52,4 +52,14 @@ export interface TimelineRow {
   destinationSignature: string | null
   /** Set only when this device + this session originated the bridge and the journal entry is still non-terminal. */
   phase: string | null
+  /**
+   * True when the user has explicitly marked this row delivered via
+   * the dismiss affordance. Used for legacy pre-fix rows where the
+   * Wormholescan oracle cannot report `delivered` because the VAA was
+   * emitted by a separate recovery tx, not the original source tx —
+   * `/operations?txHash=<source>` then returns no `targetChain`. Display
+   * treats this as `delivered` with an explicit "(marked)" indicator so
+   * automatic vs manual resolution stay distinguishable.
+   */
+  manuallyDismissed: boolean
 }

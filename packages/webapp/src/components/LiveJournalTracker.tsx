@@ -109,7 +109,7 @@ function TrackerRow({ flowId }: { flowId: string }) {
         },
       }
       if (liveStatus === 'terminal-success') {
-        toast.success(persisted.kind === 'deposit' ? 'Deposit complete' : 'Withdraw complete', { id: flowId, action })
+        toast.success(persisted.kind === 'deposit' ? 'Deposit complete' : 'Redemption complete', { id: flowId, action })
       } else {
         toast.error('Transfer failed', { id: flowId, action })
       }

@@ -5,6 +5,7 @@ import type { BurnRow, OperationStatus, TimelineRow } from '@/lib/bridgeHistory/
 import type { PersistedFlowStatus } from '@/lib/flow-status/types'
 import { useInfiniteQuery, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useMemo } from 'react'
+import { useDismissedBridges } from '@/lib/bridgeHistory/dismissed'
 import { findJournalEntryBySignature, mergeRow, rowFromJournal } from '@/lib/bridgeHistory/merge'
 import { fetchBurnPage, getCanonicalAtas } from '@/lib/bridgeHistory/rpc'
 import { fetchOperationStatus } from '@/lib/bridgeHistory/wormholescan'
@@ -32,6 +33,10 @@ export function useBridgeHistory(owner: PublicKey | null): UseBridgeHistoryResul
   const { fogoRpcUrl } = useSettings()
   const qc = useQueryClient()
   const { feeRaw } = useBridgeFee()
+  // Subscribe so dismiss/undismiss actions in this tab (or another)
+  // re-merge the row set immediately, without waiting for a polling
+  // tick or a window-focus refetch.
+  const dismissed = useDismissedBridges()
 
   const ownerB58 = owner?.toBase58() ?? null
 
@@ -141,7 +146,7 @@ export function useBridgeHistory(owner: PublicKey | null): UseBridgeHistoryResul
     const burnRows = allBurns.map((burn, i) => {
       const op = opQueries[i]?.data ?? null
       const journal = findJournalEntryBySignature(qc, burn.signature)
-      return mergeRow(burn, op, journal, feeRaw)
+      return mergeRow(burn, op, journal, feeRaw, dismissed)
     })
     // Synthesize optimistic rows for journal entries whose burn tx
     // hasn't been indexed by FOGO RPC yet. Filter to entries owned by
@@ -160,7 +165,7 @@ export function useBridgeHistory(owner: PublicKey | null): UseBridgeHistoryResul
       synthetic.push(rowFromJournal(j))
     }
     return [...synthetic, ...burnRows].sort((a, b) => b.blockTime - a.blockTime)
-  }, [allBurns, opQueries, qc, feeRaw, flowQueries, ownerB58])
+  }, [allBurns, opQueries, qc, feeRaw, flowQueries, ownerB58, dismissed])
 
   return {
     rows,

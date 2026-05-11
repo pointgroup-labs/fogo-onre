@@ -12,6 +12,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { FOGO_ONYC_DECIMALS, USDC_DECIMALS } from '@/constants'
 import { useBridgeHistory } from '@/hooks/useBridgeHistory'
+import { dismissBridge } from '@/lib/bridgeHistory/dismissed'
 import { fogoTxUrl } from '@/utils/explorers'
 
 export default function BridgeHistory() {
@@ -97,7 +98,7 @@ function BridgeRow({ row, nowMs }: { row: TimelineRow, nowMs: number }) {
   const isDeposit = row.kind === 'deposit'
   const decimals = isDeposit ? USDC_DECIMALS : FOGO_ONYC_DECIMALS
   const ticker = isDeposit ? 'USDC.s' : 'ONyc'
-  const label = isDeposit ? 'Deposit' : 'Withdraw'
+  const label = isDeposit ? 'Deposit' : 'Redeem'
   const amount = formatAmount(row.amountRaw, decimals)
   const blockMs = row.blockTime * 1000
   const relTime = formatRelativeTime(blockMs, nowMs)
@@ -159,15 +160,20 @@ function BridgeRow({ row, nowMs }: { row: TimelineRow, nowMs: number }) {
 }
 
 function StatusBadge({ row }: { row: TimelineRow }) {
-  // Three render shapes — in-flight (spinner + phase), delivered
-  // (check), pending (spinner + "Pending"). The fall-through is
-  // ALWAYS "Pending" rather than "no badge": a row without a positive
-  // delivered signal is, from the user's perspective, still pending.
-  // Rendering nothing reads as a broken row; rendering "Pending" is
-  // strictly more informative and only briefly inaccurate in the rare
-  // case where the local journal already saw terminal-success but the
-  // Wormholescan oracle is lagging — that case self-heals within
-  // seconds as Wormholescan catches up and the row flips to Delivered.
+  // Three render shapes — in-flight (spinner + phase), delivered (check),
+  // pending (spinner + "Pending" + dismiss affordance).
+  //
+  // The fall-through is ALWAYS "Pending" rather than "no badge": a row
+  // without a positive delivered signal is, from the user's perspective,
+  // still pending. The dismiss affordance covers the edge case where
+  // Wormholescan cannot ever report `delivered` — e.g. legacy pre-fix
+  // `send_usdc_to_user` rows whose VAA was emitted by a separate
+  // recovery tx so `/operations?txHash=<source>` has no `targetChain`.
+  // Manual dismissals render as the *same* Delivered badge as oracle-
+  // confirmed deliveries; the distinction is preserved on `row.manuallyDismissed`
+  // for debugging / analytics but is intentionally invisible in the UI to
+  // avoid two near-identical "Delivered" states confusing the user.
+  // Per-device, cosmetic, reversible (clear `fogo-onre.dismissed-bridges.v1`).
   if (row.phase !== null) {
     return (
       <Badge variant="secondary" aria-label={`status: ${row.phase}`} className="gap-1">
@@ -176,7 +182,7 @@ function StatusBadge({ row }: { row: TimelineRow }) {
       </Badge>
     )
   }
-  if (row.status === 'delivered') {
+  if (row.status === 'delivered' || row.manuallyDismissed) {
     return (
       <Badge variant="default" aria-label="status: delivered" className="gap-1">
         <Check aria-hidden className="size-3" />
@@ -185,10 +191,22 @@ function StatusBadge({ row }: { row: TimelineRow }) {
     )
   }
   return (
-    <Badge variant="secondary" aria-label="status: pending" className="gap-1">
-      <Loader2 aria-hidden className="size-3 animate-spin" />
-      Pending
-    </Badge>
+    <div className="flex items-center gap-1.5">
+      <Badge variant="secondary" aria-label="status: pending" className="gap-1">
+        <Loader2 aria-hidden className="size-3 animate-spin" />
+        Pending
+      </Badge>
+      <Button
+        variant="ghost"
+        size="sm"
+        className="h-6 px-1.5 text-[11px] text-muted-foreground hover:text-foreground"
+        onClick={() => dismissBridge(row.signature)}
+        title="Funds already in your wallet? Mark this row delivered. Per-device only; does not affect on-chain state."
+        aria-label="Mark this bridge as delivered"
+      >
+        Mark delivered
+      </Button>
+    </div>
   )
 }
 

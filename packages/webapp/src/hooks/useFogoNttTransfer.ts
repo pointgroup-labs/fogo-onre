@@ -76,7 +76,7 @@ export type TransferKind = 'deposit' | 'withdraw'
 
 const KIND_LABEL: Record<TransferKind, string> = {
   deposit: 'Deposit',
-  withdraw: 'Withdraw',
+  withdraw: 'Redeem',
 }
 
 export interface TransferSubmission {

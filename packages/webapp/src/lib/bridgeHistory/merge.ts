@@ -48,6 +48,7 @@ export function mergeRow(
   op: OperationStatus | null,
   journal: PersistedFlowStatus | null,
   feeRaw: bigint | null,
+  dismissedSignatures: ReadonlySet<string> = new Set(),
 ): TimelineRow {
   const isDeposit = burn.mint.equals(USDC_S_MINT)
   const decimals = isDeposit ? USDC_DECIMALS : FOGO_ONYC_DECIMALS
@@ -84,6 +85,7 @@ export function mergeRow(
     status: op?.kind ?? 'unknown',
     destinationSignature: op !== null && op.kind === 'delivered' ? op.destinationTxHash : null,
     phase: journal !== null ? humanPhaseFromStatus(journal) : null,
+    manuallyDismissed: dismissedSignatures.has(burn.signature),
   }
 }
 
@@ -112,6 +114,7 @@ export function rowFromJournal(j: PersistedFlowStatus): TimelineRow {
     status: 'unknown',
     destinationSignature: null,
     phase: humanPhaseFromStatus(j),
+    manuallyDismissed: false,
   }
 }
 

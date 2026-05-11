@@ -70,14 +70,14 @@ function configFor(kind: FlowKind): KindConfig {
     destSymbol: 'USDC',
     srcDecimals: FOGO_ONYC_DECIMALS,
     destDecimals: USDC_DECIMALS,
-    submitLabel: 'Withdraw',
-    submittingLabel: 'Withdrawing…',
+    submitLabel: 'Redeem',
+    submittingLabel: 'Redeeming…',
     insufficientLabel: 'Insufficient ONyc',
     ready: FOGO_ONYC_DEPLOYMENT_READY,
     unavailable: FOGO_ONYC_DEPLOYMENT_READY
       ? null
       : {
-          title: 'Withdrawals coming soon',
+          title: 'Redemptions coming soon',
           description: 'The FOGO-side ONyc bridge isn\'t live yet. Deposits work today; you\'ll be able to redeem here once it ships.',
         },
   }
