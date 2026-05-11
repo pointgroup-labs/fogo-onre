@@ -159,7 +159,15 @@ function BridgeRow({ row, nowMs }: { row: TimelineRow, nowMs: number }) {
 }
 
 function StatusBadge({ row }: { row: TimelineRow }) {
-  // Precedence: phase > status. `unknown` renders no badge (graceful degrade).
+  // Three render shapes — in-flight (spinner + phase), delivered
+  // (check), pending (spinner + "Pending"). The fall-through is
+  // ALWAYS "Pending" rather than "no badge": a row without a positive
+  // delivered signal is, from the user's perspective, still pending.
+  // Rendering nothing reads as a broken row; rendering "Pending" is
+  // strictly more informative and only briefly inaccurate in the rare
+  // case where the local journal already saw terminal-success but the
+  // Wormholescan oracle is lagging — that case self-heals within
+  // seconds as Wormholescan catches up and the row flips to Delivered.
   if (row.phase !== null) {
     return (
       <Badge variant="secondary" aria-label={`status: ${row.phase}`} className="gap-1">
@@ -176,15 +184,12 @@ function StatusBadge({ row }: { row: TimelineRow }) {
       </Badge>
     )
   }
-  if (row.status === 'pending') {
-    return (
-      <Badge variant="secondary" aria-label="status: pending" className="gap-1">
-        <Loader2 aria-hidden className="size-3 animate-spin" />
-        Pending
-      </Badge>
-    )
-  }
-  return null
+  return (
+    <Badge variant="secondary" aria-label="status: pending" className="gap-1">
+      <Loader2 aria-hidden className="size-3 animate-spin" />
+      Pending
+    </Badge>
+  )
 }
 
 /**
