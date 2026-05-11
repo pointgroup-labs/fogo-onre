@@ -39,10 +39,6 @@ pub mod fogo_onre_relayer {
         claim_usdc::handler(ctx, redeem_accounts_len)
     }
 
-    pub fn swap_usdc_to_onyc<'info>(ctx: Context<'info, SwapUsdcToOnyc<'info>>) -> Result<()> {
-        swap_usdc_to_onyc::handler(ctx)
-    }
-
     /// Lock ONyc via NTT and atomically emit the outbound VAA.
     /// `transfer_lock_account_count` splits `remaining_accounts` between
     /// `transfer_lock` and `release_wormhole_outbound`.
@@ -61,28 +57,26 @@ pub mod fogo_onre_relayer {
         unlock_onyc::handler(ctx, redeem_accounts_len)
     }
 
-    /// Forward flow's ONyc to OnRe + init singleton tracker; fee taken pre-CPI.
-    pub fn request_redemption_onyc<'info>(
-        ctx: Context<'info, RequestRedemptionOnyc<'info>>,
-    ) -> Result<()> {
-        request_redemption_onyc::handler(ctx)
-    }
-
-    pub fn claim_redemption_usdc(ctx: Context<ClaimRedemptionUsdc>) -> Result<()> {
-        claim_redemption_usdc::handler(ctx)
-    }
-
-    /// Authority-only escape hatch — rolls a stuck redemption back to
-    /// `Claimed` and frees the singleton. Authority-gated to prevent a
-    /// request→cancel fee-griefing loop.
-    pub fn cancel_redemption_onyc<'info>(
-        ctx: Context<'info, CancelRedemptionOnyc<'info>>,
-    ) -> Result<()> {
-        cancel_redemption_onyc::handler(ctx)
-    }
-
     pub fn send_usdc_to_user<'info>(ctx: Context<'info, SendUsdcToUser<'info>>) -> Result<()> {
         send_usdc_to_user::handler(ctx)
+    }
+
+    pub fn swap_usdc_to_onyc<'info>(ctx: Context<'info, SwapUsdcToOnyc<'info>>) -> Result<()> {
+        swap_usdc_to_onyc::handler(ctx)
+    }
+
+    /// Permissionless: convert outbound flow's ONyc → USDC via any swap
+    /// program under NAV-anchored slippage protection. Withdraw fee is
+    /// taken in ONyc up front, the post-fee remainder swapped under a
+    /// bounded SPL `Approve` to `swap_delegate`. The swap CPI runs under
+    /// plain `invoke` — PDA-signer privilege does not propagate. Replaces
+    /// the OnRe redemption-request chain (KYC-gated, never executes for
+    /// the relayer PDA).
+    pub fn swap_onyc_to_usdc<'info>(
+        ctx: Context<'info, SwapOnycToUsdc<'info>>,
+        swap_ix_data: Vec<u8>,
+    ) -> Result<()> {
+        swap_onyc_to_usdc::handler(ctx, swap_ix_data)
     }
 
     /// Authority-only. `None` args leave fields unchanged. Fee decreases

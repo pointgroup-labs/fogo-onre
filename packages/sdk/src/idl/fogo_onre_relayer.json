@@ -66,420 +66,6 @@
       "args": []
     },
     {
-      "name": "cancel_redemption_onyc",
-      "docs": [
-        "Authority-only escape hatch — rolls a stuck redemption back to",
-        "`Claimed` and frees the singleton. Authority-gated to prevent a",
-        "request→cancel fee-griefing loop."
-      ],
-      "discriminator": [
-        173,
-        168,
-        252,
-        110,
-        16,
-        149,
-        112,
-        62
-      ],
-      "accounts": [
-        {
-          "name": "authority",
-          "signer": true,
-          "relations": [
-            "relayer_config"
-          ]
-        },
-        {
-          "name": "relayer_config",
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  114,
-                  101,
-                  108,
-                  97,
-                  121,
-                  101,
-                  114,
-                  95,
-                  99,
-                  111,
-                  110,
-                  102,
-                  105,
-                  103
-                ]
-              }
-            ]
-          }
-        },
-        {
-          "name": "relayer_authority",
-          "docs": [
-            "`redemption_request`, so unlocked ONyc returns to its `onyc_ata`."
-          ],
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  114,
-                  101,
-                  108,
-                  97,
-                  121,
-                  101,
-                  114
-                ]
-              }
-            ]
-          }
-        },
-        {
-          "name": "onyc_mint",
-          "relations": [
-            "relayer_config"
-          ]
-        },
-        {
-          "name": "onyc_ata",
-          "docs": [
-            "Receives unlocked ONyc from OnRe's redemption vault."
-          ],
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "account",
-                "path": "relayer_authority"
-              },
-              {
-                "kind": "account",
-                "path": "token_program"
-              },
-              {
-                "kind": "account",
-                "path": "onyc_mint"
-              }
-            ],
-            "program": {
-              "kind": "const",
-              "value": [
-                140,
-                151,
-                37,
-                143,
-                78,
-                36,
-                137,
-                241,
-                187,
-                61,
-                16,
-                41,
-                20,
-                142,
-                13,
-                131,
-                11,
-                90,
-                19,
-                153,
-                218,
-                255,
-                16,
-                132,
-                4,
-                142,
-                123,
-                216,
-                219,
-                233,
-                248,
-                89
-              ]
-            }
-          }
-        },
-        {
-          "name": "ntt_inbox_item"
-        },
-        {
-          "name": "outflight_flow",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  111,
-                  117,
-                  116,
-                  102,
-                  108,
-                  105,
-                  103,
-                  104,
-                  116
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "ntt_inbox_item"
-              }
-            ]
-          }
-        },
-        {
-          "name": "redemption_tracker",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  114,
-                  101,
-                  100,
-                  101,
-                  109,
-                  112,
-                  116,
-                  105,
-                  111,
-                  110,
-                  95,
-                  116,
-                  114,
-                  97,
-                  99,
-                  107,
-                  101,
-                  114
-                ]
-              }
-            ]
-          }
-        },
-        {
-          "name": "payer_for_close",
-          "writable": true
-        },
-        {
-          "name": "token_program"
-        }
-      ],
-      "args": []
-    },
-    {
-      "name": "claim_redemption_usdc",
-      "discriminator": [
-        171,
-        90,
-        50,
-        244,
-        156,
-        19,
-        211,
-        106
-      ],
-      "accounts": [
-        {
-          "name": "cranker",
-          "docs": [
-            "Receives rent from closed `redemption_tracker`. Need not equal",
-            "`tracker.payer` — close-target is `payer_for_close` below."
-          ],
-          "writable": true,
-          "signer": true
-        },
-        {
-          "name": "relayer_config",
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  114,
-                  101,
-                  108,
-                  97,
-                  121,
-                  101,
-                  114,
-                  95,
-                  99,
-                  111,
-                  110,
-                  102,
-                  105,
-                  103
-                ]
-              }
-            ]
-          }
-        },
-        {
-          "name": "relayer_authority",
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  114,
-                  101,
-                  108,
-                  97,
-                  121,
-                  101,
-                  114
-                ]
-              }
-            ]
-          }
-        },
-        {
-          "name": "usdc_mint",
-          "relations": [
-            "relayer_config"
-          ]
-        },
-        {
-          "name": "usdc_ata",
-          "pda": {
-            "seeds": [
-              {
-                "kind": "account",
-                "path": "relayer_authority"
-              },
-              {
-                "kind": "account",
-                "path": "token_program"
-              },
-              {
-                "kind": "account",
-                "path": "usdc_mint"
-              }
-            ],
-            "program": {
-              "kind": "const",
-              "value": [
-                140,
-                151,
-                37,
-                143,
-                78,
-                36,
-                137,
-                241,
-                187,
-                61,
-                16,
-                41,
-                20,
-                142,
-                13,
-                131,
-                11,
-                90,
-                19,
-                153,
-                218,
-                255,
-                16,
-                132,
-                4,
-                142,
-                123,
-                216,
-                219,
-                233,
-                248,
-                89
-              ]
-            }
-          }
-        },
-        {
-          "name": "ntt_inbox_item"
-        },
-        {
-          "name": "outflight_flow",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  111,
-                  117,
-                  116,
-                  102,
-                  108,
-                  105,
-                  103,
-                  104,
-                  116
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "ntt_inbox_item"
-              }
-            ]
-          }
-        },
-        {
-          "name": "redemption_tracker",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  114,
-                  101,
-                  100,
-                  101,
-                  109,
-                  112,
-                  116,
-                  105,
-                  111,
-                  110,
-                  95,
-                  116,
-                  114,
-                  97,
-                  99,
-                  107,
-                  101,
-                  114
-                ]
-              }
-            ]
-          }
-        },
-        {
-          "name": "payer_for_close",
-          "writable": true
-        },
-        {
-          "name": "redemption_request",
-          "docs": [
-            "it has been closed by OnRe."
-          ]
-        },
-        {
-          "name": "token_program"
-        }
-      ],
-      "args": []
-    },
-    {
       "name": "claim_usdc",
       "docs": [
         "Redeem inbound USDC.s VAA, create inbound `Flow` receipt."
@@ -745,41 +331,6 @@
               {
                 "kind": "account",
                 "path": "ntt_inbox_item"
-              }
-            ]
-          }
-        },
-        {
-          "name": "redemption_tracker",
-          "docs": [
-            "Withdraw-chain mutex gate. `SystemAccount` asserts no",
-            "`RedemptionTracker` exists — pauses deposit inflows so they",
-            "can't pollute `claim_redemption_usdc`'s delta math."
-          ],
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  114,
-                  101,
-                  100,
-                  101,
-                  109,
-                  112,
-                  116,
-                  105,
-                  111,
-                  110,
-                  95,
-                  116,
-                  114,
-                  97,
-                  99,
-                  107,
-                  101,
-                  114
-                ]
               }
             ]
           }
@@ -1356,285 +907,6 @@
       ]
     },
     {
-      "name": "request_redemption_onyc",
-      "docs": [
-        "Forward flow's ONyc to OnRe + init singleton tracker; fee taken pre-CPI."
-      ],
-      "discriminator": [
-        117,
-        2,
-        5,
-        175,
-        6,
-        12,
-        151,
-        176
-      ],
-      "accounts": [
-        {
-          "name": "payer",
-          "writable": true,
-          "signer": true
-        },
-        {
-          "name": "relayer_config",
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  114,
-                  101,
-                  108,
-                  97,
-                  121,
-                  101,
-                  114,
-                  95,
-                  99,
-                  111,
-                  110,
-                  102,
-                  105,
-                  103
-                ]
-              }
-            ]
-          }
-        },
-        {
-          "name": "relayer_authority",
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  114,
-                  101,
-                  108,
-                  97,
-                  121,
-                  101,
-                  114
-                ]
-              }
-            ]
-          }
-        },
-        {
-          "name": "usdc_mint",
-          "relations": [
-            "relayer_config"
-          ]
-        },
-        {
-          "name": "onyc_mint",
-          "relations": [
-            "relayer_config"
-          ]
-        },
-        {
-          "name": "usdc_ata",
-          "docs": [
-            "Pre-balance snapshot for `claim_redemption_usdc` delta."
-          ],
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "account",
-                "path": "relayer_authority"
-              },
-              {
-                "kind": "account",
-                "path": "token_program"
-              },
-              {
-                "kind": "account",
-                "path": "usdc_mint"
-              }
-            ],
-            "program": {
-              "kind": "const",
-              "value": [
-                140,
-                151,
-                37,
-                143,
-                78,
-                36,
-                137,
-                241,
-                187,
-                61,
-                16,
-                41,
-                20,
-                142,
-                13,
-                131,
-                11,
-                90,
-                19,
-                153,
-                218,
-                255,
-                16,
-                132,
-                4,
-                142,
-                123,
-                216,
-                219,
-                233,
-                248,
-                89
-              ]
-            }
-          }
-        },
-        {
-          "name": "onyc_ata",
-          "docs": [
-            "Source for fee transfer; OnRe's CPI also pulls from here."
-          ],
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "account",
-                "path": "relayer_authority"
-              },
-              {
-                "kind": "account",
-                "path": "token_program"
-              },
-              {
-                "kind": "account",
-                "path": "onyc_mint"
-              }
-            ],
-            "program": {
-              "kind": "const",
-              "value": [
-                140,
-                151,
-                37,
-                143,
-                78,
-                36,
-                137,
-                241,
-                187,
-                61,
-                16,
-                41,
-                20,
-                142,
-                13,
-                131,
-                11,
-                90,
-                19,
-                153,
-                218,
-                255,
-                16,
-                132,
-                4,
-                142,
-                123,
-                216,
-                219,
-                233,
-                248,
-                89
-              ]
-            }
-          }
-        },
-        {
-          "name": "fee_vault",
-          "writable": true,
-          "relations": [
-            "relayer_config"
-          ]
-        },
-        {
-          "name": "ntt_inbox_item"
-        },
-        {
-          "name": "outflight_flow",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  111,
-                  117,
-                  116,
-                  102,
-                  108,
-                  105,
-                  103,
-                  104,
-                  116
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "ntt_inbox_item"
-              }
-            ]
-          }
-        },
-        {
-          "name": "redemption_tracker",
-          "docs": [
-            "Singleton init — fails if a prior redemption is mid-flight.",
-            "On-chain mutex that makes the ATA-delta math safe."
-          ],
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  114,
-                  101,
-                  100,
-                  101,
-                  109,
-                  112,
-                  116,
-                  105,
-                  111,
-                  110,
-                  95,
-                  116,
-                  114,
-                  97,
-                  99,
-                  107,
-                  101,
-                  114
-                ]
-              }
-            ]
-          }
-        },
-        {
-          "name": "token_program"
-        },
-        {
-          "name": "system_program",
-          "address": "11111111111111111111111111111111"
-        }
-      ],
-      "args": []
-    },
-    {
       "name": "send_usdc_to_user",
       "discriminator": [
         34,
@@ -1794,11 +1066,64 @@
           "writable": true
         },
         {
-          "name": "redemption_tracker",
+          "name": "token_program"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "swap_onyc_to_usdc",
+      "docs": [
+        "Permissionless: convert outbound flow's ONyc → USDC via any swap",
+        "program under NAV-anchored slippage protection. Withdraw fee is",
+        "taken in ONyc up front, the post-fee remainder swapped under a",
+        "bounded SPL `Approve` to `swap_delegate`. The swap CPI runs under",
+        "plain `invoke` — PDA-signer privilege does not propagate. Replaces",
+        "the OnRe redemption-request chain (KYC-gated, never executes for",
+        "the relayer PDA)."
+      ],
+      "discriminator": [
+        113,
+        41,
+        170,
+        211,
+        19,
+        16,
+        31,
+        63
+      ],
+      "accounts": [
+        {
+          "name": "relayer_config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  108,
+                  97,
+                  121,
+                  101,
+                  114,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "relayer_authority",
           "docs": [
-            "Singleton mutex gate — a concurrent outflow during an in-flight",
-            "redemption would poison the pre-balance delta. Stuck redemptions",
-            "are recovered via `cancel_redemption_onyc`."
+            "uses plain `invoke`, so PDA-signer privilege does not propagate."
           ],
           "pda": {
             "seeds": [
@@ -1807,20 +1132,9 @@
                 "value": [
                   114,
                   101,
-                  100,
-                  101,
-                  109,
-                  112,
-                  116,
-                  105,
-                  111,
-                  110,
-                  95,
-                  116,
-                  114,
+                  108,
                   97,
-                  99,
-                  107,
+                  121,
                   101,
                   114
                 ]
@@ -1829,10 +1143,257 @@
           }
         },
         {
+          "name": "onyc_mint",
+          "relations": [
+            "relayer_config"
+          ]
+        },
+        {
+          "name": "usdc_mint",
+          "relations": [
+            "relayer_config"
+          ]
+        },
+        {
+          "name": "onyc_ata",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "relayer_authority"
+              },
+              {
+                "kind": "account",
+                "path": "token_program"
+              },
+              {
+                "kind": "account",
+                "path": "onyc_mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "usdc_ata",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "relayer_authority"
+              },
+              {
+                "kind": "account",
+                "path": "token_program"
+              },
+              {
+                "kind": "account",
+                "path": "usdc_mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "fee_vault",
+          "docs": [
+            "authority is the fee_vault wallet (off-chain key, configurable)."
+          ],
+          "relations": [
+            "relayer_config"
+          ]
+        },
+        {
+          "name": "fee_vault_onyc_ata",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "fee_vault"
+              },
+              {
+                "kind": "account",
+                "path": "token_program"
+              },
+              {
+                "kind": "account",
+                "path": "onyc_mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "ntt_inbox_item"
+        },
+        {
+          "name": "outflight_flow",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  111,
+                  117,
+                  116,
+                  102,
+                  108,
+                  105,
+                  103,
+                  104,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "ntt_inbox_item"
+              }
+            ]
+          }
+        },
+        {
+          "name": "onre_offer",
+          "docs": [
+            "(key == PDA([b\"offer\", usdc_mint, onyc_mint], ONRE_PROGRAM_ID)).",
+            "Untyped because OnRe's struct is in a foreign crate; layout is",
+            "mirrored via byte offsets in `onre.rs`."
+          ]
+        },
+        {
+          "name": "swap_program",
+          "docs": [
+            "post-balance invariant and the bounded SPL delegation, not the",
+            "program identity."
+          ]
+        },
+        {
+          "name": "swap_delegate",
+          "docs": [
+            "Approve to exactly `net_onyc`; SPL auto-clears at zero remaining."
+          ]
+        },
+        {
           "name": "token_program"
         }
       ],
-      "args": []
+      "args": [
+        {
+          "name": "swap_ix_data",
+          "type": "bytes"
+        }
+      ]
     },
     {
       "name": "swap_usdc_to_onyc",
@@ -2024,39 +1585,6 @@
           "relations": [
             "relayer_config"
           ]
-        },
-        {
-          "name": "redemption_tracker",
-          "docs": [
-            "Withdraw-chain mutex gate (see `claim_usdc`)."
-          ],
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  114,
-                  101,
-                  100,
-                  101,
-                  109,
-                  112,
-                  116,
-                  105,
-                  111,
-                  110,
-                  95,
-                  116,
-                  114,
-                  97,
-                  99,
-                  107,
-                  101,
-                  114
-                ]
-              }
-            ]
-          }
         },
         {
           "name": "ntt_inbox_item"
@@ -2284,19 +1812,6 @@
       ]
     },
     {
-      "name": "RedemptionTracker",
-      "discriminator": [
-        1,
-        150,
-        121,
-        192,
-        138,
-        107,
-        94,
-        3
-      ]
-    },
-    {
       "name": "RelayerConfig",
       "discriminator": [
         116,
@@ -2338,6 +1853,19 @@
       ]
     },
     {
+      "name": "OnycSwappedToUsdc",
+      "discriminator": [
+        244,
+        135,
+        210,
+        3,
+        159,
+        210,
+        101,
+        216
+      ]
+    },
+    {
       "name": "OnycUnlocked",
       "discriminator": [
         66,
@@ -2348,45 +1876,6 @@
         174,
         42,
         160
-      ]
-    },
-    {
-      "name": "RedemptionCancelled",
-      "discriminator": [
-        22,
-        106,
-        118,
-        26,
-        83,
-        110,
-        71,
-        174
-      ]
-    },
-    {
-      "name": "RedemptionClaimed",
-      "discriminator": [
-        107,
-        251,
-        199,
-        213,
-        59,
-        173,
-        53,
-        189
-      ]
-    },
-    {
-      "name": "RedemptionRequested",
-      "discriminator": [
-        245,
-        155,
-        98,
-        131,
-        210,
-        25,
-        137,
-        146
       ]
     },
     {
@@ -2504,58 +1993,88 @@
     },
     {
       "code": 6017,
-      "name": "RedemptionNotFulfilled",
-      "msg": "OnRe RedemptionRequest PDA still exists — redemption_admin has not fulfilled yet"
-    },
-    {
-      "code": 6018,
-      "name": "RedemptionRequestMismatch",
-      "msg": "Provided redemption_request account does not match tracker.redemption_request"
-    },
-    {
-      "code": 6019,
-      "name": "RedemptionTrackerFlowMismatch",
-      "msg": "RedemptionTracker.flow does not match the bound Flow PDA"
-    },
-    {
-      "code": 6020,
       "name": "EmptyPendingFee",
       "msg": "PendingFee bundle has no inner leg set — invariant violation"
     },
     {
-      "code": 6021,
+      "code": 6018,
       "name": "WrongOriginChain",
       "msg": "Inbound NTT message did not originate from the FOGO peer chain"
     },
     {
-      "code": 6022,
-      "name": "UnexpectedOnycConsumed",
-      "msg": "Post-CPI ONyc balance dropped — OnRe consumed ONyc unexpectedly"
-    },
-    {
-      "code": 6023,
+      "code": 6019,
       "name": "UserInboxAuthorityMismatch",
       "msg": "user_inbox_ata's authority does not match the [user_inbox, user_wallet] PDA"
     },
     {
-      "code": 6024,
+      "code": 6020,
       "name": "UnexpectedFogoSender",
       "msg": "NTT VAA's NttManagerMessage.sender is not the intent_transfer setter PDA — deposit must originate via intent_transfer"
     },
     {
-      "code": 6025,
+      "code": 6021,
       "name": "InvalidInboxItem",
       "msg": "ntt_inbox_item account is missing, too short, or has the wrong discriminator"
     },
     {
-      "code": 6026,
+      "code": 6022,
       "name": "InsufficientInboxBalance",
       "msg": "user_inbox_ata balance is below the NTT-recorded inbox_item.amount — inbox was not credited as expected"
     },
     {
-      "code": 6027,
+      "code": 6023,
       "name": "PendingAuthorityIsCurrent",
       "msg": "Proposed pending_authority equals the current authority — self-rotate is rejected"
+    },
+    {
+      "code": 6024,
+      "name": "OnycConsumedMismatch",
+      "msg": "Post-CPI ONyc consumed does not equal the bounded Approve amount"
+    },
+    {
+      "code": 6025,
+      "name": "RedeemSlippageBelowFloor",
+      "msg": "Post-swap USDC delta is below the NAV-derived slippage floor"
+    },
+    {
+      "code": 6026,
+      "name": "OnreNoActiveVector",
+      "msg": "No active OnRe pricing vector for the current clock"
+    },
+    {
+      "code": 6027,
+      "name": "OnreNavOverflow",
+      "msg": "Overflow in OnRe NAV computation"
+    },
+    {
+      "code": 6028,
+      "name": "OnreOfferTooShort",
+      "msg": "OnRe Offer account data is shorter than the pinned layout"
+    },
+    {
+      "code": 6029,
+      "name": "OnreOfferTokenInMintMismatch",
+      "msg": "OnRe Offer token_in_mint does not match relayer_config.usdc_mint"
+    },
+    {
+      "code": 6030,
+      "name": "OnreOfferTokenOutMintMismatch",
+      "msg": "OnRe Offer token_out_mint does not match relayer_config.onyc_mint"
+    },
+    {
+      "code": 6031,
+      "name": "OnreOfferOwnerMismatch",
+      "msg": "onre_offer account owner is not the OnRe program — handler refuses to read a foreign account as a pricing oracle"
+    },
+    {
+      "code": 6032,
+      "name": "OnreOfferAddressMismatch",
+      "msg": "onre_offer address does not match the deposit Offer PDA derived from (usdc_mint, onyc_mint)"
+    },
+    {
+      "code": 6033,
+      "name": "OnreInvalidSlippageBps",
+      "msg": "MAX_SLIPPAGE_BPS is misconfigured (> 10_000) — refusing to compute a zero floor"
     }
   ],
   "types": [
@@ -2614,9 +2133,6 @@
           },
           {
             "name": "Swapped"
-          },
-          {
-            "name": "RedemptionPending"
           }
         ]
       }
@@ -2675,6 +2191,67 @@
       }
     },
     {
+      "name": "OnycSwappedToUsdc",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "flow",
+            "type": "pubkey"
+          },
+          {
+            "name": "gross_onyc",
+            "docs": [
+              "Pre-fee ONyc unlocked by `unlock_onyc` (== `flow.amount` at entry)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "fee_onyc",
+            "docs": [
+              "Withdraw fee in ONyc, transferred to `fee_vault_onyc_ata`."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "net_onyc",
+            "docs": [
+              "Post-fee ONyc spent in the swap (== gross_onyc - fee_onyc)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "onyc_consumed",
+            "docs": [
+              "Actual ONyc consumed by the swap; asserted == net_onyc on-chain."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "usdc_received",
+            "docs": [
+              "USDC delta on the relayer-authority USDC ATA; asserted >= nav_floor."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "nav_floor",
+            "docs": [
+              "NAV-anchored slippage floor the swap had to clear."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "swap_program",
+            "docs": [
+              "Router program ID — operator-chosen, surfaced for off-chain audit."
+            ],
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
       "name": "OnycUnlocked",
       "type": {
         "kind": "struct",
@@ -2726,132 +2303,6 @@
               "MAX-extended on later raises so a follow-up never shortens the window."
             ],
             "type": "u64"
-          }
-        ]
-      }
-    },
-    {
-      "name": "RedemptionCancelled",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "flow",
-            "type": "pubkey"
-          },
-          {
-            "name": "redemption_request",
-            "type": "pubkey"
-          },
-          {
-            "name": "returned_onyc_amount",
-            "type": "u64"
-          }
-        ]
-      }
-    },
-    {
-      "name": "RedemptionClaimed",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "flow",
-            "type": "pubkey"
-          },
-          {
-            "name": "redemption_request",
-            "type": "pubkey"
-          },
-          {
-            "name": "onyc_amount_in",
-            "type": "u64"
-          },
-          {
-            "name": "usdc_received",
-            "type": "u64"
-          }
-        ]
-      }
-    },
-    {
-      "name": "RedemptionRequested",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "flow",
-            "type": "pubkey"
-          },
-          {
-            "name": "redemption_request",
-            "type": "pubkey"
-          },
-          {
-            "name": "gross_amount",
-            "type": "u64"
-          },
-          {
-            "name": "fee_amount",
-            "type": "u64"
-          },
-          {
-            "name": "net_amount",
-            "type": "u64"
-          },
-          {
-            "name": "usdc_ata_pre_balance",
-            "type": "u64"
-          }
-        ]
-      }
-    },
-    {
-      "name": "RedemptionTracker",
-      "docs": [
-        "Singleton mutex for the in-flight withdraw-chain redemption.",
-        "`init` here fails if another redemption is mid-flight, blocking the",
-        "USDC-delta race."
-      ],
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "flow",
-            "type": "pubkey"
-          },
-          {
-            "name": "redemption_request",
-            "docs": [
-              "OnRe `RedemptionRequest` PDA; polled for closure as fulfillment signal."
-            ],
-            "type": "pubkey"
-          },
-          {
-            "name": "usdc_ata_pre_balance",
-            "docs": [
-              "Relayer USDC ATA balance pre-CPI; `claim_redemption_usdc` uses",
-              "post-fulfillment delta vs this."
-            ],
-            "type": "u64"
-          },
-          {
-            "name": "onyc_amount_in",
-            "docs": [
-              "Audit-trail only — net-of-fee ONyc sent to OnRe."
-            ],
-            "type": "u64"
-          },
-          {
-            "name": "payer",
-            "docs": [
-              "Pays for init, receives rent on close."
-            ],
-            "type": "pubkey"
-          },
-          {
-            "name": "bump",
-            "type": "u8"
           }
         ]
       }

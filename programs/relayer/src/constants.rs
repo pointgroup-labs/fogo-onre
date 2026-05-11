@@ -29,37 +29,15 @@ pub const NTT_RELEASE_WORMHOLE_OUTBOUND_IX: [u8; 8] =
 
 pub const ONRE_TAKE_OFFER_IX: [u8; 8] = [37, 190, 224, 77, 197, 39, 203, 230];
 
-/// OnRe `create_redemption_request` sighash. Withdraw chain has no
-/// permissionless atomic counterpart to `take_offer_permissionless`, so we
-/// submit a request and poll for closure.
-pub const ONRE_CREATE_REDEMPTION_REQUEST_IX: [u8; 8] = [201, 53, 181, 254, 115, 137, 70, 151];
-
-/// Slot index for OnRe's `create_redemption_request.redemption_request`.
-/// `request_redemption_onyc` reads this post-CPI; OnRe's `init` constraint
-/// has seed-validated it, so binding to `tracker.redemption_request` is
-/// trustworthy without a second source of truth.
-pub const ONRE_CREATE_REDEMPTION_REQUEST_REDEMPTION_REQUEST_INDEX: usize = 2;
-
-/// OnRe `cancel_redemption_request` sighash.
-pub const ONRE_CANCEL_REDEMPTION_REQUEST_IX: [u8; 8] = [77, 155, 4, 179, 114, 233, 162, 45];
-
-/// Pinned independently from the create-side index — OnRe could reorder
-/// either struct without touching the other.
-pub const ONRE_CANCEL_REDEMPTION_REQUEST_REDEMPTION_REQUEST_INDEX: usize = 2;
-
-/// OnRe `RedemptionOffer` PDA seed: `[seed, ONyc_mint, USDC_mint]` —
-/// **opposite** order from the deposit `Offer` PDA (`[b"offer", USDC_mint,
-/// ONyc_mint]`). Don't reuse `OFFER_SEED` here.
-pub const ONRE_REDEMPTION_OFFER_SEED: &[u8] = b"redemption_offer";
-
-/// `RedemptionRequest` PDA seed: `[seed, redemption_offer, request_counter_le_u64]`.
-pub const ONRE_REDEMPTION_REQUEST_SEED: &[u8] = b"redemption_request";
-
-pub const ONRE_REDEMPTION_OFFER_VAULT_AUTHORITY_SEED: &[u8] = b"redemption_offer_vault_authority";
-
-/// Singleton sidecar PDA seed: `[seed]`. Exactly one `RedemptionTracker`
-/// at a time — doubles as the in-flight withdraw mutex.
-pub const REDEMPTION_TRACKER_SEED: &[u8] = b"redemption_tracker";
+/// OnRe deposit `Offer` PDA seed: `[seed, token_in_mint, token_out_mint]`.
+/// For the relayer's deposit-side oracle (USDC → ONyc) the derivation is
+/// `[b"offer", usdc_mint, onyc_mint]` under `ONRE_PROGRAM_ID`. This is the
+/// pricing-vector source `swap_onyc_to_usdc` consults to derive the
+/// NAV-anchored slippage floor — pinning it on-chain is the single
+/// load-bearing check that prevents an attacker from forging an offer
+/// account with mint bytes at the expected offsets and a near-zero price
+/// vector.
+pub const ONRE_DEPOSIT_OFFER_SEED: &[u8] = b"offer";
 
 /// SPL `Approve` instruction tag. NTT session-authority delegate handshake.
 pub const SPL_TOKEN_APPROVE_IX_TAG: u8 = 4;
@@ -106,3 +84,32 @@ pub const INTENT_TRANSFER_PROGRAM_ID: Pubkey =
     pubkey!("Xfry4dW9m42ncAqm8LyEnyS5V6xu5DSJTMRQLiGkARD");
 
 pub const INTENT_TRANSFER_SETTER_SEED: &[u8] = b"intent_transfer";
+
+/// Hard cap on slippage tolerance accepted by `swap_onyc_to_usdc`. Used as
+/// the haircut against OnRe's NAV-derived gross expected output:
+/// `floor = gross_expected * (10_000 - MAX_SLIPPAGE_BPS) / 10_000`.
+///
+/// Tightened to 10 bps under the swap-only withdraw design — this constant
+/// *is* the security boundary now (no cancel-path fallback to fall back on),
+/// and 10 bps is the operational floor we expect ONyc/USDC to clear at
+/// typical redemption sizes via Jupiter.
+pub const MAX_SLIPPAGE_BPS: u16 = 10;
+
+/// OnRe `Offer` account layout (mirrored from
+/// `onre-finance/onre-sol/programs/onreapp/src/instructions/offer/offer_state.rs`).
+/// Drift tripwire: pinned byte-for-byte against the mainnet fixture in
+/// `onre::tests::offer_layout_matches_fixture`. Refresh both the fixture
+/// and these constants in lockstep when OnRe re-lays out `Offer`.
+pub const ONRE_OFFER_ACCOUNT_SIZE: usize = 608;
+pub const ONRE_OFFER_VECTORS_OFFSET: usize = 72;
+pub const ONRE_OFFER_VECTOR_SIZE: usize = 40;
+pub const ONRE_OFFER_MAX_VECTORS: usize = 10;
+
+/// OnRe price math constants (mirrored from
+/// `instructions/offer/offer_utils.rs`). `ONRE_PRICE_DENOMINATOR =
+/// 10^ONRE_PRICE_DECIMALS`; precomputed because the math hot path runs
+/// inside `swap_onyc_to_usdc`'s NAV-floor calculation.
+pub const ONRE_PRICE_DECIMALS: u32 = 9;
+pub const ONRE_PRICE_DENOMINATOR: u128 = 1_000_000_000;
+pub const ONRE_APR_SCALE: u128 = 1_000_000;
+pub const ONRE_SECONDS_IN_YEAR: u128 = 31_536_000;

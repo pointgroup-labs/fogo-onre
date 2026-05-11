@@ -5,7 +5,7 @@ use anchor_spl::token_interface::{
 
 use crate::constants::{
     CONFIG_SEED, FLOW_INBOUND_SEED, INTENT_TRANSFER_PROGRAM_ID, INTENT_TRANSFER_SETTER_SEED,
-    NTT_REDEEM_IX, NTT_RELEASE_INBOUND_UNLOCK_IX, NTT_USDC_PROGRAM_ID, REDEMPTION_TRACKER_SEED,
+    NTT_REDEEM_IX, NTT_RELEASE_INBOUND_UNLOCK_IX, NTT_USDC_PROGRAM_ID,
     RELAYER_SEED, USER_INBOX_SEED,
 };
 use crate::cpi::invoke_relayer_signed;
@@ -274,15 +274,6 @@ pub struct ClaimUsdc<'info> {
         bump,
     )]
     pub inflight_flow: Account<'info, Flow>,
-
-    /// Withdraw-chain mutex gate. `SystemAccount` asserts no
-    /// `RedemptionTracker` exists — pauses deposit inflows so they
-    /// can't pollute `claim_redemption_usdc`'s delta math.
-    #[account(
-        seeds = [REDEMPTION_TRACKER_SEED],
-        bump,
-    )]
-    pub redemption_tracker: SystemAccount<'info>,
 
     pub token_program: Interface<'info, TokenInterface>,
     pub system_program: Program<'info, System>,

@@ -3,7 +3,7 @@ use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};
 
 use crate::constants::{
     CONFIG_SEED, FLOW_OUTBOUND_SEED, FOGO_WORMHOLE_CHAIN_ID, NTT_TRANSFER_LOCK_IX,
-    NTT_USDC_PROGRAM_ID, REDEMPTION_TRACKER_SEED, RELAYER_SEED,
+    NTT_USDC_PROGRAM_ID, RELAYER_SEED,
 };
 use crate::cpi::{approve_ntt_session_authority, invoke_relayer_signed};
 use crate::error::RelayerError;
@@ -111,15 +111,6 @@ pub struct SendUsdcToUser<'info> {
     /// CHECK: pinned to the flow PDA's stored `payer`; receives rent refund.
     #[account(mut, address = outflight_flow.payer)]
     pub rent_destination: UncheckedAccount<'info>,
-
-    /// Singleton mutex gate — a concurrent outflow during an in-flight
-    /// redemption would poison the pre-balance delta. Stuck redemptions
-    /// are recovered via `cancel_redemption_onyc`.
-    #[account(
-        seeds = [REDEMPTION_TRACKER_SEED],
-        bump,
-    )]
-    pub redemption_tracker: SystemAccount<'info>,
 
     pub token_program: Interface<'info, TokenInterface>,
 }

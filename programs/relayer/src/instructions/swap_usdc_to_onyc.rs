@@ -2,7 +2,7 @@ use anchor_lang::prelude::*;
 use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};
 
 use crate::constants::{
-    CONFIG_SEED, FLOW_INBOUND_SEED, ONRE_PROGRAM_ID, ONRE_TAKE_OFFER_IX, REDEMPTION_TRACKER_SEED,
+    CONFIG_SEED, FLOW_INBOUND_SEED, ONRE_PROGRAM_ID, ONRE_TAKE_OFFER_IX,
     RELAYER_SEED,
 };
 use crate::cpi::{invoke_relayer_signed, relayer_signed_transfer_checked};
@@ -116,13 +116,6 @@ pub struct SwapUsdcToOnyc<'info> {
         token::token_program = token_program,
     )]
     pub fee_vault: Box<InterfaceAccount<'info, TokenAccount>>,
-
-    /// Withdraw-chain mutex gate (see `claim_usdc`).
-    #[account(
-        seeds = [REDEMPTION_TRACKER_SEED],
-        bump,
-    )]
-    pub redemption_tracker: SystemAccount<'info>,
 
     /// CHECK: validated transitively via the flow PDA seeds.
     pub ntt_inbox_item: UncheckedAccount<'info>,

@@ -139,3 +139,49 @@ pub fn approve_ntt_session_authority<'info>(
     )?;
     Ok(())
 }
+
+/// PDA-signed SPL `Approve` granting `delegate` permission to spend exactly
+/// `amount` from `source_ata`. Used by `swap_onyc_to_usdc` to bound a
+/// third-party swap program's reach: the swap CPI fires under plain `invoke` (no
+/// PDA-signer propagation), and SPL auto-clears the delegation when the
+/// approved amount hits zero — so as long as the swap consumes exactly
+/// `amount`, no explicit `Revoke` is needed.
+#[allow(clippy::too_many_arguments)]
+pub fn approve_swap_delegate<'info>(
+    token_program: &AccountInfo<'info>,
+    source_ata: &AccountInfo<'info>,
+    relayer_authority: &AccountInfo<'info>,
+    authority_bump: u8,
+    delegate: &AccountInfo<'info>,
+    amount: u64,
+) -> Result<()> {
+    let bump_arr = [authority_bump];
+    let signer_seeds: &[&[u8]] = &[RELAYER_SEED, &bump_arr];
+
+    let approve_ix = Instruction {
+        program_id: *token_program.key,
+        accounts: vec![
+            AccountMeta::new(*source_ata.key, false),
+            AccountMeta::new_readonly(*delegate.key, false),
+            AccountMeta::new_readonly(*relayer_authority.key, true),
+        ],
+        data: {
+            let mut d = Vec::with_capacity(9);
+            d.push(SPL_TOKEN_APPROVE_IX_TAG);
+            d.extend_from_slice(&amount.to_le_bytes());
+            d
+        },
+    };
+
+    invoke_signed(
+        &approve_ix,
+        &[
+            source_ata.clone(),
+            delegate.clone(),
+            relayer_authority.clone(),
+            token_program.clone(),
+        ],
+        &[signer_seeds],
+    )?;
+    Ok(())
+}

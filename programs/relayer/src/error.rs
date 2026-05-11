@@ -53,23 +53,11 @@ pub enum RelayerError {
     #[msg("Signer does not match relayer_config.pending_authority")]
     PendingAuthorityMismatch,
 
-    #[msg("OnRe RedemptionRequest PDA still exists — redemption_admin has not fulfilled yet")]
-    RedemptionNotFulfilled,
-
-    #[msg("Provided redemption_request account does not match tracker.redemption_request")]
-    RedemptionRequestMismatch,
-
-    #[msg("RedemptionTracker.flow does not match the bound Flow PDA")]
-    RedemptionTrackerFlowMismatch,
-
     #[msg("PendingFee bundle has no inner leg set — invariant violation")]
     EmptyPendingFee,
 
     #[msg("Inbound NTT message did not originate from the FOGO peer chain")]
     WrongOriginChain,
-
-    #[msg("Post-CPI ONyc balance dropped — OnRe consumed ONyc unexpectedly")]
-    UnexpectedOnycConsumed,
 
     #[msg("user_inbox_ata's authority does not match the [user_inbox, user_wallet] PDA")]
     UserInboxAuthorityMismatch,
@@ -85,4 +73,34 @@ pub enum RelayerError {
 
     #[msg("Proposed pending_authority equals the current authority — self-rotate is rejected")]
     PendingAuthorityIsCurrent,
+
+    #[msg("Post-CPI ONyc consumed does not equal the bounded Approve amount")]
+    OnycConsumedMismatch,
+
+    #[msg("Post-swap USDC delta is below the NAV-derived slippage floor")]
+    RedeemSlippageBelowFloor,
+
+    #[msg("No active OnRe pricing vector for the current clock")]
+    OnreNoActiveVector,
+
+    #[msg("Overflow in OnRe NAV computation")]
+    OnreNavOverflow,
+
+    #[msg("OnRe Offer account data is shorter than the pinned layout")]
+    OnreOfferTooShort,
+
+    #[msg("OnRe Offer token_in_mint does not match relayer_config.usdc_mint")]
+    OnreOfferTokenInMintMismatch,
+
+    #[msg("OnRe Offer token_out_mint does not match relayer_config.onyc_mint")]
+    OnreOfferTokenOutMintMismatch,
+
+    #[msg("onre_offer account owner is not the OnRe program — handler refuses to read a foreign account as a pricing oracle")]
+    OnreOfferOwnerMismatch,
+
+    #[msg("onre_offer address does not match the deposit Offer PDA derived from (usdc_mint, onyc_mint)")]
+    OnreOfferAddressMismatch,
+
+    #[msg("MAX_SLIPPAGE_BPS is misconfigured (> 10_000) — refusing to compute a zero floor")]
+    OnreInvalidSlippageBps,
 }
