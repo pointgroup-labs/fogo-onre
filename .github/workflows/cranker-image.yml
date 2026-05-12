@@ -16,14 +16,22 @@ on:
 permissions:
   contents: read
   packages: write
+  # Required so the Trivy SARIF upload can attach findings to the
+  # repo's Security tab via codeql-action/upload-sarif.
+  security-events: write
 
 concurrency:
   group: cranker-image-${{ github.ref }}
-  cancel-in-progress: true
+  # Cancel superseded runs on branches, but never on tag refs — a tag
+  # push always corresponds to a release artifact we want to publish.
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 
 jobs:
   build:
     runs-on: ubuntu-24.04
+    # Hard ceiling so a stuck buildx layer or hung Trivy DB pull can't
+    # consume an entire runner-hour budget.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -48,6 +56,7 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
 
       - name: Build and push
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -59,11 +68,54 @@ jobs:
           cache-to: type=gha,mode=max
           provenance: false
 
-      - name: Trivy scan (CRITICAL gating)
-        uses: aquasecurity/trivy-action@0.28.0
+      # Reference the freshly-built image by its content-addressed
+      # digest, not by tag. Eliminates the race where a concurrent
+      # workflow could retag `sha-<sha>` between the push above and
+      # the scans below.
+      - name: Resolve scan target
+        id: target
+        env:
+          IMAGE: ghcr.io/${{ github.repository_owner }}/fogo-onre-cranker
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: echo "ref=${IMAGE}@${DIGEST}" >> "$GITHUB_OUTPUT"
+
+      # Informational pass: HIGH+CRITICAL findings, SARIF output for the
+      # Security tab. Never blocks the build — high-noise findings (e.g.
+      # base-image CVEs awaiting upstream fix) shouldn't gate releases,
+      # they should be visible.
+      - name: Trivy scan (informational, SARIF)
+        uses: aquasecurity/trivy-action@0.36.0
+        env:
+          # Keep CI logs readable; the SARIF artifact carries the detail.
+          TRIVY_NO_PROGRESS: 'true'
         with:
-          image-ref: ghcr.io/${{ github.repository_owner }}/fogo-onre-cranker:sha-${{ github.sha }}
+          image-ref: ${{ steps.target.outputs.ref }}
+          format: sarif
+          output: trivy-results.sarif
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '0'
+
+      - name: Upload Trivy SARIF
+        # Always upload, even if a later step fails — losing scan
+        # visibility on a failing build is the worst-case scenario.
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-results.sarif
+          category: trivy-cranker
+
+      # Blocking pass: CRITICAL only. A separate invocation (rather than
+      # reusing the SARIF run with `exit-code: 1`) keeps the gating
+      # signal independent from the SARIF upload — if Trivy itself
+      # errors, we still want the SARIF step to attempt upload.
+      - name: Trivy scan (CRITICAL gating)
+        uses: aquasecurity/trivy-action@0.36.0
+        env:
+          TRIVY_NO_PROGRESS: 'true'
+        with:
+          image-ref: ${{ steps.target.outputs.ref }}
           format: table
           severity: CRITICAL
-          exit-code: '1'
           ignore-unfixed: true
+          exit-code: '1'
