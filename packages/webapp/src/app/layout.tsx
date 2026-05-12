@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next'
 import type { ReactNode } from 'react'
+import LiveJournalTracker from '@/components/LiveJournalTracker'
 import Providers from '@/providers'
 import './globals.css'
 
@@ -36,7 +37,18 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en" suppressHydrationWarning>
       <body>
-        <Providers>{children}</Providers>
+        <Providers>
+          {/*
+            Headless. Mounted at the root so it survives navigation
+            between `(main)` and `/tx/[signature]` — without this, the
+            tracker would unmount when the user opens the detail page,
+            and the journal entry would never advance to terminal
+            (BridgeHistory shows "processing" forever even after the
+            flow detail page shows "delivered").
+          */}
+          <LiveJournalTracker />
+          {children}
+        </Providers>
       </body>
     </html>
   )

@@ -40,6 +40,16 @@ function Toaster({ ...props }: ToasterProps) {
       toastOptions={{
         classNames: {
           toast: 'cn-toast',
+          // Sonner's default action button is a muted grey set via
+          // inline styles, which on our popover-bg toasts blends in to
+          // the point of looking disabled. Overriding with a filled
+          // inverse-of-surface treatment (foreground bg / background
+          // text) gives the action a primary-button feel in both
+          // themes and on every toast variant — emerald would clash on
+          // error toasts, red would clash on success. The `!` important
+          // variants are required to beat Sonner's inline styles.
+          actionButton:
+            '!bg-foreground !text-background hover:!bg-foreground/90 !rounded-md !px-3 !py-1 !text-xs !font-medium !transition-colors',
         },
       }}
       {...props}

@@ -72,6 +72,20 @@ export function mergeRow(
     amountIsApproximate = isDeposit
   }
 
+  // Phase suppression. The journal phase ("Submitting" / "In progress")
+  // is a *local* progress label driven by `LiveJournalTracker`. When the
+  // Wormholescan oracle (or a manual dismissal) independently confirms
+  // delivery, the journal label is stale by definition — suppress it
+  // here so every consumer of `TimelineRow` sees the same precedence
+  // (oracle/dismiss > journal). Without this, the journal can pin the
+  // row at "In progress" forever after the tx detail page has already
+  // shown "Delivered", because the tracker's local FOGO-balance watch
+  // can lag, miss a non-monotonic ATA write, or fail to land its
+  // terminal patch due to observer-timing races.
+  const oracleDelivered = op?.kind === 'delivered' || dismissedSignatures.has(burn.signature)
+  const journalPhase = journal !== null ? humanPhaseFromStatus(journal) : null
+  const phase = oracleDelivered ? null : journalPhase
+
   return {
     signature: burn.signature,
     // The user's burn mint determines the flow direction. Burning
@@ -84,7 +98,7 @@ export function mergeRow(
     blockTime: burn.blockTime,
     status: op?.kind ?? 'unknown',
     destinationSignature: op !== null && op.kind === 'delivered' ? op.destinationTxHash : null,
-    phase: journal !== null ? humanPhaseFromStatus(journal) : null,
+    phase,
     manuallyDismissed: dismissedSignatures.has(burn.signature),
   }
 }

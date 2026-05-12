@@ -6,7 +6,6 @@ import { useCallback } from 'react'
 import BridgeHistory from '@/components/BridgeHistory'
 import ErrorBoundary from '@/components/ErrorBoundary'
 import Header from '@/components/Header'
-import LiveJournalTracker from '@/components/LiveJournalTracker'
 import ProtocolStats from '@/components/ProtocolStats'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
@@ -30,11 +29,15 @@ function tabToPath(tab: TabKind): string {
 /**
  * Shared shell for the deposit / withdraw routes. Lives in a route
  * group (`(main)`) so it wraps both `/` and `/withdraw` without adding
- * a URL segment. Header, stats, tab nav, journal tracker, and bridge
- * history are all rendered here so they survive route changes — only
- * the inner `{children}` slot remounts when the user navigates between
- * tabs. That preserves component state (scroll, query subscriptions,
+ * a URL segment. Header, stats, tab nav, and bridge history are all
+ * rendered here so they survive route changes — only the inner
+ * `{children}` slot remounts when the user navigates between tabs.
+ * That preserves component state (scroll, query subscriptions,
  * balance WS connections) and avoids re-fetching anything on toggle.
+ *
+ * `LiveJournalTracker` lives in the *root* layout (not here) because
+ * it must keep running while the user is on `/tx/[signature]`, which
+ * is outside this route group.
  *
  * Tabs are *visual* only — `onValueChange` routes via `router.push`
  * rather than driving internal `<Tabs>` state. Radix `<Tabs>` is kept
@@ -73,7 +76,6 @@ export default function MainLayout({ children }: { children: ReactNode }) {
             </TabsList>
           </Tabs>
           {children}
-          <LiveJournalTracker />
           <ErrorBoundary label="bridge history"><BridgeHistory /></ErrorBoundary>
         </div>
       </main>

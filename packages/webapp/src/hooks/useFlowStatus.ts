@@ -3,6 +3,7 @@
 import { getAssociatedTokenAddressSync } from '@solana/spl-token'
 import { Connection, PublicKey } from '@solana/web3.js'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useEffect } from 'react'
 import { FOGO_ONYC_MINT, USDC_S_MINT } from '@/constants'
 import { useDocumentVisible } from '@/hooks/useDocumentVisible'
 import { useSettings } from '@/store/settings'
@@ -35,7 +36,11 @@ export interface FlowStatus {
   baselineBalance: bigint | null
 }
 
-const POLL_MS = 10_000
+// Poll cadence is a *fallback* — `onAccountChange` is the primary
+// delivery signal. WebSocket subs drop silently on NAT timeout / RPC
+// recycle, so we still poll, just less aggressively than when polling
+// was the only channel (was 10 s).
+const POLL_MS = 30_000
 // Bridge round-trip timing differs by kind:
 //   - Deposit: NTT FOGO→Solana → relayer cranks → return-leg NTT Solana→FOGO
 //     ONyc mint. Typically minutes; 30 min is a generous expiry.
@@ -140,6 +145,43 @@ export function useFlowStatus(input: FlowWatchInput): FlowStatus | null {
       return { phase, signature: sig, startedAt: start, baselineBalance: baseline }
     },
   })
+
+  // Push channel: subscribe to writes on the destination ATA over the
+  // RPC WebSocket. The validator notifies within ~1 slot of the
+  // relayer's return-leg mint landing, which is dramatically faster
+  // than the 30 s poll fallback. We *invalidate* rather than decode
+  // inline so baseline / expiry / phase classification stays
+  // single-sourced in the queryFn — the callback fires on every ATA
+  // write (including unrelated transfers) and the `balance > baseline`
+  // guard inside the queryFn is what actually promotes to 'delivered'.
+  //
+  // `query.data?.phase` is in the dep list specifically so the effect
+  // re-runs and tears down the socket once the flow turns terminal;
+  // otherwise we'd hold a subscription open for the lifetime of the
+  // mount.
+  useEffect(() => {
+    if (!enabled || ownerKey === null) {
+      return
+    }
+    if (isTerminal(query.data?.phase)) {
+      return
+    }
+    const connection = getFogoConnection(fogoRpcUrl)
+    const destinationMint = kind === 'deposit' ? FOGO_ONYC_MINT : USDC_S_MINT
+    const destAta = getAssociatedTokenAddressSync(destinationMint, new PublicKey(ownerKey))
+    const subId = connection.onAccountChange(
+      destAta,
+      () => {
+        queryClient.invalidateQueries({ queryKey })
+      },
+      'confirmed',
+    )
+    return () => {
+      // Fire-and-forget — a torn-down RPC connection rejecting here
+      // is not actionable, just noise in the console.
+      void connection.removeAccountChangeListener(subId).catch(() => {})
+    }
+  }, [enabled, ownerKey, kind, fogoRpcUrl, queryKey, queryClient, query.data?.phase])
 
   return query.data ?? null
 }

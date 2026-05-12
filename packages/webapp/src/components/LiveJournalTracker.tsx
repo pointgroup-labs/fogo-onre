@@ -103,7 +103,7 @@ function TrackerRow({ flowId }: { flowId: string }) {
     if (isTerminal(liveStatus) && !persisted.notified) {
       patchFlow(qc, flowId, { status: liveStatus, notified: true })
       const action = {
-        label: 'Explorer',
+        label: 'Explore',
         onClick: () => {
           window.open(fogoTxUrl(persisted.signature), '_blank', 'noopener,noreferrer')
         },
