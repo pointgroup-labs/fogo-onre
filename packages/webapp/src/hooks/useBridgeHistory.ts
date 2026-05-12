@@ -23,6 +23,14 @@ interface BurnPageGroup {
 export interface UseBridgeHistoryResult {
   rows: TimelineRow[]
   isLoading: boolean
+  /**
+   * True once the underlying burn query has completed at least one fetch.
+   * Distinct from `!isLoading`: when no owner is connected the query is
+   * `enabled: false`, so `isLoading` is `false` even though we've never
+   * actually queried — `isFetched` stays `false` in that case, which is
+   * what callers need to distinguish "settled empty" from "haven't tried".
+   */
+  isFetched: boolean
   isError: boolean
   hasNextPage: boolean
   fetchNextPage: () => void
@@ -170,6 +178,7 @@ export function useBridgeHistory(owner: PublicKey | null): UseBridgeHistoryResul
   return {
     rows,
     isLoading: burnQuery.isLoading,
+    isFetched: burnQuery.isFetched,
     isError: burnQuery.isError,
     hasNextPage: burnQuery.hasNextPage ?? false,
     fetchNextPage: () => { burnQuery.fetchNextPage() },

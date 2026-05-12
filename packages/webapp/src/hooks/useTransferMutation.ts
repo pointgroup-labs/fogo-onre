@@ -83,7 +83,14 @@ export function useTransferMutation(options: UseTransferMutationOptions = {}) {
         throw new Error('Wallet not connected')
       }
       if (args.kind === 'withdraw' && pendingWithdrawExists(qc)) {
-        throw new Error('Withdraw already in flight')
+        // Friendlier than "Withdraw already in flight" — explains *why*
+        // it's blocked and what the user can do (the journal is
+        // self-clearing past the 2h stuck-pending window in
+        // `pendingWithdrawExists`, but they shouldn't have to read
+        // source to figure that out).
+        throw new Error(
+          'A previous redeem is still in flight. Wait for it to finish or check Bridge history.',
+        )
       }
 
       const amount = parseAmountStrict(args.amountStr, args.decimals)
@@ -181,12 +188,12 @@ export function useTransferMutation(options: UseTransferMutationOptions = {}) {
     },
     onSuccess: (status) => {
       toast.success(
-        status.kind === 'deposit' ? 'Deposit submitted' : 'Withdraw submitted',
+        status.kind === 'deposit' ? 'Deposit submitted' : 'Redeem submitted',
         {
           id: status.flowId,
           description: `Tx ${shortSig(status.signature)}`,
           action: {
-            label: 'Explorer',
+            label: 'Explore',
             onClick: () => {
               window.open(fogoTxUrl(status.signature), '_blank', 'noopener,noreferrer')
             },

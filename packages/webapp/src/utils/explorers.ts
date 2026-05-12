@@ -19,9 +19,21 @@
 
 const FOGOSCAN_BASE = 'https://fogoscan.com'
 const WORMHOLESCAN_BASE = 'https://wormholescan.io'
+const SOLSCAN_BASE = 'https://solscan.io'
 
 export function fogoTxUrl(signature: string): string {
   return `${FOGOSCAN_BASE}/tx/${signature}`
+}
+
+/**
+ * Solscan URL for the Solana-side leg of a bridge (USDC redeem on
+ * deposit, ONyc unlock on withdraw). Solscan was chosen over the
+ * official Solana Explorer because it parses NTT/Anchor program logs
+ * out of the box, surfacing the `claim_usdc` / `unlock_onyc`
+ * instruction by name rather than as a hex-blob inner instruction.
+ */
+export function solanaTxUrl(signature: string): string {
+  return `${SOLSCAN_BASE}/tx/${signature}`
 }
 
 /**

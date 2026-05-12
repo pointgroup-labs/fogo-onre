@@ -3,7 +3,8 @@
 import type { TimelineRow } from '@/lib/bridgeHistory/types'
 import { isEstablished, useSession } from '@fogo/sessions-sdk-react'
 import { useIsRestoring } from '@tanstack/react-query'
-import { ArrowDownLeft, ArrowUpRight, Check, ExternalLink, Inbox, Loader2 } from 'lucide-react'
+import { ArrowDownLeft, ArrowUpRight, Check, ChevronDown, ChevronRight, ChevronUp, Inbox, Loader2 } from 'lucide-react'
+import { useRouter } from 'next/navigation'
 import { useEffect, useMemo, useState } from 'react'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
@@ -13,7 +14,16 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { FOGO_ONYC_DECIMALS, USDC_DECIMALS } from '@/constants'
 import { useBridgeHistory } from '@/hooks/useBridgeHistory'
 import { dismissBridge } from '@/lib/bridgeHistory/dismissed'
-import { fogoTxUrl } from '@/utils/explorers'
+
+/**
+ * How many rows to show before collapsing the rest behind a "Show more"
+ * toggle. Five fits comfortably in a viewport and aligns with the recency
+ * the user usually cares about; older rows (especially long-stuck
+ * `Pending` ones whose oracle never resolved) are out of sight by default
+ * but one click away. Tunable — bump to 7 if user feedback wants more
+ * density visible at rest.
+ */
+const COLLAPSED_ROWS = 5
 
 export default function BridgeHistory() {
   // Same hydration pattern as PendingTxList: defer the restoring branch
@@ -32,6 +42,12 @@ export default function BridgeHistory() {
   const session = useSession()
   const owner = isEstablished(session) ? session.walletPublicKey : null
   const { rows, isLoading, isError, hasNextPage, fetchNextPage, isFetchingNextPage } = useBridgeHistory(owner)
+
+  // Collapse state — keep the default view tight (5 rows). Older rows
+  // are still in the DOM tree only when expanded; this keeps row-count
+  // proportional to "what the user is actively triaging" instead of
+  // "everything we've ever indexed".
+  const [expanded, setExpanded] = useState(false)
 
   if (owner === null) {
     return null
@@ -64,12 +80,56 @@ export default function BridgeHistory() {
     )
   }
 
+  const visibleRows = expanded ? rows : rows.slice(0, COLLAPSED_ROWS)
+  const hiddenCount = rows.length - visibleRows.length
+  const canCollapse = rows.length > COLLAPSED_ROWS
+
   return (
     <div className="flex flex-col gap-3">
-      <ul aria-label="Bridge history" className="flex flex-col gap-2">
-        {rows.map(r => <li key={r.signature}><BridgeRow row={r} nowMs={nowMs} /></li>)}
-      </ul>
-      {hasNextPage && (
+      <div className="relative">
+        <ul aria-label="Bridge history" className="flex flex-col gap-2">
+          {visibleRows.map(r => <li key={r.signature}><BridgeRow row={r} nowMs={nowMs} /></li>)}
+        </ul>
+        {/*
+          Soft fade overlay when collapsed AND there are hidden rows —
+          a visual hint that more content lives below the fold without
+          shouting. Pointer-events disabled so it doesn't intercept
+          clicks on the bottom row.
+        */}
+        {!expanded && hiddenCount > 0 && (
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-x-0 bottom-0 h-12 rounded-b-xl bg-gradient-to-t from-background to-transparent"
+          />
+        )}
+      </div>
+      {canCollapse && (
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => setExpanded(v => !v)}
+          className="self-center text-xs text-muted-foreground"
+        >
+          {expanded
+            ? (
+                <>
+                  Show less
+                  <ChevronUp aria-hidden className="ml-1 size-3" />
+                </>
+              )
+            : (
+                <>
+                  Show
+                  {' '}
+                  {hiddenCount}
+                  {' '}
+                  more
+                  <ChevronDown aria-hidden className="ml-1 size-3" />
+                </>
+              )}
+        </Button>
+      )}
+      {expanded && hasNextPage && (
         <Button
           variant="ghost"
           size="sm"
@@ -77,7 +137,7 @@ export default function BridgeHistory() {
           disabled={isFetchingNextPage}
           className="self-center text-xs text-muted-foreground"
         >
-          {isFetchingNextPage ? 'Loading…' : 'Load more'}
+          {isFetchingNextPage ? 'Loading…' : 'Load older'}
         </Button>
       )}
     </div>
@@ -108,72 +168,135 @@ function BridgeRow({ row, nowMs }: { row: TimelineRow, nowMs: number }) {
   }, [blockMs])
   const DirectionIcon = isDeposit ? ArrowUpRight : ArrowDownLeft
 
+  // Programmatic navigation rather than wrapping the row in <Link>:
+  // the existing FogoScan anchor inside the row would create invalid
+  // nested-<a> markup. Inner interactives (source link, Mark delivered
+  // button) stopPropagation so they don't double-trigger the navigation.
+  const router = useRouter()
+  const onRowClick = () => {
+    router.push(`/tx/${row.signature}`)
+  }
+  const onRowKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault()
+      router.push(`/tx/${row.signature}`)
+    }
+  }
+
+  // Direction-coded icon tone — emerald for deposits (capital going in
+  // to earn yield), violet for redeems (matches the Solana chain badge
+  // in the detail-page Timeline so the visual language stays consistent
+  // across surfaces). Very low bg + 60% stroke opacity keeps the hue
+  // recognizable without pulling visual weight from the amount/status.
+  const iconTone = isDeposit
+    ? 'bg-emerald-500/5 text-emerald-700/60 dark:text-emerald-400/60'
+    : 'bg-violet-500/5 text-violet-700/60 dark:text-violet-400/60'
+
   return (
-    <Card className="py-0">
-      <CardContent className="flex items-center gap-3 px-3 py-2.5">
+    <Card
+      className="group cursor-pointer py-0 ring-foreground/10 transition-shadow hover:ring-foreground/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:hover:ring-white/70"
+      role="link"
+      tabIndex={0}
+      aria-label={`View details for ${label} ${amount} ${ticker}`}
+      onClick={onRowClick}
+      onKeyDown={onRowKey}
+    >
+      <CardContent className="flex items-center gap-3 px-3.5 py-3">
         <span
           aria-hidden
-          className="flex size-7 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground"
+          className={`flex size-8 shrink-0 items-center justify-center rounded-full ${iconTone}`}
         >
-          <DirectionIcon className="size-3.5" />
+          <DirectionIcon className="size-4" />
         </span>
         <div className="flex min-w-0 flex-1 flex-col leading-tight">
-          <div className="flex items-center justify-between gap-2">
-            <span className="truncate text-sm">
-              <span className="text-muted-foreground">{label}</span>
-              {' · '}
-              <span className="font-medium tabular-nums">
-                {row.amountIsApproximate
-                  ? (
-                      <span
-                        title="Approximate — reconstructed from on-chain data, may differ slightly from your typed amount"
-                      >
-                        ~
-                        {amount}
-                      </span>
-                    )
-                  : amount}
-              </span>
-              {' '}
-              <span className="text-muted-foreground">{ticker}</span>
-            </span>
-            <StatusBadge row={row} />
-          </div>
-          <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
-            <time dateTime={isoTime} title={absTime}>
-              {relTime}
-            </time>
-            <a
-              href={fogoTxUrl(row.signature)}
-              target="_blank"
-              rel="noreferrer noopener"
-              className="inline-flex items-center gap-1 hover:text-foreground hover:underline"
-            >
-              source
-              <ExternalLink aria-hidden className="size-3" />
-            </a>
-          </div>
+          <span className="truncate text-sm font-medium tabular-nums">
+            {row.amountIsApproximate
+              ? (
+                  <span
+                    title="Approximate — reconstructed from on-chain data, may differ slightly from your typed amount"
+                  >
+                    ~
+                    {amount}
+                  </span>
+                )
+              : amount}
+            {' '}
+            <span className="font-normal text-muted-foreground">{ticker}</span>
+          </span>
+          <span className="mt-0.5 truncate text-xs text-muted-foreground">
+            {label}
+            {' · '}
+            <time dateTime={isoTime} title={absTime}>{relTime}</time>
+          </span>
         </div>
+        <StatusBadge row={row} nowMs={nowMs} />
+        <ChevronRight aria-hidden className="size-4 shrink-0 text-muted-foreground/50 transition-colors group-hover:text-foreground/50 dark:group-hover:text-white/70" />
       </CardContent>
     </Card>
   )
 }
 
-function StatusBadge({ row }: { row: TimelineRow }) {
-  // Three render shapes — in-flight (spinner + phase), delivered (check),
+/**
+ * Past this point, an unresolved row is almost certainly delivered —
+ * the on-chain bridge SLA is minutes, not hours. The lazy
+ * flow/op-status queries in `useBridgeHistory` only fire on first
+ * mount of each row, so older entries that scrolled out before their
+ * resolution round can stay stuck on "Pending" forever in the UI.
+ * Treating anything older than this as "Likely delivered" turns that
+ * dead state into a soft positive, while keeping the Mark-delivered
+ * affordance available for the user to confirm.
+ *
+ * 2 hours is a generous bound: deposit happy path is ~3 min, redeem
+ * happy path is ~10 min, and the Hero's slow-threshold (8/30 min)
+ * already covers the "actually slow" range.
+ */
+const STUCK_PENDING_AGE_MS = 2 * 60 * 60_000
+
+function StatusBadge({ row, nowMs }: { row: TimelineRow, nowMs: number }) {
+  // Three render shapes — delivered (check), in-flight (spinner + phase),
   // pending (spinner + "Pending" + dismiss affordance).
   //
-  // The fall-through is ALWAYS "Pending" rather than "no badge": a row
-  // without a positive delivered signal is, from the user's perspective,
-  // still pending. The dismiss affordance covers the edge case where
-  // Wormholescan cannot ever report `delivered` — e.g. legacy pre-fix
-  // `send_usdc_to_user` rows whose VAA was emitted by a separate
-  // recovery tx so `/operations?txHash=<source>` has no `targetChain`.
+  // Precedence rationale:
+  //   1. **Delivered first.** Wormholescan (`row.status`) and the
+  //      per-device manual dismissal flag are the only *positive*
+  //      delivery oracles we have. If either confirms delivery, we
+  //      surface "Delivered" even when the local journal still says
+  //      "In progress" — the journal is a soft local progress label
+  //      driven by `LiveJournalTracker`'s FOGO-balance watch, which can
+  //      lag, miss the balance bump (non-monotonic ATA writes), or
+  //      simply never get patched to terminal if its observer race
+  //      doesn't resolve. Checking the oracle first prevents the row
+  //      from getting stuck on "In progress" forever after the tx
+  //      detail page already confirmed delivery.
+  //   2. **In-flight phase second.** Once we've ruled out a delivery
+  //      oracle, the journal phase is the next best signal: it's the
+  //      local "we're bridging" label and shows up before any oracle
+  //      has had a chance to index the destination tx.
+  //   3. **Pending fall-through.** No delivery, no journal → "Pending"
+  //      with a Mark-delivered affordance so the user can resolve the
+  //      legacy edge case where Wormholescan permanently can't see the
+  //      destination tx (recovery-relayed `send_usdc_to_user` rows
+  //      whose VAA was emitted by a separate tx so
+  //      `/operations?txHash=<source>` has no `targetChain`).
+  //
   // Manual dismissals render as the *same* Delivered badge as oracle-
-  // confirmed deliveries; the distinction is preserved on `row.manuallyDismissed`
-  // for debugging / analytics but is intentionally invisible in the UI to
-  // avoid two near-identical "Delivered" states confusing the user.
-  // Per-device, cosmetic, reversible (clear `fogo-onre.dismissed-bridges.v1`).
+  // confirmed deliveries; the distinction is preserved on
+  // `row.manuallyDismissed` for debugging / analytics but is
+  // intentionally invisible in the UI to avoid two near-identical
+  // "Delivered" states confusing the user. Per-device, cosmetic,
+  // reversible (clear `fogo-onre.dismissed-bridges.v1`).
+  if (row.status === 'delivered' || row.manuallyDismissed) {
+    return (
+      <Badge
+        variant="outline"
+        aria-label="status: delivered"
+        className="gap-1 border-emerald-600/20 bg-emerald-500/5 text-emerald-700/80 dark:border-emerald-400/20 dark:text-emerald-300/80"
+      >
+        <Check aria-hidden className="size-3" />
+        Delivered
+      </Badge>
+    )
+  }
   if (row.phase !== null) {
     return (
       <Badge variant="secondary" aria-label={`status: ${row.phase}`} className="gap-1">
@@ -182,31 +305,54 @@ function StatusBadge({ row }: { row: TimelineRow }) {
       </Badge>
     )
   }
-  if (row.status === 'delivered' || row.manuallyDismissed) {
-    return (
-      <Badge variant="default" aria-label="status: delivered" className="gap-1">
-        <Check aria-hidden className="size-3" />
-        Delivered
-      </Badge>
-    )
-  }
   return (
     <div className="flex items-center gap-1.5">
-      <Badge variant="secondary" aria-label="status: pending" className="gap-1">
-        <Loader2 aria-hidden className="size-3 animate-spin" />
-        Pending
-      </Badge>
+      <PendingBadge row={row} nowMs={nowMs} />
       <Button
         variant="ghost"
         size="sm"
         className="h-6 px-1.5 text-[11px] text-muted-foreground hover:text-foreground"
-        onClick={() => dismissBridge(row.signature)}
+        onClick={(e) => {
+          // Don't bubble — the parent Card has a click handler that
+          // navigates to the detail page; "Mark delivered" should stay
+          // on the list.
+          e.stopPropagation()
+          dismissBridge(row.signature)
+        }}
         title="Funds already in your wallet? Mark this row delivered. Per-device only; does not affect on-chain state."
         aria-label="Mark this bridge as delivered"
       >
         Mark delivered
       </Button>
     </div>
+  )
+}
+
+/**
+ * Renders the actual pending pill — split out so we can swap it for
+ * a quieter "Likely delivered" variant on rows past the SLA window
+ * without duplicating the surrounding Mark-delivered affordance.
+ */
+function PendingBadge({ row, nowMs }: { row: TimelineRow, nowMs: number }) {
+  const ageMs = nowMs - row.blockTime * 1000
+  if (ageMs > STUCK_PENDING_AGE_MS) {
+    return (
+      <Badge
+        variant="outline"
+        aria-label="status: likely delivered"
+        title="Older than the typical bridge window with no failure signal — almost certainly delivered. Open the row to verify, or use Mark delivered to confirm."
+        className="gap-1 border-muted-foreground/20 text-muted-foreground"
+      >
+        <Check aria-hidden className="size-3" />
+        Likely delivered
+      </Badge>
+    )
+  }
+  return (
+    <Badge variant="secondary" aria-label="status: pending" className="gap-1">
+      <Loader2 aria-hidden className="size-3 animate-spin" />
+      Pending
+    </Badge>
   )
 }
 
