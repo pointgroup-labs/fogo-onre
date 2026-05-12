@@ -12,20 +12,33 @@ export const APP_NAME = 'Fogo OnRe'
 // local dev too. Set NEXT_PUBLIC_APP_DOMAIN per environment; see
 // .env.example for the full story.
 //
-// In production we *refuse* to silently default — a misconfigured
-// paymaster lookup is a session-establish failure for every user, not
-// the kind of thing we want to mask with a hardcoded fallback.
+// `NEXT_PUBLIC_*` vars are inlined at build time, so any missing value
+// here ships into the client bundle. We surface a build-time warning
+// instead of throwing because:
+//   1. The fallback (`https://app.ignitionfi.xyz`) IS a real
+//      registered paymaster domain — falling back to it is safe, not
+//      catastrophic.
+//   2. Throwing here breaks `next build` during static prerender (the
+//      module is evaluated by the build worker, not just at request
+//      time), which blocks every CI build that hasn't pre-set the env
+//      var even when the fallback would have been correct.
+// Operators wanting a different domain still get a loud warning in
+// build logs, and a misconfigured deploy fails fast at first request
+// when the paymaster rejects the unregistered domain.
+const DEFAULT_APP_DOMAIN = 'https://app.ignitionfi.xyz'
 function resolveAppDomain(): string {
   const fromEnv = process.env.NEXT_PUBLIC_APP_DOMAIN
   if (fromEnv && fromEnv.length > 0) {
     return fromEnv
   }
   if (process.env.NODE_ENV === 'production') {
-    throw new Error(
-      'NEXT_PUBLIC_APP_DOMAIN is required in production. Set it to the domain registered with the Fogo paymaster.',
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[fogo-onre] NEXT_PUBLIC_APP_DOMAIN not set; falling back to ${DEFAULT_APP_DOMAIN}. `
+      + `Set it in your environment if you mean to register a different paymaster domain.`,
     )
   }
-  return 'https://app.ignitionfi.xyz'
+  return DEFAULT_APP_DOMAIN
 }
 export const APP_DOMAIN = resolveAppDomain()
 

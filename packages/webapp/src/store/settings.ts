@@ -11,17 +11,28 @@ const FOGO_NETWORK_NAME = process.env.NEXT_PUBLIC_FOGO_NETWORK ?? 'mainnet'
 const FOGO_RPC_DEFAULT = process.env.NEXT_PUBLIC_FOGO_RPC_URL
   ?? (FOGO_NETWORK_NAME === 'testnet' ? 'https://testnet.fogo.io' : 'https://mainnet.fogo.io')
 
+// FOGO RPC defaults to a first-party Fogo Labs endpoint per network — fine
+// to default. Solana RPC is a third-party JPool endpoint that can rate-limit
+// under load and isn't promised; we surface a build-time warning when the
+// env var isn't set so operators don't accidentally ship the rate-limited
+// fallback to production traffic. The fallback itself is safe enough to
+// keep the build passing — see the matching note in `constants.ts` on
+// `APP_DOMAIN` for why we don't hard-throw here.
+const SOLANA_RPC_FALLBACK = 'https://rpc.jpool.one'
 function resolveSolanaRpcDefault(): string {
   const fromEnv = process.env.NEXT_PUBLIC_SOLANA_RPC_URL
   if (fromEnv && fromEnv.length > 0) {
     return fromEnv
   }
   if (process.env.NODE_ENV === 'production') {
-    throw new Error(
-      'NEXT_PUBLIC_SOLANA_RPC_URL is required in production. Set it to a Solana mainnet RPC you trust to handle production traffic.',
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[fogo-onre] NEXT_PUBLIC_SOLANA_RPC_URL not set; falling back to ${SOLANA_RPC_FALLBACK}. `
+      + `That endpoint is third-party and rate-limited — set this env var to a `
+      + `Solana mainnet RPC you trust before serving production traffic.`,
     )
   }
-  return 'https://rpc.jpool.one'
+  return SOLANA_RPC_FALLBACK
 }
 const SOLANA_RPC_DEFAULT = resolveSolanaRpcDefault()
 
