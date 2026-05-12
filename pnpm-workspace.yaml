@@ -41,3 +41,7 @@ overrides:
   # without provenance. 7.x has provenance attestations and an essentially
   # identical public API for the parse/satisfies/range surface babel uses.
   semver: ^7.6.0
+  # chokidar@4.0.2 and 4.0.3 (transitive via tsup) lost provenance.
+  # 4.0.1 is the latest 4.x with provenance attestations and satisfies
+  # tsup's `^4` range. Pin tightly until a later 4.x restores provenance.
+  chokidar: 4.0.1
