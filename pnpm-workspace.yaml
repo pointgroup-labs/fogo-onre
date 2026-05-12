@@ -1,5 +1,19 @@
 allowBuilds:
-  bigint-buffer: true
+  # Approved — postinstall does real work the toolchain depends on.
+  bigint-buffer: true   # native bigint codec, Solana account encode/decode
+  esbuild: true         # downloads platform binary, vitest + Next bundler
+  msw: true             # installs service-worker shim used by webapp tests
+  sharp: true           # next/image optimizer native binary
+  # Ignored — transitive deps we don't actually exercise. Pure-JS
+  # fallbacks (where applicable) work fine; postinstall is either a
+  # speedup we don't need or a binding for a chain we don't use.
+  '@stellar/stellar-sdk': false  # transitive via Wormhole; no Stellar flows
+  blake-hash: false              # transitive hasher, JS fallback fine
+  bufferutil: false              # ws speedup, JS fallback fine
+  protobufjs: false              # postinstall is just a deprecation banner
+  tiny-secp256k1: false          # bitcoin curve, not used (Solana = ed25519)
+  usb: false                     # Ledger HID binding, no hardware-wallet flow
+  utf-8-validate: false          # ws speedup, JS fallback fine
 shellEmulator: true
 
 # `no-downgrade` blocks install whenever any transitive was republished
