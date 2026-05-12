@@ -61,8 +61,17 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # Registry cache lives in ghcr alongside the image: persists
+          # across branches, isn't capped at 10 GB like type=gha, and
+          # isn't evicted when other workflows pressure the cache.
+          # `mode=max` exports intermediate layers too — costs a bit
+          # more storage, saves a lot of time on partial-hit rebuilds.
+          cache-from: |
+            type=registry,ref=ghcr.io/${{ github.repository_owner }}/fogo-onre-cranker:buildcache
+            type=gha
+          cache-to: |
+            type=registry,ref=ghcr.io/${{ github.repository_owner }}/fogo-onre-cranker:buildcache,mode=max
+            type=gha,mode=max
           provenance: false
 
       # NOTE: Container CVE scanning was previously wired here via

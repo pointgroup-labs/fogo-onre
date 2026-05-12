@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 # Multi-stage build for the @fogo-onre/cranker daemon.
-# Stage 1: install all workspace deps + build SDK + cranker.
+# Stage 1: install only cranker's dep closure + build SDK + cranker.
 # Stage 2: minimal runtime image with the production-only deploy subtree.
 
 FROM node:24-bookworm-slim AS builder
@@ -11,16 +11,30 @@ RUN corepack enable && corepack prepare pnpm@10.33.0 --activate
 
 WORKDIR /repo
 
-# Copy lockfile and workspace manifests first for better layer caching.
+# Layer 1: lockfile + workspace manifests only. This layer changes on
+# any dep bump but not on source edits, so the install layer hits
+# cache on every source-only push.
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
 COPY packages/sdk/package.json packages/sdk/
 COPY packages/cranker/package.json packages/cranker/
 
-RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile
+# Filter install to cranker's dep closure (`...` includes transitive
+# workspace deps, i.e. @fogo-onre/sdk). Skips webapp and cli entirely
+# — webapp alone drags in Next.js, React, full Wormhole SDK, and the
+# WalletConnect graph (hundreds of MB) that cranker never imports.
+# `--ignore-scripts` skips postinstalls during install; we already run
+# explicit `pnpm --filter ... build` steps below for what actually
+# needs to be built (SDK + cranker).
+RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
+    pnpm install --frozen-lockfile --ignore-scripts \
+      --filter @fogo-onre/cranker... \
+      --filter @fogo-onre/sdk...
 
-# Now copy sources. SDK has Anchor IDL it depends on; copy the whole repo
-# to avoid cherry-picking IDL/program-build outputs.
-COPY . .
+# Layer 2: source. Only the two packages we actually compile, plus the
+# Anchor IDL/types the SDK reads at build. Avoids busting cache on
+# unrelated source edits (webapp, cli, tests, docs).
+COPY packages/sdk packages/sdk
+COPY packages/cranker packages/cranker
 
 # Build SDK first (cranker depends on its dist), then cranker.
 RUN pnpm --filter @fogo-onre/sdk build \
