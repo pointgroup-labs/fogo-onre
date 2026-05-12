@@ -7,7 +7,10 @@ FROM node:24-bookworm-slim AS builder
 
 ENV PNPM_HOME=/pnpm
 ENV PATH="$PNPM_HOME:$PATH"
-RUN corepack enable && corepack prepare pnpm@10.33.0 --activate
+# Activate corepack and let it pick the pnpm version from the root
+# `package.json` "packageManager" field — single source of truth so
+# this Dockerfile doesn't drift from the rest of the repo.
+RUN corepack enable
 
 WORKDIR /repo
 
@@ -41,7 +44,11 @@ RUN pnpm --filter @fogo-onre/sdk build \
  && pnpm --filter @fogo-onre/cranker build
 
 # Produce a self-contained, prod-only deployable subtree at /out.
-RUN pnpm deploy --filter @fogo-onre/cranker --prod /out
+# `--legacy` keeps the pre-v10 deploy semantics (workspace packages
+# are copied verbatim, no inject-workspace-packages requirement). The
+# v10 default needs every workspace dep marked injected in the root
+# manifest, which is more invasive than this single deploy site needs.
+RUN pnpm deploy --legacy --filter @fogo-onre/cranker --prod /out
 
 # ----------------------------------------------------------------------------
 
