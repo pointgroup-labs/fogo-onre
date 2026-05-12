@@ -2,8 +2,8 @@ import type { AdvanceContext } from '../src/relayer/types'
 import type { Logger } from '../src/utils/log'
 import { PublicKey } from '@solana/web3.js'
 import { describe, expect, it, vi } from 'vitest'
-import { silentLogger } from '../src/utils/log'
 import { scanAndAdvance } from '../src/relayer/scan'
+import { silentLogger } from '../src/utils/log'
 
 // Minimal mock context — scanAndAdvance only reads abortSignal + log directly;
 // the rest is forwarded to advance fns which we mock entirely.

@@ -1,6 +1,7 @@
 import type { AdvanceContext, AdvanceResult } from './types'
 import { describeStatus, NTT_USDC_PROGRAM_ID, resolveNttVaa, USDC_MINT } from '@fogo-onre/sdk'
 import { PublicKey } from '@solana/web3.js'
+import { makePriorityFeeIx } from '../utils/priority-fee'
 import { fetchVaaBytes } from '../utils/wormhole'
 
 export type SwapUsdcToOnycInput = {
@@ -59,6 +60,7 @@ export async function swapUsdcToOnyc(
         feeVault,
         onre: {},
       })
+      .preInstructions([makePriorityFeeIx(ctx.priorityFeeMicroLamports)])
       .rpc()
 
     metrics.txSent.inc({ instruction: 'swap_usdc_to_onyc', result: 'ok' })

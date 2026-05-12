@@ -4,8 +4,8 @@ export {
   type EnumerateFlowsFn,
   FLOW_STATUSES,
   type FlowStatus,
+  scanAndAdvance,
   type ScannedFlow,
   type ScanOptions,
-  scanAndAdvance,
 } from './scan'
 export type { AdvanceContext, AdvanceResult, PlannedTx } from './types'

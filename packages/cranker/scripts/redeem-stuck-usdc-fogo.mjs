@@ -31,18 +31,18 @@
 
 import fs from 'node:fs'
 import {
-  Connection,
-  Keypair,
-  PublicKey,
-  ComputeBudgetProgram,
-  Transaction,
-  VersionedTransaction,
-  sendAndConfirmTransaction,
-} from '@solana/web3.js'
-import {
   createAssociatedTokenAccountIdempotentInstruction,
   getAssociatedTokenAddressSync,
 } from '@solana/spl-token'
+import {
+  ComputeBudgetProgram,
+  Connection,
+  Keypair,
+  PublicKey,
+  sendAndConfirmTransaction,
+  Transaction,
+  VersionedTransaction,
+} from '@solana/web3.js'
 import { deserialize } from '@wormhole-foundation/sdk-definitions'
 import { register as registerNttDefinitions } from '@wormhole-foundation/sdk-definitions-ntt'
 import { register as registerSolanaNtt, SolanaNtt } from '@wormhole-foundation/sdk-solana-ntt'
@@ -176,8 +176,7 @@ async function main() {
       console.log('\nVAA already executed on FOGO — nothing to do.')
       return
     }
-  }
-  catch (err) {
+  } catch (err) {
     console.log('getIsExecuted probe failed (continuing):', err?.message ?? err)
   }
 
@@ -211,8 +210,7 @@ async function main() {
         { signature: sig, blockhash: latest.blockhash, lastValidBlockHeight: latest.lastValidBlockHeight },
         'confirmed',
       )
-    }
-    else {
+    } else {
       sig = await sendAndConfirmTransaction(
         connection,
         inner,

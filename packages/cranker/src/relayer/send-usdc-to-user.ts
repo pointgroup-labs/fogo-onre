@@ -1,3 +1,4 @@
+import type { Connection } from '@solana/web3.js'
 import type { AdvanceContext, AdvanceResult } from './types'
 import {
   describeStatus,
@@ -12,8 +13,8 @@ import {
   resolveNttVaa,
 } from '@fogo-onre/sdk'
 import { Keypair, PublicKey, SystemProgram } from '@solana/web3.js'
-import type { Connection } from '@solana/web3.js'
 import { SolanaNtt } from '@wormhole-foundation/sdk-solana-ntt'
+import { makePriorityFeeIx } from '../utils/priority-fee'
 import { withTimeout } from '../utils/rpc'
 import { DEFAULT_NTT_VERSION, fetchVaaBytes, WORMHOLE_CORE_MAINNET } from '../utils/wormhole'
 import { isLostRace } from './race-classifier'
@@ -195,7 +196,7 @@ export async function sendUsdcToUser(
           outboxItem.publicKey,
         ),
       })
-      .preInstructions(fundIxs)
+      .preInstructions([makePriorityFeeIx(ctx.priorityFeeMicroLamports), ...fundIxs])
       .signers([outboxItem])
       .rpc()
 

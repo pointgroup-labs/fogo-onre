@@ -2,17 +2,30 @@ import type { AdvanceContext, AdvanceResult } from './types'
 import {
   deriveUserWalletFromFogoTx,
   describeStatus,
+  findAuthorityPda,
   findUserInboxAuthorityPda,
   NTT_USDC_PROGRAM_ID,
   resolveNttVaa,
   USDC_MINT,
 } from '@fogo-onre/sdk'
 import { createAssociatedTokenAccountIdempotentInstruction, getAssociatedTokenAddressSync } from '@solana/spl-token'
-import { PublicKey } from '@solana/web3.js'
+import { PublicKey, SystemProgram } from '@solana/web3.js'
+import { makePriorityFeeIx } from '../utils/priority-fee'
 import { withTimeout } from '../utils/rpc'
-import { readNttInboxAmount, readSplTokenAmount } from './account-layouts'
 import { fetchVaaBytes } from '../utils/wormhole'
+import { readNttInboxAmount, readSplTokenAmount } from './account-layouts'
+import { prepareTransceiverMessage } from './prepare-transceiver-message'
 import { isLostRace } from './race-classifier'
+
+// NTT `Redeem` inits the `inbox_item` PDA via `invoke_signed` under the
+// relayer-authority PDA, debiting rent (~1.41M lamports observed) from
+// that PDA. If it's at the rent-exempt floor for its own data (~1.14M),
+// the inner system_program::transfer underflows and the whole tx
+// aborts with `Transfer: insufficient lamports … need …` (custom error
+// 0x1 from System Program). 3M lamports leaves comfortable headroom for
+// the rent debit plus any future NTT layout growth. Mirrors the
+// matching constant in `unlock-onyc.ts` — keep them in sync.
+const RELAYER_AUTH_TOPUP = 3_000_000n
 
 export type ClaimUsdcInput = {
   fogoTx: string
@@ -193,6 +206,66 @@ export async function claimUsdc(
       usdcMint,
     )
 
+    // Pre-step: ensure the USDC NTT `transceiver_message` PDA exists on
+    // Solana, owned by the USDC NTT manager. Mirrors the same pattern
+    // `unlock_onyc` uses — the on-chain `claim_usdc` handler declares
+    // `ntt_transceiver_message` with `owner = NTT_USDC_PROGRAM_ID` and
+    // can't create it itself (its CPI does redeem + release_inbound_mint,
+    // both of which read the existing transceiver_message).
+    //
+    // Why this exists despite Wormhole's auto-relayer nominally
+    // subscribing to USDC.s: in practice the auto-relayer is unreliable
+    // — observed failures land as Anchor ConstraintOwner (2004) with
+    // `Left=11111…, Right=nttu74Cd…SdGk`, i.e. the PDA is still System-
+    // owned at submit time. Posting it ourselves is idempotent (probe
+    // first) so concurrent auto-relayer + cranker posts cost one
+    // redundant RPC.
+    //
+    // Bundled-mode NTT: `transceiver` and `expectedOwner` both equal
+    // `nttProgram` because the manager program also serves as the
+    // transceiver in OnRe's NTT v3 deploy.
+    const prep = await prepareTransceiverMessage({
+      connection,
+      payer: keypair,
+      vaaBytes,
+      transceiverMessagePda: resolved.nttTransceiverMessage,
+      manager: nttProgram,
+      token: usdcMint,
+      transceiver: nttProgram,
+      expectedOwner: nttProgram,
+      rpcTimeoutMs: ctx.rpcTimeoutMs,
+      txConfirmTimeoutMs: ctx.txConfirmTimeoutMs,
+      priorityFeeMicroLamports: ctx.priorityFeeMicroLamports,
+      log: ctx.log,
+    })
+    if (prep.kind === 'error') {
+      return {
+        kind: 'error',
+        error: prep.error,
+        partialSignatures: [],
+      }
+    }
+
+    // Lamport top-up: NTT `redeem` does `init` on `inbox_item` via
+    // `invoke_signed` under `relayer_authority`, debiting rent from
+    // that PDA. If relayer_authority is at its rent-exempt floor for
+    // its own data, the inbox_item rent debit underflows
+    // (`Transfer: insufficient lamports … need …`, custom error 0x1).
+    // Top up to RELAYER_AUTH_TOPUP only when below threshold —
+    // skipping the system_program transfer when not needed keeps the
+    // tx small. Mirrors `unlock-onyc.ts`; same constant family.
+    const [relayerAuthorityPda] = findAuthorityPda(client.program.programId)
+    const relayerAuthInfo = await connection.getAccountInfo(relayerAuthorityPda).catch(() => null)
+    const relayerCurrentLamports = BigInt(relayerAuthInfo?.lamports ?? 0)
+    const fundIxs: ReturnType<typeof SystemProgram.transfer>[] = []
+    if (relayerCurrentLamports < RELAYER_AUTH_TOPUP) {
+      fundIxs.push(SystemProgram.transfer({
+        fromPubkey: keypair.publicKey,
+        toPubkey: relayerAuthorityPda,
+        lamports: Number(RELAYER_AUTH_TOPUP - relayerCurrentLamports),
+      }))
+    }
+
     const sig = await client
       .claimUsdc({
         payer: keypair.publicKey,
@@ -202,7 +275,7 @@ export async function claimUsdc(
         nttTransceiverMessage: resolved.nttTransceiverMessage,
         ntt: { transceiverAddress: nttProgram },
       })
-      .preInstructions([ensureUserInboxAtaIx])
+      .preInstructions([makePriorityFeeIx(ctx.priorityFeeMicroLamports), ...fundIxs, ensureUserInboxAtaIx])
       .rpc()
 
     metrics.txSent.inc({ instruction: 'claim_usdc', result: 'ok' })

@@ -8,12 +8,12 @@ import {
   PublicKey,
   sendAndConfirmTransaction,
   Transaction,
-  VersionedTransaction,
 } from '@solana/web3.js'
 import { deserialize } from '@wormhole-foundation/sdk-definitions'
 import { register as registerNttDefinitions } from '@wormhole-foundation/sdk-definitions-ntt'
 import { register as registerSolanaNtt, SolanaNtt } from '@wormhole-foundation/sdk-solana-ntt'
 import { errorFields } from '../utils/log'
+import { isVersionedTransaction, makePriorityFeeIx } from '../utils/priority-fee'
 import { withTimeout } from '../utils/rpc'
 
 registerNttDefinitions()
@@ -75,7 +75,8 @@ function extractRecipientOwner(
   // Layout: WormholeTransceiverMessage → NttManagerMessage → NativeTokenTransfer
   // SDK exposes the innermost record at vaa.payload.nttManagerPayload.payload.
   const nativeTransfer = (vaa.payload as { nttManagerPayload: { payload: { recipientAddress: { toUint8Array: () => Uint8Array } } } })
-    .nttManagerPayload.payload
+    .nttManagerPayload
+    .payload
   return new PublicKey(nativeTransfer.recipientAddress.toUint8Array())
 }
 
@@ -109,7 +110,7 @@ async function ensureRecipientAta(
   // Modest CU budget — ATA create is cheap, but the default 200k can
   // get out-prioritised on busy slots.
   const cuLimit = ComputeBudgetProgram.setComputeUnitLimit({ units: 80_000 })
-  const tx = new Transaction().add(cuLimit, ix)
+  const tx = new Transaction().add(makePriorityFeeIx(ctx.priorityFeeMicroLamports), cuLimit, ix)
 
   const sig = await withTimeout(
     sendAndConfirmTransaction(
@@ -217,7 +218,28 @@ export async function executeSdkBundledRedeem(
       const inner = stx.transaction
 
       let sig: string
-      if (inner instanceof VersionedTransaction) {
+      // **Do NOT inject our priority-fee ix here.** The Wormhole/NTT
+      // SDK already embeds compute-budget pricing (setComputeUnitPrice +
+      // setComputeUnitLimit) into every tx it yields from `redeem(...)`,
+      // sized for the specific step it built. Layering a second
+      // setComputeUnitPrice on top — even after filtering — produced
+      // DuplicateInstruction (0x2) at simulation under pnpm's dual-
+      // realm `@solana/web3.js` resolution (the SDK's Transaction
+      // serialises via a different internal path than our
+      // `.instructions` mutation, defeating any pre-submit dedup we do
+      // from outside).
+      //
+      // The net effect is identical to the pre-rollout behaviour: this
+      // path used to sign-and-send SDK-yielded txs verbatim, and it
+      // worked. We keep our priority-fee injection only for txs we
+      // build ourselves (`ensureRecipientAta`, the shim-mode helpers in
+      // `prepareTransceiverMessage`, and `bridge/redeem.ts`), where the
+      // SDK isn't in the loop.
+      //
+      // Cross-realm-safe detection of v0 vs legacy because the SDK and
+      // we may resolve different physical copies of @solana/web3.js
+      // under pnpm — see `isVersionedTransaction` for the rationale.
+      if (isVersionedTransaction(inner)) {
         inner.sign([target.destSigner, ...extraSigners])
         const raw = inner.serialize()
         sig = await withTimeout(

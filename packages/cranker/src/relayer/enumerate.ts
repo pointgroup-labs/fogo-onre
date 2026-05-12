@@ -1,8 +1,8 @@
 import type { FlowStatusName, ResolvedNttVaa, WormholescanVaa } from '@fogo-onre/sdk'
-import type { AdvanceContext } from './types'
-import type { FlowStatus, ScannedFlow } from './scan'
-import type { WatermarkStore } from '../state/watermarks'
 import type { PublicKey } from '@solana/web3.js'
+import type { WatermarkStore } from '../state/watermarks'
+import type { FlowStatus, ScannedFlow } from './scan'
+import type { AdvanceContext } from './types'
 import {
   decodeNttInboxItem,
   describeStatus,
@@ -11,8 +11,8 @@ import {
   resolveNttVaa,
   WormholescanClient,
 } from '@fogo-onre/sdk'
-import { errorFields, errorFieldsCompact } from '../utils/log'
 import { recordSeen } from '../state/watermarks'
+import { errorFields, errorFieldsCompact } from '../utils/log'
 import { harvestVaaPages } from '../utils/wormholescan-pages'
 
 const VAA_LEG = {
@@ -39,6 +39,21 @@ export type EnumerateOptions = {
    * record nothing" path.
    */
   watermarks?: WatermarkStore
+  /**
+   * Backstop mode. When true, the floor is forced to 0 — paging walks
+   * the full `maxPages` window regardless of where the watermark sits,
+   * and the recorded watermark is *not* updated. Used by the periodic
+   * recovery scan to surface flows the incremental enumerator stranded:
+   *
+   *   - Daemon downtime crossed VAA arrival → incremental scan recorded
+   *     a non-NTT skip OR fast-forwarded the floor past it on resume.
+   *   - Post-watermark dispatch failed and the flow's status didn't
+   *     change → incremental scan no longer pages its sequence.
+   *
+   * Backstop pairs naturally with a much larger `maxPages` (e.g. 50 vs
+   * the incremental tick's 5) so it covers ~hours, not ~minutes.
+   */
+  bypassWatermark?: boolean
 }
 
 /**
@@ -90,12 +105,13 @@ export function makeEnumerator(opts: EnumerateOptions) {
         pageSize: opts.pageSize,
         maxPages: opts.maxPages,
         watermarks: opts.watermarks,
+        bypassWatermark: opts.bypassWatermark,
         abortSignal: ctx.abortSignal,
         onPageError: (page, err) => {
-          ctx.log.warn('wormholescan fetch failed', { leg, page, ...errorFields(err) })
+          ctx.log.warn('wormholescan fetch failed', { leg, page, ...errorFields(err), backstop: Boolean(opts.bypassWatermark) })
         },
         onPageFetched: (page, count, floor) => {
-          ctx.log.debug('wormholescan page fetched', { leg, page, count, floor: floor.toString() })
+          ctx.log.debug('wormholescan page fetched', { leg, page, count, floor: floor.toString(), backstop: Boolean(opts.bypassWatermark) })
         },
       })
       for await (const items of pages) {
@@ -114,7 +130,12 @@ export function makeEnumerator(opts: EnumerateOptions) {
           // Advance the watermark only for VAAs we observed cleanly.
           // A transient RPC blip leaves the watermark untouched so this
           // VAA stays inside the next scan's paging window.
-          if (r.recordable && opts.watermarks) {
+          //
+          // Backstop scans deliberately do *not* advance the watermark
+          // — they're a recovery sweep over flows the incremental scan
+          // already passed. Updating the watermark here would conflict
+          // with the next incremental tick's view of "where I am."
+          if (r.recordable && !opts.bypassWatermark && opts.watermarks) {
             recordSeen(opts.watermarks, opts.fogoWormholeChainId, emitterHex, r.sequence)
           }
         }

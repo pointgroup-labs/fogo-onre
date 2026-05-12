@@ -1,10 +1,10 @@
-import type { ClassRollupAgg } from '../utils/log'
 import type { WatermarkStore } from '../state/watermarks'
+import type { ClassRollupAgg } from '../utils/log'
 import type { BridgeContext, BridgeRedeemResult, BridgeRedeemTarget } from './types'
 import { WormholescanClient } from '@fogo-onre/sdk'
-import { errorFields, recordErrorClass, rollupErrorClasses } from '../utils/log'
 import { recordSeen } from '../state/watermarks'
 import { runBounded } from '../utils/concurrency'
+import { errorFields, recordErrorClass, rollupErrorClasses } from '../utils/log'
 import { harvestVaaPages } from '../utils/wormholescan-pages'
 import { executeBridgePlan, planBridgeRedeem } from './redeem'
 

@@ -1,16 +1,16 @@
 import type { PublicKey } from '@solana/web3.js'
-import type { AdvanceContext, AdvanceResult } from './types'
-import type { ClassRollupAgg } from '../utils/log'
 import type { FlowStateTracker } from '../state/flow-state'
+import type { ClassRollupAgg } from '../utils/log'
+import type { AdvanceContext, AdvanceResult } from './types'
+import { runBounded } from '../utils/concurrency'
+import { errorClass, errorFields, recordErrorClass, rollupErrorClasses } from '../utils/log'
+import { withTimeout } from '../utils/rpc'
 import { claimUsdc } from './claim-usdc'
 import { lockOnyc } from './lock-onyc'
 import { sendUsdcToUser } from './send-usdc-to-user'
 import { swapOnycToUsdc } from './swap-onyc-to-usdc'
 import { swapUsdcToOnyc } from './swap-usdc-to-onyc'
 import { unlockOnyc } from './unlock-onyc'
-import { errorClass, errorFields, recordErrorClass, rollupErrorClasses } from '../utils/log'
-import { runBounded } from '../utils/concurrency'
-import { withTimeout } from '../utils/rpc'
 
 /**
  * Flow lifecycle states the cranker recognises. Mirrors the on-chain
@@ -296,7 +296,35 @@ function logAdvanceResult(
       // (or isn't) recurring.
       return
     case 'noop':
-      // Routine: another cranker advanced first, or pre-flight rejected.
+      // Two flavors:
+      //   - `severity: 'config'`: an operator-actionable deployment gate
+      //     (FOGO peer missing, registered_transceiver PDA absent, etc).
+      //     These used to hide at debug — meaning a misconfigured mainnet
+      //     deployment looked exactly like a healthy idle daemon. Surface
+      //     at WARN, but dedup via the same seenErrors map used for
+      //     real errors so an unresolved gate doesn't spam every scan.
+      //   - default / `routine`: another cranker advanced first, pre-flight
+      //     legitimately rejected for race reasons, etc. Stay at debug.
+      if (result.severity === 'config') {
+        const seenKey = `noop-config:${fromStatus}:${result.reason}`
+        const firstSeenOn = seenErrors?.get(seenKey)
+        if (firstSeenOn === undefined) {
+          seenErrors?.set(seenKey, flow)
+          ctx.log.warn('flow noop — deployment gate failing (operator action required)', {
+            flow,
+            status: fromStatus,
+            reason: result.reason,
+          })
+        } else {
+          ctx.log.debug('flow noop — deployment gate (known)', {
+            flow,
+            status: fromStatus,
+            reason: result.reason,
+            firstSeenOn,
+          })
+        }
+        return
+      }
       ctx.log.debug('flow noop', { flow, status: fromStatus, reason: result.reason })
       return
     case 'error': {

@@ -13,9 +13,9 @@ import { isUndecodableAccountError } from '../../src/relayer/enumerate'
 
 describe('isUndecodableAccountError', () => {
   it('matches the canonical BorshAccountsCoder TypeError stack', () => {
-    const err = new TypeError("Cannot read properties of null (reading 'property')")
+    const err = new TypeError('Cannot read properties of null (reading \'property\')')
     err.stack = [
-      "TypeError: Cannot read properties of null (reading 'property')",
+      'TypeError: Cannot read properties of null (reading \'property\')',
       '    at Union.decode (file:///app/dist/bin.js:10777:20)',
       '    at Structure.decode (file:///app/dist/bin.js:10519:36)',
       '    at BorshAccountsCoder.decodeUnchecked (file:///app/dist/bin.js:24912:30)',
@@ -25,13 +25,13 @@ describe('isUndecodableAccountError', () => {
   })
 
   it('matches when only Union.decode appears in the frame', () => {
-    const err = new TypeError("Cannot read properties of null (reading 'foo')")
+    const err = new TypeError('Cannot read properties of null (reading \'foo\')')
     err.stack = 'TypeError: ...\n    at Union.decode (somewhere)'
     expect(isUndecodableAccountError(err)).toBe(true)
   })
 
   it('rejects TypeErrors from unrelated call sites', () => {
-    const err = new TypeError("Cannot read properties of undefined (reading 'x')")
+    const err = new TypeError('Cannot read properties of undefined (reading \'x\')')
     err.stack = 'TypeError: ...\n    at PromiseHandler.then (somewhere)'
     expect(isUndecodableAccountError(err)).toBe(false)
   })

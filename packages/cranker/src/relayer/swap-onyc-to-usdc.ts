@@ -35,6 +35,7 @@ import {
   resolveNttVaa,
 } from '@fogo-onre/sdk'
 import { ComputeBudgetProgram, PublicKey, TransactionMessage, VersionedTransaction } from '@solana/web3.js'
+import { makePriorityFeeIx } from '../utils/priority-fee'
 import { withTimeout } from '../utils/rpc'
 import { fetchVaaBytes } from '../utils/wormhole'
 import { isLostRace } from './race-classifier'
@@ -212,7 +213,7 @@ export async function swapOnycToUsdc(
         recentBlockhash: blockhash,
         instructions: [
           ComputeBudgetProgram.setComputeUnitLimit({ units: 800_000 }),
-          ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 1_000 }),
+          makePriorityFeeIx(ctx.priorityFeeMicroLamports),
           swapIx,
         ],
       }).compileToV0Message(altAccounts)

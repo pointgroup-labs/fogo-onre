@@ -36,7 +36,7 @@
 import type { FlowAccount } from '@fogo-onre/sdk'
 import type { TransactionInstruction } from '@solana/web3.js'
 import { AnchorProvider, Wallet } from '@anchor-lang/core'
-import { describeStatus, findAuthorityPda, findInboxRateLimitPda, findInflightFlowPda, findNttPeerPda, findSessionAuthorityPda, findUserInboxAuthorityPda, FOGO_WORMHOLE_CHAIN_ID, NTT_ONYC_PROGRAM_ID, NTT_USDC_PROGRAM_ID, nttTransferArgsHash, ONYC_MINT, resolveNttVaa, USDC_MINT, WormholescanClient } from '@fogo-onre/sdk'
+import { deriveUserWalletFromFogoTx, describeStatus, findAuthorityPda, findInboxRateLimitPda, findInflightFlowPda, findNttPeerPda, findRegisteredTransceiverPda, findSessionAuthorityPda, findUserInboxAuthorityPda, FOGO_WORMHOLE_CHAIN_ID, NTT_ONYC_PROGRAM_ID, NTT_USDC_PROGRAM_ID, nttTransferArgsHash, ONYC_MINT, resolveNttVaa, USDC_MINT, WormholescanClient } from '@fogo-onre/sdk'
 import { createAssociatedTokenAccountIdempotentInstruction, getAssociatedTokenAddressSync } from '@solana/spl-token'
 import { Connection, Keypair, PublicKey, SystemProgram, Transaction, VersionedTransaction } from '@solana/web3.js'
 import { deserialize } from '@wormhole-foundation/sdk-definitions'
@@ -73,6 +73,71 @@ const FOGO_WORMHOLE_CORE_MAINNET = 'worm2mrQkG1B1KTz37erMfWN8anHkSK24nzca7UD8BB'
 // First-party Fogo Labs RPC, matching the webapp default in
 // `packages/webapp/src/store/settings.ts`.
 const FOGO_RPC_DEFAULT = 'https://mainnet.fogo.io'
+
+/**
+ * Source label for `userWallet` resolution, threaded into plan output so
+ * the operator can audit how the CLI picked the wallet that seeds the
+ * inbox-authority PDA.
+ *
+ *   flag             — explicit `--user-wallet`
+ *   signer-auto      — current keypair derives the matching PDA
+ *   sender-auto      — VAA's NTT `sender` field derives the matching PDA
+ *                      (true for non-Session direct deposits)
+ *   fogo-tx-recovery — read FOGO source tx's `bridge_ntt_tokens`
+ *                      source-ATA owner; only firing when the first two
+ *                      probes miss (Fogo Sessions case: VAA sender is the
+ *                      session keypair, not the wallet that owns the ATA)
+ *   sender-fallback  — none matched; used by `claim-usdc` so Pre-flight 4
+ *                      can throw the standard mismatch diagnostic
+ */
+type UserWalletSource = 'flag' | 'signer-auto' | 'sender-auto' | 'fogo-tx-recovery' | 'sender-fallback'
+
+interface ResolveUserWalletArgs {
+  programId: PublicKey
+  signer: PublicKey
+  resolved: { recipientOnSolana: PublicKey, senderOnSource: PublicKey }
+  fogoConnection: Connection
+  fogoTx: string
+}
+
+/**
+ * Three-stage userWallet auto-detect — kept in lockstep with the daemon's
+ * resolver in `packages/cranker/src/relayer/claim-usdc.ts`.
+ *
+ * Order matters: cheap PDA derivations first, network round-trip last.
+ *   1. Signer  — operator cranking their own deposit (most common)
+ *   2. VAA sender — non-Session direct FOGO deposit
+ *   3. FOGO source-ATA owner — Sessions deposit. The session keypair
+ *      signed the bridge ix (so it appears as VAA sender), but the per-
+ *      user inbox PDA is seeded against the main wallet that owns the
+ *      USDC.s ATA the burn pulled from. The SDK helper reads that ATA's
+ *      owner from the FOGO tx; one RPC call, gates exactly the case the
+ *      first two probes miss.
+ *
+ * Returns `null` when all three miss — callers decide whether to throw
+ * with a precise message or fall through to a downstream pre-flight that
+ * will throw with the standard mismatch diagnostic.
+ */
+async function autoDetectUserWallet(
+  args: ResolveUserWalletArgs,
+): Promise<{ wallet: PublicKey, source: 'signer-auto' | 'sender-auto' | 'fogo-tx-recovery' } | null> {
+  const deriveInboxAuthority = (wallet: PublicKey): PublicKey => {
+    const [pda] = findUserInboxAuthorityPda(wallet, args.programId)
+    return pda
+  }
+  const target = args.resolved.recipientOnSolana
+  if (deriveInboxAuthority(args.signer).equals(target)) {
+    return { wallet: args.signer, source: 'signer-auto' }
+  }
+  if (deriveInboxAuthority(args.resolved.senderOnSource).equals(target)) {
+    return { wallet: args.resolved.senderOnSource, source: 'sender-auto' }
+  }
+  const recovered = await deriveUserWalletFromFogoTx(args.fogoConnection, args.fogoTx).catch(() => null)
+  if (recovered && deriveInboxAuthority(recovered).equals(target)) {
+    return { wallet: recovered, source: 'fogo-tx-recovery' }
+  }
+  return null
+}
 
 export function crankerCommands(): Command {
   const cranker = new Command('cranker').description(
@@ -133,6 +198,225 @@ export function crankerCommands(): Command {
       }
     })
 
+  // `diagnose` is the operator-facing "where is this flow stuck and what
+  // do I run next?" command. It mirrors every pre-flight gate inside
+  // `lock_onyc` (deposit-leg step 3) but as a read-only report — no
+  // signatures spent, no chain mutations. The point is to turn a stuck
+  // tx signature into a precise, actionable diagnosis without the
+  // operator having to mentally chain `status` + manual RPC probes +
+  // grep-through-the-cranker-source.
+  //
+  // The gates we check (each must pass for `lock_onyc` to dispatch):
+  //   1. NTT ONyc manager id is not the USDC manager placeholder
+  //   2. FOGO peer registered on the Solana ONyc NTT manager
+  //   3. FOGO inbox-rate-limit PDA initialized on the same manager
+  //   4. `registered_transceiver` PDA initialized on the same manager
+  //   5. `relayer_authority` PDA has at least 3M lamports (NTT's
+  //      OutboxItem rent debit floor — silently underflows otherwise)
+  //
+  // If gates 1–5 all pass and the Flow PDA is in `Swapped`, the
+  // recommended next action is literally `cranker advance --confirm`.
+  // If the Flow PDA is gone (lock_onyc already fired), the recommended
+  // action is to look up VAA #2 on Wormholescan from the Solana ONyc
+  // emitter and run `cranker redeem-fogo --vaa <hex>`.
+  cranker
+    .command('diagnose')
+    .description('Read-only end-to-end report of why a deposit flow is stalled and exactly what to run next')
+    .requiredOption('--fogo-tx <signature>', 'FOGO tx signature that emitted the bridge VAA')
+    .option('--vaa <hex>', 'Override Wormholescan lookup with raw signed VAA bytes (hex)')
+    .option('--ntt-program <pubkey>', `NTT USDC.s manager program id (default: ${NTT_USDC_PROGRAM_ID.toBase58()})`)
+    .option('--wormholescan-url <url>', `Wormholescan REST base URL [default: ${DEFAULT_WORMHOLESCAN_URL}]`)
+    .action(async (opts: {
+      fogoTx: string
+      vaa?: string
+      nttProgram?: string
+      wormholescanUrl?: string
+    }) => {
+      const { connection, client } = useContext()
+      const nttProgram = opts.nttProgram ? new PublicKey(opts.nttProgram) : NTT_USDC_PROGRAM_ID
+
+      // Mirror of lock-onyc.ts: NTT debits OutboxItem rent (~1.86M) from
+      // relayer_authority via invoke_signed; target = debit + rent-exempt
+      // + headroom = 3M. Same constant lives in three places (relayer
+      // daemon, CLI lock-onyc, CLI advance); centralizing it would be a
+      // separate cleanup pass. For now, mirror the value so the gate
+      // here matches what `lock_onyc` actually requires.
+      const RELAYER_AUTH_TOPUP_LAMPORTS = 3_000_000n
+
+      let vaaBytes: Uint8Array | null = null
+      try {
+        vaaBytes = await fetchVaaBytes({
+          fogoTx: opts.fogoTx,
+          vaaHex: opts.vaa,
+          wormholescanUrl: opts.wormholescanUrl,
+        })
+      } catch (err) {
+        // VAA fetch failure is itself a diagnosis: guardians haven't
+        // signed VAA #1 yet, or the FOGO tx didn't emit a Wormhole msg.
+        // Treat it as terminal-for-this-report so the operator sees a
+        // clear "VAA #1 missing" signal instead of an unhandled throw.
+        console.log(chalk.red('VAA #1 not retrievable'))
+        console.log(chalk.dim(`  cause: ${err instanceof Error ? err.message : String(err)}`))
+        console.log()
+        console.log(chalk.yellow('Diagnosis: the FOGO burn either has not been observed by guardians yet, or it did not emit a Wormhole message.'))
+        console.log(chalk.dim('  - Wait a few seconds and retry — guardian signing typically lands within ~10s of FOGO finality.'))
+        console.log(chalk.dim('  - If the retry still fails after 60s, verify the tx actually invoked NTT transfer_burn (check FogoScan).'))
+        return
+      }
+
+      const resolved = resolveNttVaa({ vaaBytes, nttProgramId: nttProgram })
+
+      console.log(chalk.cyan('VAA #1 (FOGO → Solana, USDC.s)'))
+      console.log(chalk.dim(`  emitterChain:           ${resolved.fromChain}`))
+      console.log(chalk.dim(`  sequence:               ${resolved.vaa.sequence}`))
+      console.log(chalk.dim(`  sender:                 ${resolved.senderOnSource.toBase58()}`))
+      console.log(chalk.dim(`  recipient (Solana PDA): ${resolved.recipientOnSolana.toBase58()}`))
+      console.log(chalk.dim(`  trimmedAmount:          ${resolved.manager.trimmedAmount} (decimals=${resolved.manager.trimmedDecimals})`))
+      console.log(chalk.dim(`  nttInboxItem:           ${resolved.nttInboxItem.toBase58()}`))
+
+      // 1. Has VAA #1 been delivered to NTT on Solana?
+      // 2. What does the Flow PDA say (if anything)?
+      // Fetch both in parallel — independent RPCs.
+      const [inboxItemInfo, inflight] = await Promise.all([
+        connection.getAccountInfo(resolved.nttInboxItem).catch(() => null),
+        client.fetchInflightFlow(resolved.nttInboxItem).catch(() => null),
+      ])
+      const claimDone = inboxItemInfo !== null
+      const flowExists = inflight !== null
+      const flowStatus = inflight ? describeStatus(inflight.status) : '(no Flow PDA)'
+
+      console.log(chalk.cyan('\nSolana side state'))
+      console.log(chalk.dim(`  NTT inbox_item:         ${claimDone ? chalk.green('exists ✓') : chalk.yellow('missing — claim_usdc has not run')}`))
+      console.log(chalk.dim(`  inflight Flow PDA:      ${flowExists ? chalk.green(`exists (status=${flowStatus})`) : chalk.yellow('(none — either fresh or lock_onyc already closed it)')}`))
+      if (inflight) {
+        const sender = new PublicKey(Uint8Array.from(inflight.fogoSender as ArrayLike<number>))
+        console.log(chalk.dim(`  Flow.amount:            ${inflight.amount.toString()}`))
+        console.log(chalk.dim(`  Flow.fogoSender:        ${sender.toBase58()}`))
+        console.log(chalk.dim(`  Flow.payer:             ${inflight.payer.toBase58()}`))
+      }
+
+      // Pre-flight gates that `lock_onyc` runs every scan. Each is
+      // checked even when the Flow PDA isn't `Swapped` yet — the report
+      // is more useful when it surfaces deployment problems eagerly,
+      // not just at the exact moment they'd block.
+      console.log(chalk.cyan('\nlock_onyc pre-flight gates'))
+
+      // Gate 1: ONyc NTT manager not the USDC placeholder.
+      const placeholderActive = NTT_ONYC_PROGRAM_ID.equals(NTT_USDC_PROGRAM_ID)
+      const gate1Ok = !placeholderActive
+      console.log(`  ${gate1Ok ? chalk.green('✓') : chalk.red('✗')} ONyc NTT manager distinct from USDC manager`)
+      console.log(chalk.dim(`      NTT_ONYC_PROGRAM_ID = ${NTT_ONYC_PROGRAM_ID.toBase58()}`))
+      console.log(chalk.dim(`      NTT_USDC_PROGRAM_ID = ${NTT_USDC_PROGRAM_ID.toBase58()}`))
+      if (!gate1Ok) {
+        console.log(chalk.dim(chalk.red('      → SDK constants still hold the placeholder — rebuild SDK with real ONyc manager id')))
+      }
+
+      // Gates 2 & 3: FOGO peer + inbox_rate_limit on ONyc NTT manager.
+      // Fetch in parallel — both gate `transfer_lock` independently.
+      const [fogoPeerPda] = findNttPeerPda(FOGO_WORMHOLE_CHAIN_ID, NTT_ONYC_PROGRAM_ID)
+      const [fogoInboxRateLimitPda] = findInboxRateLimitPda(FOGO_WORMHOLE_CHAIN_ID, NTT_ONYC_PROGRAM_ID)
+      // Gate 4: registered_transceiver PDA. The OnRe ONyc deployment
+      // uses bundled-transceiver mode (transceiver == manager program),
+      // so seed = ["registered_transceiver", manager_pubkey] under the
+      // same manager. Mirrors `lock-onyc.ts:122-128`.
+      const [registeredTransceiverPda] = findRegisteredTransceiverPda(
+        NTT_ONYC_PROGRAM_ID,
+        NTT_ONYC_PROGRAM_ID,
+      )
+      // Gate 5: relayer_authority lamports — NTT debits OutboxItem rent
+      // via invoke_signed; if the PDA can't cover the debit + rent-exempt
+      // floor, the CPI reverts with `Transfer: insufficient lamports`.
+      const [relayerAuthorityPda] = findAuthorityPda(client.program.programId)
+      const [peerInfo, inboxRateLimitInfo, transceiverInfo, relayerAuthInfo] = await Promise.all([
+        connection.getAccountInfo(fogoPeerPda).catch(() => null),
+        connection.getAccountInfo(fogoInboxRateLimitPda).catch(() => null),
+        connection.getAccountInfo(registeredTransceiverPda).catch(() => null),
+        connection.getAccountInfo(relayerAuthorityPda).catch(() => null),
+      ])
+
+      const gate2Ok = peerInfo !== null
+      console.log(`  ${gate2Ok ? chalk.green('✓') : chalk.red('✗')} FOGO peer registered on ONyc NTT manager`)
+      console.log(chalk.dim(`      ${fogoPeerPda.toBase58()}`))
+      if (!gate2Ok) {
+        console.log(chalk.dim(chalk.red(`      → operator must run NTT set-peer for FOGO chain ${FOGO_WORMHOLE_CHAIN_ID} on the ONyc NTT manager`)))
+      }
+
+      const gate3Ok = inboxRateLimitInfo !== null
+      console.log(`  ${gate3Ok ? chalk.green('✓') : chalk.red('✗')} FOGO inbox_rate_limit PDA initialized`)
+      console.log(chalk.dim(`      ${fogoInboxRateLimitPda.toBase58()}`))
+      if (!gate3Ok) {
+        console.log(chalk.dim(chalk.red(`      → typically initialized by set-peer; if missing alongside peer it confirms set-peer was never run for FOGO`)))
+      }
+
+      const gate4Ok = transceiverInfo !== null
+      console.log(`  ${gate4Ok ? chalk.green('✓') : chalk.red('✗')} registered_transceiver PDA on ONyc NTT manager`)
+      console.log(chalk.dim(`      ${registeredTransceiverPda.toBase58()}`))
+      if (!gate4Ok) {
+        console.log(chalk.dim(chalk.red('      → operator must run NTT register-transceiver on the ONyc NTT manager')))
+      }
+
+      const relayerAuthLamports = BigInt(relayerAuthInfo?.lamports ?? 0)
+      const gate5Ok = relayerAuthLamports >= RELAYER_AUTH_TOPUP_LAMPORTS
+      console.log(`  ${gate5Ok ? chalk.green('✓') : chalk.yellow('!')} relayer_authority PDA funded for OutboxItem rent`)
+      console.log(chalk.dim(`      ${relayerAuthorityPda.toBase58()} balance=${relayerAuthLamports.toString()} lamports (target ≥ ${RELAYER_AUTH_TOPUP_LAMPORTS.toString()})`))
+      if (!gate5Ok) {
+        console.log(chalk.dim(chalk.yellow('      → not strictly fatal: every cranker invocation tops this up to 3M before transfer_lock, so cli/daemon recover automatically')))
+      }
+
+      const allGatesOk = gate1Ok && gate2Ok && gate3Ok && gate4Ok
+
+      // Decision tree — turn the gathered state into a single actionable
+      // recommendation. Branches are ordered by what the operator would
+      // do first, not by chain order.
+      console.log(chalk.cyan('\nDiagnosis'))
+      if (!claimDone && !flowExists) {
+        console.log(chalk.yellow('  Fresh deposit — no Solana side work has run yet.'))
+        console.log(chalk.green(`  Next action:  cranker advance --fogo-tx ${opts.fogoTx} --confirm`))
+        console.log(chalk.dim('  (orchestrates claim_usdc + swap_usdc_to_onyc + lock_onyc in one or two atomic txs)'))
+        return
+      }
+      if (flowExists && flowStatus === 'Claimed') {
+        console.log(chalk.yellow('  claim_usdc landed; swap_usdc_to_onyc has not run.'))
+        console.log(chalk.green(`  Next action:  cranker advance --fogo-tx ${opts.fogoTx} --confirm`))
+        console.log(chalk.dim('  (advance is idempotent — re-running picks up exactly where chain state left off)'))
+        return
+      }
+      if (flowExists && flowStatus === 'Swapped') {
+        if (!allGatesOk) {
+          console.log(chalk.red('  swap_usdc_to_onyc landed, but lock_onyc cannot dispatch — one or more deployment gates above are failing.'))
+          console.log(chalk.dim('  USDC.s value is now held on Solana as ONyc in the relayer/OnRe ATA. Funds are safe but pinned until the gates are fixed.'))
+          console.log(chalk.green('  Next action:  fix the ✗ gates above (operator/governance action on NTT manager), then `cranker advance --confirm` to resume.'))
+          return
+        }
+        console.log(chalk.yellow('  Ready for lock_onyc — all pre-flight gates pass.'))
+        console.log(chalk.green(`  Next action:  cranker advance --fogo-tx ${opts.fogoTx} --confirm`))
+        console.log(chalk.dim('  (lock_onyc emits VAA #2 atomically; the cranker daemon\'s `solana-onyc-to-fogo` bridge leg then redeems it on FOGO)'))
+        return
+      }
+      if (claimDone && !flowExists) {
+        // Two sub-cases under this branch:
+        //  a) lock_onyc fired and VAA #2 is in flight / FOGO-side redeem
+        //     pending — the daemon's bridge leg handles this automatically
+        //     but the operator can force it with `redeem-fogo --vaa <hex>`.
+        //  b) claim_usdc ran but swap+lock then closed the flow (would be
+        //     unusual on the deposit chain — rules it out implicitly).
+        console.log(chalk.green('  Solana side complete: lock_onyc already closed the Flow PDA and emitted VAA #2.'))
+        console.log(chalk.yellow('  Remaining: FOGO-side NTT redeem must consume VAA #2 and mint ONyc into the user wallet.'))
+        console.log()
+        console.log(chalk.cyan('  How to verify / fix:'))
+        console.log(chalk.dim(`    1. Look up VAA #2 on Wormholescan from the Solana ONyc emitter`))
+        console.log(chalk.dim(`       (emitter address = NTT_ONYC_PROGRAM_ID '${NTT_ONYC_PROGRAM_ID.toBase58()}' wrapped to a Wormhole-format 32-byte hex)`))
+        console.log(chalk.dim(`       Watch your bridge sequence; sequences are monotonic per emitter.`))
+        console.log(chalk.dim(`    2. If VAA #2 status is 'completed', the redeem has already landed on FOGO — confirm by checking the user's ONyc ATA balance.`))
+        console.log(chalk.dim(`    3. If VAA #2 is 'published' but not 'completed', the FOGO redeem is pending. Force it:`))
+        console.log(chalk.green(`         cranker redeem-fogo --vaa <hex of signed VAA #2> --confirm`))
+        console.log(chalk.dim(`    4. If VAA #2 doesn't exist on Wormholescan yet, guardians haven't observed lock_onyc's emit — wait ~10s or check Solana for the lock_onyc tx.`))
+        return
+      }
+      console.log(chalk.red('  Unexpected state combination — please report this output to engineering.'))
+      console.log(chalk.dim(`    claimDone=${claimDone} flowExists=${flowExists} flowStatus=${flowStatus}`))
+    })
+
   cranker
     .command('claim-usdc')
     .description('Claim a bridged USDC.s VAA into the per-user inbox ATA (deposit leg, step 1)')
@@ -142,6 +426,7 @@ export function crankerCommands(): Command {
     .option('--usdc-mint <pubkey>', `USDC mint on Solana (default: ${USDC_MINT.toBase58()})`)
     .option('--ntt-program <pubkey>', `NTT USDC.s manager program id (default: ${NTT_USDC_PROGRAM_ID.toBase58()})`)
     .option('--wormholescan-url <url>', `Wormholescan REST base URL [default: ${DEFAULT_WORMHOLESCAN_URL}]`)
+    .option('--fogo-rpc <url>', `FOGO RPC URL for Sessions wallet recovery [env: FOGO_RPC_URL, default: ${FOGO_RPC_DEFAULT}]`)
     .option('--confirm', 'Actually broadcast the transaction (default: dry-run)')
     .action(async (opts: {
       fogoTx: string
@@ -150,11 +435,14 @@ export function crankerCommands(): Command {
       usdcMint?: string
       nttProgram?: string
       wormholescanUrl?: string
+      fogoRpc?: string
       confirm?: boolean
     }) => {
       const { connection, keypair, client } = useContext()
       const usdcMint = opts.usdcMint ? new PublicKey(opts.usdcMint) : USDC_MINT
       const nttProgram = opts.nttProgram ? new PublicKey(opts.nttProgram) : NTT_USDC_PROGRAM_ID
+      const fogoRpcUrl = opts.fogoRpc ?? process.env.FOGO_RPC_URL ?? FOGO_RPC_DEFAULT
+      const fogoConnection = new Connection(fogoRpcUrl, 'confirmed')
 
       const vaaBytes = await fetchVaaBytes({
         fogoTx: opts.fogoTx,
@@ -173,35 +461,37 @@ export function crankerCommands(): Command {
       // `sessionState.walletPublicKey`).
       //
       // Auto-detection strategy when `--user-wallet` is unset: probe
-      // [signer.publicKey, senderOnSource] and pick whichever derives
-      // the inbox-authority PDA matching the VAA's recipient. The
-      // signer is checked first because the common operator pattern is
-      // "I deposited from this same wallet, and now I'm cranking my
-      // own deposit." The VAA-sender fallback covers the
-      // non-Session direct-deposit case. If both miss, the
-      // mismatch pre-flight (Pre-flight 4 below) bails with a
-      // diagnostic naming the recipient PDA the operator must derive
-      // from elsewhere.
-      function deriveInboxAuthority(wallet: PublicKey): PublicKey {
-        const [pda] = findUserInboxAuthorityPda(wallet, client.program.programId)
-        return pda
-      }
+      // [signer.publicKey, senderOnSource, fogo-tx source-ATA owner] and
+      // pick whichever derives the inbox-authority PDA matching the
+      // VAA's recipient. The signer is checked first (common operator
+      // pattern: cranking own deposit), VAA-sender second (non-Session
+      // direct deposit), and the FOGO-tx source-ATA owner last
+      // (Sessions deposits, where the VAA sender is a session keypair
+      // distinct from the wallet that owns the burned ATA). If all
+      // miss, fall through to senderOnSource so Pre-flight 4 below
+      // bails with the standard mismatch diagnostic.
       let userWallet: PublicKey
-      let userWalletSource: 'flag' | 'signer-auto' | 'sender-auto' | 'sender-fallback'
+      let userWalletSource: UserWalletSource
       if (opts.userWallet) {
         userWallet = new PublicKey(opts.userWallet)
         userWalletSource = 'flag'
-      } else if (deriveInboxAuthority(keypair.publicKey).equals(resolved.recipientOnSolana)) {
-        userWallet = keypair.publicKey
-        userWalletSource = 'signer-auto'
-      } else if (deriveInboxAuthority(resolved.senderOnSource).equals(resolved.recipientOnSolana)) {
-        userWallet = resolved.senderOnSource
-        userWalletSource = 'sender-auto'
       } else {
-        // Neither candidate matches — fall through to senderOnSource so
-        // Pre-flight 4 can throw with the standard mismatch diagnostic.
-        userWallet = resolved.senderOnSource
-        userWalletSource = 'sender-fallback'
+        const auto = await autoDetectUserWallet({
+          programId: client.program.programId,
+          signer: keypair.publicKey,
+          resolved,
+          fogoConnection,
+          fogoTx: opts.fogoTx,
+        })
+        if (auto) {
+          userWallet = auto.wallet
+          userWalletSource = auto.source
+        } else {
+          // Neither candidate matches — fall through to senderOnSource so
+          // Pre-flight 4 can throw with the standard mismatch diagnostic.
+          userWallet = resolved.senderOnSource
+          userWalletSource = 'sender-fallback'
+        }
       }
       const defaultedUserWallet = userWalletSource !== 'flag'
 
@@ -253,7 +543,7 @@ export function crankerCommands(): Command {
       // a precise message that names the recovery action.
       if (!userInboxAuthority.equals(resolved.recipientOnSolana)) {
         const hint = defaultedUserWallet
-          ? ` The CLI defaulted --user-wallet to the VAA sender (${resolved.senderOnSource.toBase58()}), which is correct for a non-Session deposit but wrong for a Fogo Sessions deposit (sender = session keypair, not the main wallet that seeds the inbox PDA).`
+          ? ` The CLI exhausted all three auto-detect probes (signer, VAA sender, FOGO source-ATA owner) and fell back to the VAA sender (${resolved.senderOnSource.toBase58()}); none derived a matching PDA.`
           : ''
         throw new Error(
           `derived inbox-authority PDA (${userInboxAuthority.toBase58()}) does not match the VAA's recorded recipient (${resolved.recipientOnSolana.toBase58()}).${hint} Re-run with --user-wallet=<main_fogo_wallet> matching the wallet that initiated the deposit on FOGO.`,
@@ -284,6 +574,23 @@ export function crankerCommands(): Command {
       }
 
       console.log()
+      // Top-up: NTT Redeem CPI uses relayer_authority PDA as payer for
+      // `inbox_item` init (~1.41M lamports). A bare PDA only holds the
+      // ~1.14M rent-exempt minimum for itself, so the inner System
+      // Transfer fails with `insufficient lamports`. Same fix as
+      // lock_onyc / advance — top up to 3M, idempotent above target.
+      const [relayerAuthorityPdaForClaim] = findAuthorityPda(client.program.programId)
+      const relayerAuthInfoForClaim = await connection.getAccountInfo(relayerAuthorityPdaForClaim).catch(() => null)
+      const RELAYER_AUTH_TOPUP_CLAIM = 3_000_000n
+      const existingRelayerAuthLamports = BigInt(relayerAuthInfoForClaim?.lamports ?? 0)
+      const preIxs: TransactionInstruction[] = [ensureUserInboxAtaIx]
+      if (existingRelayerAuthLamports < RELAYER_AUTH_TOPUP_CLAIM) {
+        preIxs.unshift(SystemProgram.transfer({
+          fromPubkey: keypair.publicKey,
+          toPubkey: relayerAuthorityPdaForClaim,
+          lamports: Number(RELAYER_AUTH_TOPUP_CLAIM - existingRelayerAuthLamports),
+        }))
+      }
       const sig = await runTx(() =>
         client
           .claimUsdc({
@@ -298,7 +605,7 @@ export function crankerCommands(): Command {
             // for the same wiring on the ONyc side.
             ntt: { transceiverAddress: nttProgram },
           })
-          .preInstructions([ensureUserInboxAtaIx])
+          .preInstructions(preIxs)
           .rpc(),
       )
 
@@ -789,6 +1096,7 @@ export function crankerCommands(): Command {
     .option('--ntt-version <ver>', `NTT IDL version for the ONyc manager (release_outbound only) [default: ${DEFAULT_NTT_VERSION}]`)
     .option('--wormhole-core <pubkey>', `Wormhole Core program id (release_outbound only) [default: ${WORMHOLE_CORE_MAINNET}]`)
     .option('--wormholescan-url <url>', `Wormholescan REST base URL [default: ${DEFAULT_WORMHOLESCAN_URL}]`)
+    .option('--fogo-rpc <url>', `FOGO RPC URL for Sessions wallet recovery [env: FOGO_RPC_URL, default: ${FOGO_RPC_DEFAULT}]`)
     .option('--confirm', 'Actually broadcast the transaction (default: dry-run)')
     .action(async (opts: {
       fogoTx: string
@@ -802,6 +1110,7 @@ export function crankerCommands(): Command {
       nttVersion?: string
       wormholeCore?: string
       wormholescanUrl?: string
+      fogoRpc?: string
       confirm?: boolean
     }) => {
       const { connection, keypair, client } = useContext()
@@ -810,6 +1119,8 @@ export function crankerCommands(): Command {
       const rentDestination = opts.rentDestination
         ? new PublicKey(opts.rentDestination)
         : keypair.publicKey
+      const fogoRpcUrl = opts.fogoRpc ?? process.env.FOGO_RPC_URL ?? FOGO_RPC_DEFAULT
+      const fogoConnection = new Connection(fogoRpcUrl, 'confirmed')
 
       const vaaBytes = await fetchVaaBytes({
         fogoTx: opts.fogoTx,
@@ -872,77 +1183,118 @@ export function crankerCommands(): Command {
       let userWallet = keypair.publicKey
       let userWalletNote = '(default: signer)'
       if (needClaim) {
-        function deriveInboxAuthority(wallet: PublicKey): PublicKey {
-          const [pda] = findUserInboxAuthorityPda(wallet, client.program.programId)
-          return pda
-        }
         if (opts.userWallet) {
           userWallet = new PublicKey(opts.userWallet)
           userWalletNote = '(from --user-wallet)'
-        } else if (deriveInboxAuthority(keypair.publicKey).equals(resolved.recipientOnSolana)) {
-          userWallet = keypair.publicKey
-          userWalletNote = '(auto: signer matches recipient PDA)'
-        } else if (deriveInboxAuthority(resolved.senderOnSource).equals(resolved.recipientOnSolana)) {
-          userWallet = resolved.senderOnSource
-          userWalletNote = '(auto: VAA sender matches recipient PDA)'
         } else {
-          throw new Error(
-            `Cannot auto-detect userWallet — neither signer (${keypair.publicKey.toBase58()}) `
-            + `nor VAA sender (${resolved.senderOnSource.toBase58()}) derives an inbox-authority PDA `
-            + `matching the VAA recipient (${resolved.recipientOnSolana.toBase58()}). `
-            + `Pass --user-wallet explicitly. Common cause: Fogo Sessions wallet — the VAA sender is `
-            + `the session keypair, not the main wallet that seeds the inbox PDA.`,
-          )
+          const auto = await autoDetectUserWallet({
+            programId: client.program.programId,
+            signer: keypair.publicKey,
+            resolved,
+            fogoConnection,
+            fogoTx: opts.fogoTx,
+          })
+          if (!auto) {
+            throw new Error(
+              `Cannot auto-detect userWallet — none of the three probes matched the VAA recipient PDA `
+              + `(${resolved.recipientOnSolana.toBase58()}). Tried: signer (${keypair.publicKey.toBase58()}), `
+              + `VAA sender (${resolved.senderOnSource.toBase58()}), and FOGO source-ATA owner from tx ${opts.fogoTx}. `
+              + `Pass --user-wallet explicitly. If this is a Sessions deposit, check that --fogo-rpc reaches a node `
+              + `that has the FOGO tx (default: ${FOGO_RPC_DEFAULT}).`,
+            )
+          }
+          userWallet = auto.wallet
+          userWalletNote = `(auto: ${auto.source})`
         }
       }
 
-      // TX 1: claim and/or swap. These can be safely bundled because
-      // swap reads Flow.amount that claim writes within the same tx.
-      // Lock is deferred to TX 2 because its off-chain args_hash
-      // depends on Flow.amount AFTER swap rewrites it (post-swap ONyc
-      // amount, not the pre-swap USDC amount).
-      if (needClaim || needSwap) {
-        const label = needClaim && needSwap ? 'claim_usdc + swap_usdc_to_onyc' : (needClaim ? 'claim_usdc' : 'swap_usdc_to_onyc')
+      // TX 1: claim_usdc (if needed). Originally claim+swap were bundled
+      // into one tx because swap reads Flow.amount that claim writes
+      // — atomic was nice. But the combined account list (NTT redeem
+      // ~26 accts + OnRe take_offer 22 remaining_accounts + signers +
+      // sysvars) overflows Solana's legacy 1232-byte tx limit when both
+      // run from scratch (~1448 bytes). Splitting into two sequential
+      // legacy txs sidesteps the limit without requiring v0+LUT
+      // plumbing. The atomicity loss is acceptable: swap's pre-flight
+      // gates on `Flow.status === Claimed`, and if claim lands but
+      // swap fails, re-running `cranker advance` (or the daemon's
+      // next tick) picks up the Flow PDA in `Claimed` and dispatches
+      // swap directly — no value at risk, just a paused state machine.
+      // Long-term fix is v0 + NTT/OnRe LUTs; this is the right
+      // immediate change.
+      if (needClaim) {
         txQueue.push({
-          label,
+          label: 'claim_usdc',
           build: async () => {
             const ixs: TransactionInstruction[] = []
-            if (needClaim) {
-              const [userInboxAuthority] = findUserInboxAuthorityPda(userWallet, client.program.programId)
-              const userInboxAta = getAssociatedTokenAddressSync(usdcMint, userInboxAuthority, true)
-              ixs.push(
-                createAssociatedTokenAccountIdempotentInstruction(
-                  keypair.publicKey,
-                  userInboxAta,
-                  userInboxAuthority,
-                  usdcMint,
-                ),
-              )
-              const claimIx = await client
-                .claimUsdc({
-                  payer: keypair.publicKey,
-                  userWallet,
-                  usdcMint,
-                  nttInboxItem: resolved.nttInboxItem,
-                  nttTransceiverMessage: resolved.nttTransceiverMessage,
-                  ntt: { transceiverAddress: nttProgram },
-                })
-                .instruction()
-              ixs.push(claimIx)
+            const [userInboxAuthority] = findUserInboxAuthorityPda(userWallet, client.program.programId)
+            const userInboxAta = getAssociatedTokenAddressSync(usdcMint, userInboxAuthority, true)
+            ixs.push(
+              createAssociatedTokenAccountIdempotentInstruction(
+                keypair.publicKey,
+                userInboxAta,
+                userInboxAuthority,
+                usdcMint,
+              ),
+            )
+            // Top-up: NTT Redeem CPI uses the relayer_authority PDA as
+            // payer for `inbox_item` init (see SDK builder
+            // `buildNttRedeemReleaseAccounts` — the first redeem-slice
+            // account is `writable(authority)`). Init costs ~1.41M
+            // lamports; a stock relayer_authority PDA holds only
+            // ~1.14M (rent-exempt for itself), so the inner System
+            // Transfer fails with `insufficient lamports`. Same pattern
+            // lock_onyc handles. Top up to 3M (init + headroom for
+            // multiple Redeems before next top-up). Idempotent:
+            // computeTopUp returns 0 once the PDA is already at-or-above
+            // target, so subsequent claims pay nothing.
+            const [relayerAuthorityPda] = findAuthorityPda(client.program.programId)
+            const relayerAuthInfo = await connection.getAccountInfo(relayerAuthorityPda).catch(() => null)
+            const RELAYER_AUTH_TOPUP = 3_000_000n
+            const existing = BigInt(relayerAuthInfo?.lamports ?? 0)
+            if (existing < RELAYER_AUTH_TOPUP) {
+              ixs.push(SystemProgram.transfer({
+                fromPubkey: keypair.publicKey,
+                toPubkey: relayerAuthorityPda,
+                lamports: Number(RELAYER_AUTH_TOPUP - existing),
+              }))
             }
-            if (needSwap) {
-              const swapIx = await client
-                .swapUsdcToOnyc({
-                  usdcMint,
-                  onycMint,
-                  nttInboxItem: resolved.nttInboxItem,
-                  feeVault,
-                  onre: {},
-                })
-                .instruction()
-              ixs.push(swapIx)
-            }
+            const claimIx = await client
+              .claimUsdc({
+                payer: keypair.publicKey,
+                userWallet,
+                usdcMint,
+                nttInboxItem: resolved.nttInboxItem,
+                nttTransceiverMessage: resolved.nttTransceiverMessage,
+                ntt: { transceiverAddress: nttProgram },
+              })
+              .instruction()
+            ixs.push(claimIx)
             return { ixs, signers: [] }
+          },
+        })
+      }
+
+      // TX 2: swap_usdc_to_onyc (if needed). Builder is deferred
+      // (lambda), so when this runs in the same `advance` invocation
+      // as a fresh claim, the on-chain Flow PDA is already populated
+      // with `status=Claimed` and `amount=USDC.received` by the time
+      // swap's pre-flight runs inside the program. The instruction
+      // itself is account-list-heavy but well under 1232 bytes solo.
+      if (needSwap) {
+        txQueue.push({
+          label: 'swap_usdc_to_onyc',
+          build: async () => {
+            const swapIx = await client
+              .swapUsdcToOnyc({
+                usdcMint,
+                onycMint,
+                nttInboxItem: resolved.nttInboxItem,
+                feeVault,
+                onre: {},
+              })
+              .instruction()
+            return { ixs: [swapIx], signers: [] }
           },
         })
       }
@@ -1416,7 +1768,6 @@ export function crankerCommands(): Command {
       console.log(chalk.dim(`  tx: ${sig}`))
     })
 
-
   cranker
     .command('send-usdc-to-user')
     .description('NTT lock USDC.s back to flow.fogo_sender + close outflight Flow (withdraw leg, step 4 — terminal)')
@@ -1639,8 +1990,21 @@ function makeSolanaNtt(args: MakeSolanaNttArgs): SolanaNtt<'Mainnet', 'Solana'> 
  * a `SolanaNtt` instance. Pulls the wormhole-core PDAs (bridge,
  * fee_collector, sequence) and the v3 `outbox_item_signer` PDA out of the
  * NTT SDK's own `createReleaseWormholeOutboundIx` so we don't have to
- * mirror those derivations here. Index positions match the mainnet tx
- * `3NR6EEbk…` ordering pinned in `sdk-ntt-release.test.ts`.
+ * mirror those derivations here. Index positions match the NTT v3 IDL
+ * for `releaseWormholeOutbound` (verified against
+ * `idl/3_0_0/json/example_native_token_transfers.json`):
+ *   k[ 3] = transceiver (registered_transceiver PDA)
+ *   k[ 4] = wormhole_message (writable, init'd by NTT v3)
+ *   k[ 5] = emitter
+ *   k[ 6] = wormhole.bridge
+ *   k[ 7] = wormhole.fee_collector
+ *   k[ 8] = wormhole.sequence
+ *   k[ 9] = wormhole.program
+ *   k[14] = outbox_item_signer (v3)
+ *
+ * Mirrors `packages/cranker/src/relayer/lock-onyc.ts:deriveLockOnycReleaseAccounts`;
+ * the CLI and daemon must use the same indexes or `lock_onyc` aborts
+ * with Anchor `ConstraintSeeds (2006)` on `wormhole_message`.
  */
 async function deriveLockOnycReleaseAccounts(
   ntt: SolanaNtt<'Mainnet', 'Solana'>,
@@ -1662,8 +2026,8 @@ async function deriveLockOnycReleaseAccounts(
   const releaseIx = await xcvr.createReleaseWormholeOutboundIx(payer, outboxItem, false)
   const k = releaseIx.keys
   return {
-    wormholeMessage: k[3].pubkey,
-    emitter: k[4].pubkey,
+    wormholeMessage: k[4].pubkey,
+    emitter: k[5].pubkey,
     wormholeBridge: k[6].pubkey,
     wormholeFeeCollector: k[7].pubkey,
     wormholeSequence: k[8].pubkey,

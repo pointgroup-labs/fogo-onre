@@ -1,17 +1,17 @@
-import type { Logger } from '../utils/log'
 import type { Connection, Keypair, PublicKey } from '@solana/web3.js'
-import { NTT_ONYC_PROGRAM_ID, ONYC_MINT, WH_TRANSCEIVER_ONYC_PROGRAM_ID } from '@fogo-onre/sdk'
+import type { Logger } from '../utils/log'
 import {
   ComputeBudgetProgram,
-  Keypair as Web3Keypair,
   sendAndConfirmTransaction,
   Transaction,
   TransactionMessage,
   VersionedTransaction,
+  Keypair as Web3Keypair,
 } from '@solana/web3.js'
 import { deserialize } from '@wormhole-foundation/sdk-definitions'
 import { register as registerNttDefinitions } from '@wormhole-foundation/sdk-definitions-ntt'
 import { register as registerSolanaNtt, SolanaNtt } from '@wormhole-foundation/sdk-solana-ntt'
+import { isVersionedTransaction, makePriorityFeeIx } from '../utils/priority-fee'
 import { withTimeout } from '../utils/rpc'
 
 registerNttDefinitions()
@@ -22,37 +22,50 @@ const SOLANA_CHAIN = 'Solana' as const
 const SOLANA_WORMHOLE_CORE = 'worm2ZoG2kUd4vFXhvjh93UUH596ayRfgQ2MgjNMTth'
 const NTT_VERSION = '3.0.0'
 
-type SolanaOnycNtt = SolanaNtt<typeof NETWORK, typeof SOLANA_CHAIN>
+type SolanaNttMainnet = SolanaNtt<typeof NETWORK, typeof SOLANA_CHAIN>
 // `redeem(attestations[])` accepts a union including
 // `Ntt:WormholeTransferStandardRelayer`; only `Ntt:WormholeTransfer` is
 // relevant for our use case (the relayer-relayer path is unused here).
 // Narrow by intersection to the transfer flavour.
 type WormholeTransferVaa = Extract<
-  Parameters<SolanaOnycNtt['redeem']>[0][number],
+  Parameters<SolanaNttMainnet['redeem']>[0][number],
   { payloadName: 'WormholeTransfer' }
 >
 
-let cachedNtt: SolanaOnycNtt | null = null
+// One SolanaNtt instance per (manager, connection) tuple. Constructing
+// the SDK object resolves an IDL fetch internally on first use, so the
+// cache amortises that across scan ticks. Keyed on the manager pubkey
+// because all other fields (token, transceiver) are functionally
+// determined by it for our deploys (bundled mode → transceiver==manager).
+const nttCache = new Map<string, SolanaNttMainnet>()
 
-function getOrCreateOnycNtt(connection: Connection): SolanaOnycNtt {
-  if (cachedNtt) {
-    return cachedNtt
+function getOrCreateNtt(
+  connection: Connection,
+  manager: PublicKey,
+  token: PublicKey,
+  transceiver: PublicKey,
+): SolanaNttMainnet {
+  const key = manager.toBase58()
+  const cached = nttCache.get(key)
+  if (cached) {
+    return cached
   }
-  cachedNtt = new SolanaNtt(
+  const ntt = new SolanaNtt(
     NETWORK,
     SOLANA_CHAIN,
     connection,
     {
       coreBridge: SOLANA_WORMHOLE_CORE,
       ntt: {
-        manager: NTT_ONYC_PROGRAM_ID.toBase58(),
-        token: ONYC_MINT.toBase58(),
-        transceiver: { wormhole: WH_TRANSCEIVER_ONYC_PROGRAM_ID.toBase58() },
+        manager: key,
+        token: token.toBase58(),
+        transceiver: { wormhole: transceiver.toBase58() },
       },
     },
     NTT_VERSION,
   )
-  return cachedNtt
+  nttCache.set(key, ntt)
+  return ntt
 }
 
 export type PrepareTransceiverMessageInput = {
@@ -62,37 +75,61 @@ export type PrepareTransceiverMessageInput = {
   /**
    * The expected `transceiver_message` PDA for this VAA, as already
    * derived by `resolveNttVaa`. Used as the idempotency probe target —
-   * if this account is already owned by the ONyc NTT manager, prep was
-   * done by an earlier scan tick (or another cranker) and we skip.
+   * if this account is already owned by `expectedOwner`, prep was done
+   * by an earlier scan tick (or another cranker) and we skip.
    */
   transceiverMessagePda: PublicKey
+  /**
+   * NTT manager program ID for this leg (e.g. `NTT_USDC_PROGRAM_ID` or
+   * `NTT_ONYC_PROGRAM_ID`). The SolanaNtt SDK object is keyed on this.
+   */
+  manager: PublicKey
+  /** SPL mint the NTT manager custodies (`USDC_MINT` or `ONYC_MINT`). */
+  token: PublicKey
+  /**
+   * Wormhole transceiver program. In bundled mode (current OnRe
+   * deploy) this equals `manager`. Kept as a separate parameter for
+   * forward-compatibility with standalone-transceiver NTT deploys.
+   */
+  transceiver: PublicKey
+  /**
+   * Program that should own the `transceiver_message` PDA once posted.
+   * For bundled NTT this equals `manager`; the parameter is explicit
+   * so the idempotency check stays correct under future standalone
+   * deploys.
+   */
+  expectedOwner: PublicKey
   rpcTimeoutMs: number
   txConfirmTimeoutMs: number
+  /** µ-lamports/CU prepended to every postVaa-sequence tx. */
+  priorityFeeMicroLamports: number
   log: Logger
 }
 
-export type PrepareTransceiverMessageResult =
-  | { kind: 'already-prepared' }
-  | { kind: 'prepared', signatures: string[] }
-  | { kind: 'error', error: Error }
+export type PrepareTransceiverMessageResult
+  = | { kind: 'already-prepared' }
+    | { kind: 'prepared', signatures: string[] }
+    | { kind: 'error', error: Error }
 
 /**
- * Pre-step for `unlock_onyc`: ensures the ONyc NTT
- * `transceiver_message` PDA exists on Solana, owned by the ONyc NTT
- * manager program. The on-chain `unlock_onyc` handler declares this
- * account with `owner = NTT_ONYC_PROGRAM_ID` and *cannot* create it
- * itself — its CPI does `redeem` + `release_inbound_unlock`, which both
- * read the existing transceiver_message.
+ * Pre-step for any handler that consumes an NTT `transceiver_message`
+ * PDA: ensures that PDA exists on Solana, owned by the corresponding
+ * NTT manager program. The on-chain handlers (`unlock_onyc`,
+ * `claim_usdc`) declare this account with `owner = <manager>` and
+ * cannot* create it themselves — their CPIs do `redeem` +
+ * `release_inbound_*`, which both read the existing transceiver_message.
  *
- * **Why this exists at all:** the Wormhole generic-relayer that auto-
- * posts inbound VAAs is (as of 2026-05) only subscribed to the USDC.s
- * NTT manager, not the ONyc manager. Without this pre-step, every
- * inbound ONyc VAA permanently fails `unlock_onyc` at Anchor's
- * `ConstraintOwner (2004)` check (`Left=11111…, Right=nttpna5…`).
+ * **Why this exists at all:** in practice the Wormhole generic-relayer
+ * that auto-posts inbound VAAs is unreliable for our deploys — it has
+ * been observed to skip both legs depending on subscription state.
+ * Without this pre-step, inbound VAAs intermittently fail at Anchor's
+ * `ConstraintOwner (2004)` check (`Left=11111…, Right=<manager>`).
+ * Generic, manager-agnostic, idempotent — call it from any inbound
+ * leg whose handler reads an NTT transceiver_message account.
  *
  * **What it does NOT do:** it does NOT call `redeem` or
- * `release_inbound_unlock`. Both of those are done by the on-chain
- * `unlock_onyc` handler under the relayer-PDA signer, and a standalone
+ * `release_inbound_{mint,unlock}`. Both of those are done by the
+ * on-chain handler under the relayer-PDA signer, and a standalone
  * redeem here would (a) consume the inbox-item PDA, causing the
  * subsequent on-chain redeem to fail with `init`-constraint violation,
  * and (b) move tokens to the wrong recipient. We extract only the
@@ -115,20 +152,35 @@ export type PrepareTransceiverMessageResult =
 export async function prepareTransceiverMessage(
   input: PrepareTransceiverMessageInput,
 ): Promise<PrepareTransceiverMessageResult> {
-  const { connection, payer, vaaBytes, transceiverMessagePda, rpcTimeoutMs, txConfirmTimeoutMs, log } = input
+  const {
+    connection,
+    payer,
+    vaaBytes,
+    transceiverMessagePda,
+    manager,
+    token,
+    transceiver,
+    expectedOwner,
+    rpcTimeoutMs,
+    txConfirmTimeoutMs,
+    priorityFeeMicroLamports,
+    log,
+  } = input
+  const priorityFeeIx = makePriorityFeeIx(priorityFeeMicroLamports)
 
-  // Idempotency probe: if the PDA already exists owned by the NTT
-  // manager, we're done. Note: a System-owned account at the same
-  // address (lamports==0, data empty) means uninitialized — fall
+  // Idempotency probe: if the PDA already exists owned by the expected
+  // manager program, we're done. Note: a System-owned account at the
+  // same address (lamports==0, data empty) means uninitialized — fall
   // through to prep.
   const existing = await withTimeout(
     connection.getAccountInfo(transceiverMessagePda),
     rpcTimeoutMs,
     'getAccountInfo(transceiverMessage)',
   ).catch(() => null)
-  if (existing && existing.owner.equals(NTT_ONYC_PROGRAM_ID)) {
+  if (existing && existing.owner.equals(expectedOwner)) {
     log.debug('transceiver_message already prepared', {
       pda: transceiverMessagePda.toBase58(),
+      manager: manager.toBase58(),
     })
     return { kind: 'already-prepared' }
   }
@@ -140,15 +192,15 @@ export async function prepareTransceiverMessage(
     return { kind: 'error', error: err instanceof Error ? err : new Error(String(err)) }
   }
 
-  const ntt = getOrCreateOnycNtt(connection)
-  let whTransceiver: Awaited<ReturnType<SolanaOnycNtt['getWormholeTransceiver']>>
+  const ntt = getOrCreateNtt(connection, manager, token, transceiver)
+  let whTransceiver: Awaited<ReturnType<SolanaNttMainnet['getWormholeTransceiver']>>
   try {
     whTransceiver = await ntt.getWormholeTransceiver()
   } catch (err) {
     return { kind: 'error', error: err instanceof Error ? err : new Error(String(err)) }
   }
   if (!whTransceiver) {
-    return { kind: 'error', error: new Error('ONyc NTT manager has no wormhole transceiver registered') }
+    return { kind: 'error', error: new Error(`NTT manager ${manager.toBase58()} has no wormhole transceiver registered`) }
   }
 
   const senderAddress = payer.publicKey
@@ -162,7 +214,7 @@ export async function prepareTransceiverMessage(
       const signatureKeypair = Web3Keypair.generate()
 
       const wormholeNTT = vaa
-      const sigsArg = wormholeNTT.signatures.map((s) => [
+      const sigsArg = wormholeNTT.signatures.map(s => [
         s.guardianIndex,
         ...Array.from(s.signature.encode()),
       ])
@@ -176,6 +228,7 @@ export async function prepareTransceiverMessage(
         .instruction()
 
       const tx1 = new Transaction().add(
+        priorityFeeIx,
         ComputeBudgetProgram.setComputeUnitLimit({ units: 200_000 }),
         postSigsIx,
       )
@@ -212,6 +265,7 @@ export async function prepareTransceiverMessage(
       const messageV0 = new TransactionMessage({
         payerKey: senderAddress,
         instructions: [
+          priorityFeeIx,
           ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 }),
           receiveIx,
           closeSigsIx,
@@ -244,7 +298,22 @@ export async function prepareTransceiverMessage(
         const inner = stx.transaction
         const extraSigners = stx.signers ?? []
         let sig: string
-        if (inner instanceof VersionedTransaction) {
+        // **Do NOT inject our priority-fee ix into SDK-yielded postVaa
+        // txs.** Wormhole core's `postVaa(...)` already embeds
+        // compute-budget pricing (setComputeUnitPrice + setComputeUnitLimit)
+        // into the txs it yields. Layering another setComputeUnitPrice on
+        // top — even after filtering — produced DuplicateInstruction (0x2)
+        // at simulation under pnpm's dual-realm @solana/web3.js resolution.
+        // Same lesson as `bridge/sdk-redeem.ts`: when a third-party SDK
+        // owns the tx, sign and send it as the SDK built it. Priority
+        // fees still apply to every tx we construct ourselves elsewhere
+        // in this function (shim mode tx1/tx2 and the non-shim final
+        // receive_message tx below).
+        //
+        // Cross-realm-safe detection of v0 vs legacy because the SDK and
+        // we may resolve different physical copies of @solana/web3.js
+        // under pnpm — see `isVersionedTransaction` for the rationale.
+        if (isVersionedTransaction(inner)) {
           inner.sign([payer, ...extraSigners])
           sig = await withTimeout(
             connection.sendRawTransaction(inner.serialize(), { skipPreflight: false }),
@@ -279,6 +348,7 @@ export async function prepareTransceiverMessage(
 
       const receiveIx = await whTransceiver.createReceiveIx(vaa, senderAddress)
       const tx = new Transaction().add(
+        priorityFeeIx,
         ComputeBudgetProgram.setComputeUnitLimit({ units: 200_000 }),
         receiveIx,
       )

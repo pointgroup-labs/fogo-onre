@@ -36,13 +36,24 @@ export async function* harvestVaaPages(opts: {
   maxPages: number
   /** Floor lookup only; see fn doc — caller advances watermarks. */
   watermarks?: WatermarkStore
+  /**
+   * When set, ignore the watermark for floor calculation (floor = 0)
+   * and page through `maxPages` regardless of where the watermark sits.
+   * Used by the periodic backstop scan to catch flows the incremental
+   * scan stranded — e.g. a VAA processed during daemon downtime that
+   * already advanced the watermark past it, or a post-watermark
+   * dispatch that failed and left an orphan Flow PDA.
+   */
+  bypassWatermark?: boolean
   abortSignal: AbortSignal
   onPageError?: (page: number, err: unknown) => void
   onPageFetched?: (page: number, count: number, floor: bigint) => void
 }): AsyncGenerator<WormholescanVaa[], void, void> {
-  const floor = opts.watermarks
-    ? pagingFloor(opts.watermarks, opts.chainId, opts.emitterHex)
-    : 0n
+  const floor = opts.bypassWatermark
+    ? 0n
+    : (opts.watermarks
+        ? pagingFloor(opts.watermarks, opts.chainId, opts.emitterHex)
+        : 0n)
   for (let page = 0; page < opts.maxPages; page++) {
     if (opts.abortSignal.aborted) {
       return

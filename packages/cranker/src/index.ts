@@ -193,6 +193,7 @@ async function runScanIteration(deps: ScanDeps, signal: AbortSignal): Promise<vo
         wormholescanTimeoutMs: cfg.wormholescanTimeoutMs,
         rpcTimeoutMs: cfg.rpcTimeoutMs,
         txConfirmTimeoutMs: cfg.txConfirmTimeoutMs,
+        priorityFeeMicroLamports: cfg.solanaPriorityFeeMicroLamports,
       },
       target,
       {
@@ -330,6 +331,26 @@ async function main(): Promise<void> {
     watermarks,
   })
 
+  // Backstop enumerator — bypasses the watermark and pages much deeper
+  // (~days, not ~minutes). Runs on a separate cadence (`backstopIntervalMs`)
+  // to recover stranded flows: VAAs that arrived during daemon downtime
+  // and whose watermark fast-forwarded past them on resume, OR
+  // post-watermark dispatches that failed and left an orphan Flow the
+  // incremental scan no longer pages. Set BACKSTOP_INTERVAL_MS=0 to
+  // disable.
+  const backstopEnumerateFlows = cfg.backstopIntervalMs > 0
+    ? makeEnumerator({
+        fogoWormholeChainId: cfg.fogoWormholeChainId,
+        fogoUsdcEmitterHex: cfg.fogoUsdcEmitterHex,
+        fogoOnycEmitterHex: cfg.fogoOnycEmitterHex,
+        pageSize: cfg.wormholescanPageSize,
+        maxPages: cfg.wormholescanBackstopMaxPages,
+        baseUrl: cfg.wormholescanUrl,
+        watermarks,
+        bypassWatermark: true,
+      })
+    : undefined
+
   const advanceCtxBase = {
     connection,
     fogoConnection,
@@ -340,6 +361,8 @@ async function main(): Promise<void> {
     wormholescanUrl: cfg.wormholescanUrl,
     wormholescanTimeoutMs: cfg.wormholescanTimeoutMs,
     rpcTimeoutMs: cfg.rpcTimeoutMs,
+    txConfirmTimeoutMs: cfg.txConfirmTimeoutMs,
+    priorityFeeMicroLamports: cfg.solanaPriorityFeeMicroLamports,
     metrics,
     log,
     // Cross-scan cache: FOGO source-tx → user wallet. claim_usdc resolves
@@ -448,20 +471,46 @@ async function main(): Promise<void> {
       }
     }
 
+    // Wall-clock checkpoint for the backstop tick selector below.
+    // `lastBackstopAt = 0` means "backstop is due on the first tick";
+    // operators see a backstop sweep at startup, which is exactly when
+    // post-restart stranding is most likely.
+    let lastBackstopAt = 0
+
     await runDaemon({
-      scan: signal => runScanIteration({
-        advanceCtxBase,
-        bridgeTargets,
-        cfg,
-        metrics,
-        log,
-        enumerateFlows,
-        seenAdvanceErrors,
-        seenBridgeErrors,
-        flowState,
-        watermarks,
-        wakeup,
-      }, signal),
+      scan: (signal) => {
+        // Tick selection: a backstop sweep takes the place of the
+        // incremental enumeration on ticks where enough wall-clock
+        // time has elapsed since the last backstop. The decision is
+        // edge-triggered against `now()` (not tick count) so a
+        // wakeup-driven burst of fast ticks doesn't fire backstop
+        // every tick. Backstop replaces (does not augment) the
+        // incremental scan that tick — both would just produce the
+        // same VAAs, and the dedupe is harmless but wasteful.
+        const now = Date.now()
+        let enumerator = enumerateFlows
+        if (backstopEnumerateFlows && now - lastBackstopAt >= cfg.backstopIntervalMs) {
+          lastBackstopAt = now
+          log.info('backstop scan tick', {
+            intervalMs: cfg.backstopIntervalMs,
+            maxPages: cfg.wormholescanBackstopMaxPages,
+          })
+          enumerator = backstopEnumerateFlows
+        }
+        return runScanIteration({
+          advanceCtxBase,
+          bridgeTargets,
+          cfg,
+          metrics,
+          log,
+          enumerateFlows: enumerator,
+          seenAdvanceErrors,
+          seenBridgeErrors,
+          flowState,
+          watermarks,
+          wakeup,
+        }, signal)
+      },
       metrics,
       intervalMs: cfg.scanIntervalMs,
       heartbeatStaleMs: cfg.heartbeatStaleMs,

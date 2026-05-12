@@ -16,6 +16,7 @@ import {
   Transaction,
 } from '@solana/web3.js'
 import { errorFields } from '../utils/log'
+import { makePriorityFeeIx } from '../utils/priority-fee'
 import { withTimeout } from '../utils/rpc'
 import { executeSdkBundledRedeem } from './sdk-redeem'
 
@@ -229,7 +230,7 @@ export async function executeBridgePlan(
     return executeSdkBundledRedeem(ctx, target, vaaBytes)
   }
 
-  const tx = new Transaction().add(...plan.ixs)
+  const tx = new Transaction().add(makePriorityFeeIx(ctx.priorityFeeMicroLamports), ...plan.ixs)
   try {
     const sig = await withTimeout(
       sendAndConfirmTransaction(target.destConnection, tx, [target.destSigner], {

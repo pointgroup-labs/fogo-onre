@@ -14,6 +14,7 @@ import {
 } from '@fogo-onre/sdk'
 import { Keypair, PublicKey, SystemProgram } from '@solana/web3.js'
 import { SolanaNtt } from '@wormhole-foundation/sdk-solana-ntt'
+import { makePriorityFeeIx } from '../utils/priority-fee'
 import { DEFAULT_NTT_VERSION, fetchVaaBytes, WORMHOLE_CORE_MAINNET } from '../utils/wormhole'
 
 export type LockOnycInput = {
@@ -96,6 +97,7 @@ export async function lockOnyc(
     if (NTT_ONYC_PROGRAM_ID.equals(NTT_USDC_PROGRAM_ID)) {
       return {
         kind: 'noop',
+        severity: 'config',
         reason: 'ONyc NTT manager not deployed (NTT_ONYC_PROGRAM_ID == NTT_USDC_PROGRAM_ID placeholder)',
       }
     }
@@ -108,6 +110,7 @@ export async function lockOnyc(
     if (!peerInfo) {
       return {
         kind: 'noop',
+        severity: 'config',
         reason: `FOGO peer not registered on ONyc NTT manager (${fogoPeerPda.toBase58()})`,
       }
     }
@@ -128,6 +131,7 @@ export async function lockOnyc(
     if (!transceiverInfo) {
       return {
         kind: 'noop',
+        severity: 'config',
         reason: `registered_transceiver PDA not initialized on ONyc NTT manager (${registeredTransceiverPda.toBase58()}) — operator must run NTT register-transceiver before lock_onyc can succeed`,
       }
     }
@@ -198,7 +202,7 @@ export async function lockOnyc(
         outboxItem: outboxItem.publicKey,
         release,
       })
-      .preInstructions(fundIxs)
+      .preInstructions([makePriorityFeeIx(ctx.priorityFeeMicroLamports), ...fundIxs])
       .signers([outboxItem])
       .rpc()
 

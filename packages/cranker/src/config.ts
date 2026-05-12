@@ -28,6 +28,23 @@ const schema = z.object({
   WORMHOLESCAN_URL: z.string().url().default('https://api.wormholescan.io'),
   WORMHOLESCAN_PAGE_SIZE: z.coerce.number().int().min(1).max(200).default(50),
   WORMHOLESCAN_MAX_PAGES: z.coerce.number().int().min(1).max(20).default(2),
+  /**
+   * Backstop scan: the incremental enumerator stops at the watermark.
+   * Periodically (every `BACKSTOP_INTERVAL_MS`) the daemon runs a
+   * second enumeration that ignores the watermark and walks
+   * `WORMHOLESCAN_BACKSTOP_MAX_PAGES` deep. Catches flows the
+   * incremental scan stranded — e.g. a VAA that arrived during daemon
+   * downtime (watermark fast-forwarded past it on resume) or a
+   * post-watermark dispatch that failed and left an orphan Flow PDA
+   * the incremental scan no longer pages.
+   *
+   * Default 50 pages × 50 items = 2,500 VAAs per emitter ≈ several
+   * days at mainnet deposit volume — enough to catch every reasonable
+   * stranding window without scanning the entire emitter history.
+   */
+  WORMHOLESCAN_BACKSTOP_MAX_PAGES: z.coerce.number().int().min(1).max(200).default(50),
+  /** Period between backstop sweeps. 0 disables. Default 5 minutes. */
+  BACKSTOP_INTERVAL_MS: z.coerce.number().int().min(0).default(300_000),
   /** FOGO Wormhole chain ID (source chain for VAA polling). Defaults to SDK constant. */
   FOGO_WORMHOLE_CHAIN_ID: z.coerce.number().int().min(1).default(FOGO_WORMHOLE_CHAIN_ID),
   /** Hex emitter (32 bytes, no 0x) for the FOGO USDC NTT manager. Defaults to PDA derived from SDK's NTT_USDC_PROGRAM_ID. */
@@ -62,10 +79,38 @@ const schema = z.object({
    * window — easily 50–100 round-trips — and 15s isn't enough.
    */
   ENUMERATE_TIMEOUT_MS: z.coerce.number().int().min(5000).default(90_000),
-  TX_CONFIRM_TIMEOUT_MS: z.coerce.number().int().min(5000).default(60_000),
+  /**
+   * Per-transaction confirmation budget. Applied around every
+   * `sendAndConfirmTransaction` (and equivalent send + confirm pairs)
+   * in the bridge / relayer paths.
+   *
+   * Floor (30s) and default (90s) tuned for the `core.postVaa`
+   * sequence, which fans out into several `verify_signatures` txs
+   * followed by one `post_vaa` tx — each confirmed with this same
+   * budget. Under mainnet congestion `confirmed`-commitment routinely
+   * drifts to 20–40s per tx; a too-tight value aborts mid-sequence
+   * and leaves the Flow in `WithdrawPending` until the next scan.
+   * The 30s minimum is *intentionally* defensive — anything lower
+   * silently bricks withdraw flows during congestion windows.
+   */
+  TX_CONFIRM_TIMEOUT_MS: z.coerce.number().int().min(30_000).default(90_000),
   WORMHOLESCAN_TIMEOUT_MS: z.coerce.number().int().min(1000).default(10_000),
   HEARTBEAT_STALE_MS: z.coerce.number().int().min(30_000).default(120_000),
   MAX_CONCURRENT_ADVANCES: z.coerce.number().int().min(1).max(32).default(4),
+  /**
+   * Priority fee in micro-lamports per compute unit, prepended to
+   * every Solana tx the cranker submits. Without a non-zero value,
+   * mainnet leaders deprioritize the tx and the blockhash routinely
+   * expires before inclusion (surfaces as
+   * `TransactionExpiredBlockheightExceededError`).
+   *
+   * Default 10_000 µ-lamports/CU = 0.001 SOL on a 100k-CU tx, which
+   * comfortably clears the floor on a moderately congested mainnet
+   * without overspending. Bump to 50_000+ during incidents; the
+   * cranker re-builds blockhash on each scan so a config bump takes
+   * effect on the next attempt.
+   */
+  SOLANA_PRIORITY_FEE_MICROLAMPORTS: z.coerce.number().int().min(0).default(10_000),
   /**
    * Path to the on-disk checkpoint file (per-emitter Wormholescan
    * watermarks). Empty string disables persistence — in-memory
@@ -85,6 +130,8 @@ export type CrankerConfig = {
   wormholescanUrl: string
   wormholescanPageSize: number
   wormholescanMaxPages: number
+  wormholescanBackstopMaxPages: number
+  backstopIntervalMs: number
   fogoWormholeChainId: number
   fogoUsdcEmitterHex: string
   fogoOnycEmitterHex: string
@@ -103,6 +150,7 @@ export type CrankerConfig = {
   wormholescanTimeoutMs: number
   heartbeatStaleMs: number
   maxConcurrentAdvances: number
+  solanaPriorityFeeMicroLamports: number
   checkpointPath: string
   logLevel: 'debug' | 'info' | 'warn' | 'error'
 }
@@ -117,6 +165,8 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     wormholescanUrl: parsed.WORMHOLESCAN_URL,
     wormholescanPageSize: parsed.WORMHOLESCAN_PAGE_SIZE,
     wormholescanMaxPages: parsed.WORMHOLESCAN_MAX_PAGES,
+    wormholescanBackstopMaxPages: parsed.WORMHOLESCAN_BACKSTOP_MAX_PAGES,
+    backstopIntervalMs: parsed.BACKSTOP_INTERVAL_MS,
     fogoWormholeChainId: parsed.FOGO_WORMHOLE_CHAIN_ID,
     fogoUsdcEmitterHex: parsed.FOGO_USDC_EMITTER_HEX,
     fogoOnycEmitterHex: parsed.FOGO_ONYC_EMITTER_HEX,
@@ -135,6 +185,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     wormholescanTimeoutMs: parsed.WORMHOLESCAN_TIMEOUT_MS,
     heartbeatStaleMs: parsed.HEARTBEAT_STALE_MS,
     maxConcurrentAdvances: parsed.MAX_CONCURRENT_ADVANCES,
+    solanaPriorityFeeMicroLamports: parsed.SOLANA_PRIORITY_FEE_MICROLAMPORTS,
     checkpointPath: parsed.CHECKPOINT_PATH,
     logLevel: parsed.LOG_LEVEL,
   }

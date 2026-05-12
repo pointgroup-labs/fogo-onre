@@ -7,8 +7,10 @@ import {
   NTT_ONYC_PROGRAM_ID,
   NTT_USDC_PROGRAM_ID,
   resolveNttVaa,
+  WH_TRANSCEIVER_ONYC_PROGRAM_ID,
 } from '@fogo-onre/sdk'
 import { PublicKey, SystemProgram } from '@solana/web3.js'
+import { makePriorityFeeIx } from '../utils/priority-fee'
 import { withTimeout } from '../utils/rpc'
 import { fetchVaaBytes } from '../utils/wormhole'
 import { prepareTransceiverMessage } from './prepare-transceiver-message'
@@ -149,8 +151,13 @@ export async function unlockOnyc(
       payer: keypair,
       vaaBytes,
       transceiverMessagePda: resolved.nttTransceiverMessage,
+      manager: NTT_ONYC_PROGRAM_ID,
+      token: onycMint,
+      transceiver: WH_TRANSCEIVER_ONYC_PROGRAM_ID,
+      expectedOwner: NTT_ONYC_PROGRAM_ID,
       rpcTimeoutMs: ctx.rpcTimeoutMs,
-      txConfirmTimeoutMs: ctx.rpcTimeoutMs,
+      txConfirmTimeoutMs: ctx.txConfirmTimeoutMs,
+      priorityFeeMicroLamports: ctx.priorityFeeMicroLamports,
       log: ctx.log,
     })
     if (prep.kind === 'error') {
@@ -194,7 +201,7 @@ export async function unlockOnyc(
         // deposit-side `claimUsdc` uses.
         ntt: { transceiverAddress: nttProgram },
       })
-      .preInstructions(fundIxs)
+      .preInstructions([makePriorityFeeIx(ctx.priorityFeeMicroLamports), ...fundIxs])
       .rpc()
 
     metrics.txSent.inc({ instruction: 'unlock_onyc', result: 'ok' })

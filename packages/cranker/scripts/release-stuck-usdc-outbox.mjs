@@ -29,8 +29,8 @@ import {
   Connection,
   Keypair,
   PublicKey,
-  Transaction,
   sendAndConfirmTransaction,
+  Transaction,
 } from '@solana/web3.js'
 import { SolanaNtt } from '@wormhole-foundation/sdk-solana-ntt'
 
