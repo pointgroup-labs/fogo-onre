@@ -13,6 +13,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { FOGO_ONYC_DECIMALS, USDC_DECIMALS, USDC_S_MINT } from '@/constants'
 import { useBridgeHistory } from '@/hooks/useBridgeHistory'
+import { useDepositUsdcAmount } from '@/hooks/useDepositUsdcAmount'
 import { dismissBridge } from '@/lib/bridgeHistory/dismissed'
 import { UNCONFIRMED_AFTER_MS } from '@/lib/bridgeHistory/displaySla'
 
@@ -158,15 +159,22 @@ function SkeletonList({ count }: { count: number }) {
 function BridgeRow({ action, nowMs }: { action: DisplayAction, nowMs: number }) {
   const isDeposit = action.kind === 'deposit'
   const mintIsUsdc = action.displayMintB58 === USDC_S_MINT.toBase58()
-  // Deposits always read as the USDC the user sent — never the ONyc
-  // received. The USDC amount comes from the device journal or the
-  // detail page's lazy recovery; when neither is available here
-  // (cross-device orphan), show the USDC label with a pending
-  // placeholder rather than the wrong-token amount.
-  const depositAmountPending = isDeposit && !mintIsUsdc
+  // Deposits read as the USDC the user sent, never the ONyc received.
+  // Same-device deposits already carry USDC (journal overlay); orphan
+  // deposits (cross-device / journal-less) arrive ONyc-denominated, so
+  // recover the USDC on demand for this visible row — cached + persisted,
+  // ~3 RPC once per deposit rather than eagerly across all history.
+  const needsUsdcRecovery = isDeposit && !mintIsUsdc && action.anchorChain === 'Solana'
+  const recoveredUsdc = useDepositUsdcAmount(needsUsdcRecovery ? action.anchorSig : null)
+  const depositAmountPending = isDeposit && !mintIsUsdc && recoveredUsdc === null
+  const depositUsdcRaw = isDeposit && !mintIsUsdc ? recoveredUsdc : null
   const ticker = isDeposit ? 'USDC' : (mintIsUsdc ? 'USDC' : 'ONyc')
   const decimals = mintIsUsdc ? USDC_DECIMALS : FOGO_ONYC_DECIMALS
-  const amountText = depositAmountPending ? '—' : formatAmount(action.displayAmountRaw, decimals)
+  const amountText = depositAmountPending
+    ? '—'
+    : depositUsdcRaw !== null
+      ? formatAmount(depositUsdcRaw, USDC_DECIMALS)
+      : formatAmount(action.displayAmountRaw, decimals)
   const label = isDeposit ? 'Deposit' : 'Redeem'
   const blockMs = action.startedAt * 1000
   const relTime = formatRelativeTime(blockMs, nowMs)
@@ -230,7 +238,7 @@ function BridgeRow({ action, nowMs }: { action: DisplayAction, nowMs: number }) 
         </span>
         <div className="flex min-w-0 flex-1 flex-col leading-tight">
           <span className="truncate text-sm font-medium tabular-nums">
-            <span title={depositAmountPending ? 'Deposit amount is confirmed on the details page.' : undefined}>
+            <span title={depositAmountPending ? 'Recovering the deposit amount from chain history…' : undefined}>
               {amountText}
             </span>
             {' '}
