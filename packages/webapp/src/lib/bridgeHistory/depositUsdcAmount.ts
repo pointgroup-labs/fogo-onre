@@ -87,47 +87,23 @@ async function withRetry<T>(label: string, fn: () => Promise<T>): Promise<T> {
 }
 
 /**
- * Process-global gate so the N independent React Query recovery walks
- * (one per visible deposit row) don't fire ~3 RPC calls each in parallel
- * and burst the public endpoint into 429s. Serializing only costs
- * first-load latency — results are cached + persisted, so warm loads do
- * zero RPC. The slot is handed directly to the next waiter on release,
- * so the in-flight count never exceeds the limit.
+ * Serialize recovery walks so the N independent React Query rows (one
+ * per visible deposit) don't fire ~3 RPC calls each in parallel and
+ * burst the public endpoint into 429s. Each call appends to a single
+ * promise chain; the tail swallows errors so one failed walk can't
+ * poison the chain, while the returned promise still rejects to its own
+ * caller. Serializing only costs first-load latency — results are
+ * cached + persisted, so warm loads do zero RPC.
  */
-const MAX_CONCURRENT_WALKS = 1
-let activeWalks = 0
-const walkQueue: Array<() => void> = []
+let walkTail: Promise<unknown> = Promise.resolve()
 
-function acquireWalkSlot(): Promise<void> {
-  if (activeWalks < MAX_CONCURRENT_WALKS) {
-    activeWalks++
-    return Promise.resolve()
-  }
-  return new Promise<void>((resolve) => {
-    walkQueue.push(resolve)
-  })
-}
-
-function releaseWalkSlot(): void {
-  const next = walkQueue.shift()
-  if (next !== undefined) {
-    // Hand the slot straight to the next waiter; count stays the same.
-    next()
-  } else {
-    activeWalks--
-  }
-}
-
-export async function fetchDepositUsdcAmount(
+export function fetchDepositUsdcAmount(
   sources: DepositAmountSources,
   lockOnycSig: string,
 ): Promise<bigint | null> {
-  await acquireWalkSlot()
-  try {
-    return await walkDepositUsdcAmount(sources, lockOnycSig)
-  } finally {
-    releaseWalkSlot()
-  }
+  const run = walkTail.then(() => walkDepositUsdcAmount(sources, lockOnycSig))
+  walkTail = run.then(() => undefined, () => undefined)
+  return run
 }
 
 async function walkDepositUsdcAmount(
