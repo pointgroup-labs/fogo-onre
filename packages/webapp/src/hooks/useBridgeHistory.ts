@@ -13,10 +13,8 @@ import {
   nearestUnusedJournal,
   ORPHAN_MATCH_CLOCK_SKEW_MS,
   ORPHAN_MATCH_WINDOW_MS,
-  resolveDepositActions,
-} from '@/lib/bridgeHistory/resolveDeposits'
+} from '@/lib/bridgeHistory/orphanJournalMatch'
 import { fetchAddressOpsPage, WORMHOLESCAN_PAGE_SIZE } from '@/lib/bridgeHistory/wormholescan-list'
-import { useSettings } from '@/store/settings'
 
 /**
  * History source: Wormholescan `/operations?address=<user>`. Replaces
@@ -32,11 +30,12 @@ import { useSettings } from '@/store/settings'
  * inbound ONyc delivery because the user-signed source burn is
  * paymaster-wrapped and not visible to the address query.
  *
- * USDC recovery for orphan deposits is delegated to
- * `resolveDepositActions` (see `resolveDeposits.ts`) — the queryFn
- * calls it once per page, the result already carries USDC where
- * recovery succeeded. The React-tree useMemo below is a pure
- * projection: journal back-fill, dedup, decoration, synthetic rows.
+ * Orphan-deposit rows surface with the inbound ONyc amount. The exact
+ * deposited USDC is NOT recovered here — that walk is ~3 Solana RPC
+ * calls per row, so it's deferred to the tx-detail page
+ * (`useDepositUsdcAmount`) for the single opened row. The React-tree
+ * useMemo below is a pure projection: journal back-fill, dedup,
+ * decoration, synthetic rows.
  */
 
 interface WormholescanPageData {
@@ -65,7 +64,6 @@ export interface UseBridgeHistoryResult {
 
 export function useBridgeHistory(owner: PublicKey | null): UseBridgeHistoryResult {
   const qc = useQueryClient()
-  const { solanaRpcUrl } = useSettings()
   // Subscribe so dismiss/undismiss actions in this tab (or another)
   // re-merge the action set immediately.
   const dismissed = useDismissedBridges()
@@ -83,12 +81,7 @@ export function useBridgeHistory(owner: PublicKey | null): UseBridgeHistoryResul
       // Per-page grouping rather than across all pages: both legs of
       // any single round-trip share a Wormholescan timestamp window
       // of seconds and land on the same page.
-      const classified = classifyOpsIntoActions(ops, ownerStr)
-      const actions = await resolveDepositActions(classified, {
-        qc,
-        solanaRpcUrl,
-        ownerB58: ownerStr,
-      })
+      const actions = classifyOpsIntoActions(ops, ownerStr)
       return { actions, hasMore, nextPage: page + 1 }
     },
     getNextPageParam: last => (last.hasMore ? last.nextPage : undefined),
@@ -150,9 +143,8 @@ export function useBridgeHistory(owner: PublicKey | null): UseBridgeHistoryResul
     }
 
     // Pass 0: back-fill `originSig` on orphan actions by matching a
-    // same-owner, same-kind, in-window journal entry. Shares its
-    // matcher with `resolveDepositActions`'s pre-filter — same logic,
-    // two epochs (fetch vs render).
+    // same-owner, same-kind, in-window journal entry via the shared
+    // `nearestUnusedJournal` matcher.
     const usedJournalSigs = new Set<string>()
     const consumed: BridgeAction[] = indexerActions.map((action) => {
       if (action.originSig !== null || action.anchorChain !== 'Solana') {

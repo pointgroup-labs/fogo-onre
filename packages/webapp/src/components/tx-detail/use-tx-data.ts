@@ -8,7 +8,9 @@ import { isEstablished, isWalletLoading, useSession } from '@fogo/sessions-sdk-r
 import { PublicKey } from '@solana/web3.js'
 import { useQueryClient } from '@tanstack/react-query'
 import { useMemo } from 'react'
+import { USDC_S_MINT } from '@/constants'
 import { useBridgeHistory } from '@/hooks/useBridgeHistory'
+import { useDepositUsdcAmount } from '@/hooks/useDepositUsdcAmount'
 import { useFlowStatus } from '@/hooks/useFlowStatus'
 import { useFogoDelivery } from '@/hooks/useFogoDelivery'
 import { findJournalEntryBySignature } from '@/lib/bridgeHistory/merge'
@@ -149,10 +151,22 @@ export function useTxDetail(signature: string): TxDetail {
     sourceBlockTime,
   })
 
-  // Only orphan deposit-delivery actions benefit from the relayer-event
-  // lookup, and that recovery now happens inside `useBridgeHistory`'s
-  // queryFn so the action arrives here with USDC already baked into
-  // `displayAmountRaw` / `displayMintB58`. No per-row hook needed.
+  // Orphan deposit-delivery rows arrive carrying the inbound ONyc amount
+  // (Wormholescan can't see the paymaster-wrapped USDC burn). The exact
+  // USDC is recovered lazily here — ~3 Solana RPC calls for this one open
+  // row — instead of eagerly for every history-list row. Skipped when a
+  // same-device journal already supplied USDC (`displayMintB58` is USDC).
+  const needsUsdcRecovery = action !== null
+    && action.kind === 'deposit'
+    && action.anchorChain === 'Solana'
+    && action.displayMintB58 !== USDC_S_MINT.toBase58()
+  const recoveredUsdc = useDepositUsdcAmount(needsUsdcRecovery ? action.anchorSig : null)
+  const resolvedAction = useMemo(() => {
+    if (action === null || recoveredUsdc === null) {
+      return action
+    }
+    return { ...action, displayAmountRaw: recoveredUsdc, displayMintB58: USDC_S_MINT.toBase58() }
+  }, [action, recoveredUsdc])
 
   // `notFound` requires *positive evidence* of absence. Two paths:
   //   1. Connected: history must have actually completed a fetch
@@ -175,7 +189,7 @@ export function useTxDetail(signature: string): TxDetail {
 
   return {
     signature,
-    action,
+    action: resolvedAction,
     journal,
     flow,
     fogoDelivery,
