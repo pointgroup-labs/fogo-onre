@@ -238,6 +238,14 @@ export interface Classified {
  * and which token leg it represents. Ops that don't fit either pattern
  * (foreign relayer-to-relayer hops, or symbols we don't recognize) are
  * dropped — they're not user-visible history.
+ *
+ * Inbound detection does NOT match `std.toAddress` against the user:
+ * that field is `None` on every inbound NTT VAA (Wormholescan decodes
+ * the recipient into `nttMessage.to`, not the standardized props), so
+ * gating on it dropped 100% of deliveries — the "inbound=0" bug where
+ * redeems never paired and orphan-deposit rows never formed. The
+ * `?address=` query already scopes results to this user, so an op
+ * delivered to FOGO that the user didn't originate IS their inbound leg.
  */
 export function classifyOps(ops: WormholescanOp[], userB58: string): Classified[] {
   const out: Classified[] = []
@@ -265,9 +273,9 @@ export function classifyOps(ops: WormholescanOp[], userB58: string): Classified[
     const isOutbound
       = op.sourceChain.chainId === FOGO_CHAIN_ID
         && (op.sourceChain.from === userB58 || std?.fromAddress === userB58)
+    // FOGO-target + not the user's own outbound = their delivery.
     const isInbound
-      = op.targetChain?.chainId === FOGO_CHAIN_ID
-        && std?.toAddress === userB58
+      = !isOutbound && op.targetChain?.chainId === FOGO_CHAIN_ID
 
     if (isOutbound) {
       out.push({ op, dir: 'outbound', token })
