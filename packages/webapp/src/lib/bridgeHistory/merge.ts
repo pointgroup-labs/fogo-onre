@@ -1,7 +1,5 @@
 import type { QueryClient } from '@tanstack/react-query'
-import type { BurnRow, OperationStatus, TimelineRow } from './types'
 import type { PersistedFlowStatus } from '@/lib/flow-status/types'
-import { FOGO_ONYC_DECIMALS, FOGO_ONYC_MINT, USDC_DECIMALS, USDC_S_MINT } from '@/constants'
 import { readFlow, readIndex } from '@/lib/flow-status/store'
 
 /**
@@ -13,8 +11,8 @@ import { readFlow, readIndex } from '@/lib/flow-status/store'
  * Returns terminal entries too: we want them as the source of truth
  * for the *amount* (the user's typed principal, not the gross burn
  * which includes the bridge fee). The phase pill is suppressed for
- * terminal entries inside `humanPhaseFromStatus` so the Wormholescan
- * "Delivered" badge still wins display precedence.
+ * terminal entries inside `decorateAction`'s phase rule so the
+ * Wormholescan "Delivered" badge still wins display precedence.
  */
 export function findJournalEntryBySignature(
   qc: QueryClient,
@@ -31,146 +29,14 @@ export function findJournalEntryBySignature(
 }
 
 /**
- * Pure: given the four inputs, produce one TimelineRow. Must be
- * deterministic — same inputs always yield the same output.
- *
- * Amount precedence:
- *   1. Journal principal (exact — what the user typed).
- *   2. Deposit + on-chain bridge fee known: `gross - fee`. Treated as
- *      exact for display: the burn's gross amount is committed on-chain,
- *      and even if the live fee tier has shifted between sign time and
- *      now, the move would have to exceed the 2-decimal display
- *      threshold (~$0.01 on a sub-dollar fee) to change the rendered
- *      number. Marking these rows approximate produced "~1 USDC.s" for
- *      a deposit that landed at exactly 1.00, which read as a fudge
- *      factor instead of a precise reconstruction.
- *   3. Otherwise: on-chain burn delta as-is. Approximate for deposits
- *      (gross is wrong by an unknown fee), exact for withdraws (no fee
- *      deduction in the redeem leg).
- *
- * `feeRaw` is the live `FeeConfig.bridge_transfer_fee` for USDC.s,
- * `null` while still loading or if RPC failed.
- */
-export function mergeRow(
-  burn: BurnRow,
-  op: OperationStatus | null,
-  journal: PersistedFlowStatus | null,
-  feeRaw: bigint | null,
-  dismissedSignatures: ReadonlySet<string> = new Set(),
-): TimelineRow {
-  const isDeposit = burn.mint.equals(USDC_S_MINT)
-  const decimals = isDeposit ? USDC_DECIMALS : FOGO_ONYC_DECIMALS
-  const principalFromJournal = journal !== null
-    ? parseAmountForDisplay(journal.amountStr, decimals)
-    : null
-
-  let amountRaw: bigint
-  let amountIsApproximate: boolean
-  if (principalFromJournal !== null) {
-    amountRaw = principalFromJournal
-    amountIsApproximate = false
-  } else if (isDeposit && feeRaw !== null && burn.amountRaw > feeRaw) {
-    amountRaw = burn.amountRaw - feeRaw
-    amountIsApproximate = false
-  } else {
-    // Deposit without journal AND without known fee: best we can do is
-    // gross; flag approximate so the UI prefixes `~`. Withdraw without
-    // journal: no fee deduction, gross IS principal — exact.
-    amountRaw = burn.amountRaw
-    amountIsApproximate = isDeposit
-  }
-
-  // Phase suppression. The journal phase ("Submitting" / "In progress")
-  // is a *local* progress label driven by `LiveJournalTracker`. When the
-  // Wormholescan oracle (or a manual dismissal) independently confirms
-  // delivery, the journal label is stale by definition — suppress it
-  // here so every consumer of `TimelineRow` sees the same precedence
-  // (oracle/dismiss > journal). Without this, the journal can pin the
-  // row at "In progress" forever after the tx detail page has already
-  // shown "Delivered", because the tracker's local FOGO-balance watch
-  // can lag, miss a non-monotonic ATA write, or fail to land its
-  // terminal patch due to observer-timing races.
-  const oracleDelivered = op?.kind === 'delivered' || dismissedSignatures.has(burn.signature)
-  const journalPhase = journal !== null ? humanPhaseFromStatus(journal) : null
-  const phase = oracleDelivered ? null : journalPhase
-
-  return {
-    signature: burn.signature,
-    // The user's burn mint determines the flow direction. Burning
-    // USDC.s on FOGO = depositing into the protocol. Burning ONyc
-    // on FOGO = withdrawing.
-    kind: isDeposit ? 'deposit' : 'withdraw',
-    amountRaw,
-    amountIsApproximate,
-    mintB58: burn.mint.toBase58(),
-    blockTime: burn.blockTime,
-    status: op?.kind ?? 'unknown',
-    destinationSignature: op !== null && op.kind === 'delivered' ? op.destinationTxHash : null,
-    phase,
-    manuallyDismissed: dismissedSignatures.has(burn.signature),
-  }
-}
-
-/**
- * Synthesize an optimistic TimelineRow from a journal entry whose
- * burn tx hasn't surfaced via FOGO `getSignaturesForAddress` yet.
- * RPC indexing typically lags submission by several seconds, and the
- * burn-page query has a 30s staleTime, so without this the user sees
- * an empty history for ~30s after clicking Deposit. The journal has
- * everything we need to render a "Submitting" / "Bridging" row in
- * the meantime; once the real burn appears, dedup by signature drops
- * this synthetic copy in favor of the canonical merged row.
- */
-export function rowFromJournal(j: PersistedFlowStatus): TimelineRow {
-  const isDeposit = j.kind === 'deposit'
-  const decimals = isDeposit ? USDC_DECIMALS : FOGO_ONYC_DECIMALS
-  const principal = parseAmountForDisplay(j.amountStr, decimals) ?? 0n
-  const mintB58 = isDeposit ? USDC_S_MINT.toBase58() : FOGO_ONYC_MINT.toBase58()
-  return {
-    signature: j.signature,
-    kind: j.kind,
-    amountRaw: principal,
-    amountIsApproximate: false,
-    mintB58,
-    blockTime: Math.floor(j.startedAt / 1000),
-    status: 'unknown',
-    destinationSignature: null,
-    phase: humanPhaseFromStatus(j),
-    manuallyDismissed: false,
-  }
-}
-
-/**
- * The journal stores `FlowStatusValue` ('pending' | 'in-progress' | …).
- * `BridgeHistory` wants a human label like "Bridging…" / "Submitting"
- * for in-flight rows.
- *
- * Returns null for terminal statuses so the row's badge precedence
- * (`phase ?? status`) hands off to the Wormholescan-derived
- * "Delivered" badge rather than shadowing it with a stale "Complete".
- */
-function humanPhaseFromStatus(j: PersistedFlowStatus): string | null {
-  switch (j.status) {
-    case 'pending':
-      return 'Submitting'
-    case 'in-progress':
-      return 'In progress'
-    case 'terminal-success':
-      return null
-    case 'terminal-failure':
-      return null
-  }
-}
-
-/**
  * Parse a user-typed amount string ("1", "1.5", "0.123456") into raw
  * units. Returns null on invalid input rather than throwing — display
- * code falls back to the on-chain delta if parsing fails. Less strict
- * than `useTransferMutation.parseAmountStrict` because we're consuming
- * already-validated journal data; tolerance for weirdness here is
- * preferable to crashing the row.
+ * code falls back to whatever upstream amount is available if parsing
+ * fails. Less strict than `useTransferMutation.parseAmountStrict`
+ * because we're consuming already-validated journal data; tolerance
+ * for weirdness here is preferable to crashing the row.
  */
-function parseAmountForDisplay(amountStr: string, decimals: number): bigint | null {
+export function parseAmountForDisplay(amountStr: string, decimals: number): bigint | null {
   if (!/^\d*(?:\.\d*)?$/.test(amountStr) || amountStr === '') {
     return null
   }

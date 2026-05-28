@@ -76,7 +76,7 @@ export function undismissBridge(signature: string): void {
  * Reactive accessor. Re-renders the component on any change to the
  * dismissed set (same tab via custom event; cross-tab via native
  * `storage` event). Returns a stable Set instance per snapshot so
- * `mergeRow` deps in `useBridgeHistory` invalidate correctly.
+ * `decorateAction` deps in `useBridgeHistory` invalidate correctly.
  */
 export function useDismissedBridges(): Set<string> {
   return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot)

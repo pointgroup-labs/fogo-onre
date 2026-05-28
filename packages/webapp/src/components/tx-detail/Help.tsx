@@ -101,7 +101,7 @@ export function Help() {
               question="Can I cancel a bridge in progress?"
               answer={(
                 <p>
-                  No. Once submitted, the bridge runs to completion on its own. In rare cases the protocol team can reverse a redemption — that returns your ONyc instead of delivering USDC.s — but cancellation isn&apos;t something you can trigger yourself.
+                  No. Once submitted, the bridge runs to completion on its own. In rare cases the protocol team can reverse a redemption — that returns your ONyc instead of delivering USDC — but cancellation isn&apos;t something you can trigger yourself.
                 </p>
               )}
             />

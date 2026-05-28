@@ -1,34 +1,60 @@
 'use client'
 
 import type { PublicKey } from '@solana/web3.js'
-import type { BurnRow, OperationStatus, TimelineRow } from '@/lib/bridgeHistory/types'
+import type { BridgeAction, DisplayAction } from '@/lib/bridgeHistory/bridgeAction'
 import type { PersistedFlowStatus } from '@/lib/flow-status/types'
 import { useInfiniteQuery, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useMemo } from 'react'
+import { USDC_S_MINT } from '@/constants'
+import { actionFromJournal, classifyOpsIntoActions, decorateAction } from '@/lib/bridgeHistory/bridgeAction'
 import { useDismissedBridges } from '@/lib/bridgeHistory/dismissed'
-import { findJournalEntryBySignature, mergeRow, rowFromJournal } from '@/lib/bridgeHistory/merge'
-import { fetchBurnPage, getCanonicalAtas } from '@/lib/bridgeHistory/rpc'
-import { fetchOperationStatus } from '@/lib/bridgeHistory/wormholescan'
+import { findJournalEntryBySignature } from '@/lib/bridgeHistory/merge'
+import {
+  nearestUnusedJournal,
+  ORPHAN_MATCH_CLOCK_SKEW_MS,
+  ORPHAN_MATCH_WINDOW_MS,
+  resolveDepositActions,
+} from '@/lib/bridgeHistory/resolveDeposits'
+import { fetchAddressOpsPage, WORMHOLESCAN_PAGE_SIZE } from '@/lib/bridgeHistory/wormholescan-list'
 import { useSettings } from '@/store/settings'
-import { getFogoConnection } from '@/utils/connections'
-import { useBridgeFee } from './useBridgeFee'
 
-interface BurnPageGroup {
-  cursors: { usdcS: string | undefined, onyc: string | undefined }
-  rows: BurnRow[]
-  hasMoreUsdcS: boolean
-  hasMoreOnyc: boolean
+/**
+ * History source: Wormholescan `/operations?address=<user>`. Replaces
+ * the old FOGO `getSignaturesForAddress` burn-paging pipeline — the
+ * public FOGO RPC only retains ~5 days of signatures, so anything
+ * older silently disappeared. Wormholescan indexes every NTT VAA
+ * permanently, so a single paged call returns the wallet's full
+ * cross-chain history.
+ *
+ * Grouping (one row per logical user intent) happens inside
+ * `classifyOpsIntoActions` — withdraw actions pair an outbound ONyc
+ * burn with its inbound USDC delivery; deposit actions anchor on the
+ * inbound ONyc delivery because the user-signed source burn is
+ * paymaster-wrapped and not visible to the address query.
+ *
+ * USDC recovery for orphan deposits is delegated to
+ * `resolveDepositActions` (see `resolveDeposits.ts`) — the queryFn
+ * calls it once per page, the result already carries USDC where
+ * recovery succeeded. The React-tree useMemo below is a pure
+ * projection: journal back-fill, dedup, decoration, synthetic rows.
+ */
+
+interface WormholescanPageData {
+  actions: BridgeAction[]
+  hasMore: boolean
+  nextPage: number
 }
 
 export interface UseBridgeHistoryResult {
-  rows: TimelineRow[]
+  actions: DisplayAction[]
   isLoading: boolean
   /**
-   * True once the underlying burn query has completed at least one fetch.
-   * Distinct from `!isLoading`: when no owner is connected the query is
-   * `enabled: false`, so `isLoading` is `false` even though we've never
-   * actually queried — `isFetched` stays `false` in that case, which is
-   * what callers need to distinguish "settled empty" from "haven't tried".
+   * True once the underlying history query has completed at least one
+   * fetch. Distinct from `!isLoading`: when no owner is connected the
+   * query is `enabled: false`, so `isLoading` is `false` even though
+   * we've never actually queried — `isFetched` stays `false` in that
+   * case, which is what callers need to distinguish "settled empty"
+   * from "haven't tried".
    */
   isFetched: boolean
   isError: boolean
@@ -38,94 +64,58 @@ export interface UseBridgeHistoryResult {
 }
 
 export function useBridgeHistory(owner: PublicKey | null): UseBridgeHistoryResult {
-  const { fogoRpcUrl } = useSettings()
   const qc = useQueryClient()
-  const { feeRaw } = useBridgeFee()
+  const { solanaRpcUrl } = useSettings()
   // Subscribe so dismiss/undismiss actions in this tab (or another)
-  // re-merge the row set immediately, without waiting for a polling
-  // tick or a window-focus refetch.
+  // re-merge the action set immediately.
   const dismissed = useDismissedBridges()
 
   const ownerB58 = owner?.toBase58() ?? null
 
-  // Page 1: fetch both ATA streams in parallel; merge sorted desc.
-  // Subsequent pages advance whichever ATA still has older signatures.
-  const burnQuery = useInfiniteQuery<BurnPageGroup>({
-    queryKey: ['bridge-history', 'burns', ownerB58, fogoRpcUrl],
+  const historyQuery = useInfiniteQuery<WormholescanPageData>({
+    queryKey: ['bridge-history', 'wormholescan', ownerB58],
     enabled: ownerB58 !== null,
-    initialPageParam: { usdcS: undefined, onyc: undefined } as { usdcS: string | undefined, onyc: string | undefined },
+    initialPageParam: 0,
     queryFn: async ({ pageParam }) => {
-      // owner is guaranteed by `enabled` gate above
-      const ownerKey = owner as PublicKey
-      const connection = getFogoConnection(fogoRpcUrl)
-      const [usdcSBinding, onycBinding] = getCanonicalAtas(ownerKey)
-      const cursors = pageParam as { usdcS: string | undefined, onyc: string | undefined }
-      const [usdcSPage, onycPage] = await Promise.all([
-        fetchBurnPage(connection, usdcSBinding, cursors.usdcS),
-        fetchBurnPage(connection, onycBinding, cursors.onyc),
-      ])
-      const merged = [...usdcSPage.rows, ...onycPage.rows].sort((a, b) => b.blockTime - a.blockTime)
-      return {
-        cursors: { usdcS: usdcSPage.nextCursor ?? undefined, onyc: onycPage.nextCursor ?? undefined },
-        rows: merged,
-        hasMoreUsdcS: usdcSPage.nextCursor !== null,
-        hasMoreOnyc: onycPage.nextCursor !== null,
-      }
+      const page = pageParam as number
+      const ownerStr = ownerB58 as string
+      const { ops, hasMore } = await fetchAddressOpsPage(ownerStr, page)
+      // Per-page grouping rather than across all pages: both legs of
+      // any single round-trip share a Wormholescan timestamp window
+      // of seconds and land on the same page.
+      const classified = classifyOpsIntoActions(ops, ownerStr)
+      const actions = await resolveDepositActions(classified, {
+        qc,
+        solanaRpcUrl,
+        ownerB58: ownerStr,
+      })
+      return { actions, hasMore, nextPage: page + 1 }
     },
-    getNextPageParam: (last) => {
-      if (!last.hasMoreUsdcS && !last.hasMoreOnyc) {
-        return undefined
-      }
-      return last.cursors
-    },
+    getNextPageParam: last => (last.hasMore ? last.nextPage : undefined),
+    // 30s balances "show me deliveries quickly" against the cost of
+    // refetching N pages on every window focus.
     staleTime: 30_000,
     refetchOnWindowFocus: true,
   })
 
-  const allBurns: BurnRow[] = useMemo(() => {
-    const pages = burnQuery.data?.pages ?? []
-    const all = pages.flatMap(p => p.rows)
-    // Dedup by signature defensively (same tx could touch both ATAs)
+  const indexerActions: BridgeAction[] = useMemo(() => {
+    const pages = historyQuery.data?.pages ?? []
+    const all = pages.flatMap(p => p.actions)
+    // Dedup defensively across pages — Wormholescan paging quirks
+    // can't double-render an action.
     const seen = new Set<string>()
-    const out: BurnRow[] = []
-    for (const r of all) {
-      if (!seen.has(r.signature)) {
-        seen.add(r.signature)
-        out.push(r)
+    const out: BridgeAction[] = []
+    for (const a of all) {
+      if (!seen.has(a.anchorSig)) {
+        seen.add(a.anchorSig)
+        out.push(a)
       }
     }
-    return out.sort((a, b) => b.blockTime - a.blockTime)
-  }, [burnQuery.data])
+    return out
+  }, [historyQuery.data])
 
-  // One Wormholescan query per burn. TanStack dedupes parallel calls
-  // for the same key. Per-state staleTime: delivered=Infinity, pending=30s,
-  // unknown=10s with backoff.
-  const opQueries = useQueries({
-    queries: allBurns.map(burn => ({
-      queryKey: ['wormholescan-op', burn.signature],
-      queryFn: () => fetchOperationStatus(burn.signature),
-      staleTime: (q: { state: { data?: OperationStatus } }) => {
-        const data = q.state.data
-        if (data?.kind === 'delivered') {
-          return Infinity
-        }
-        if (data?.kind === 'pending') {
-          return 30_000
-        }
-        return 10_000
-      },
-      gcTime: 24 * 60 * 60 * 1_000,
-      retry: 3,
-      retryDelay: (attempt: number) => Math.min(9000, 1000 * 3 ** attempt),
-      refetchOnWindowFocus: true,
-    })),
-  })
-
-  // Subscribe to the journal index. The mutation pipeline writes to
-  // `['pending-flow-ids']` via `setQueryData` whenever a new flow is
-  // added or removed; mirroring it through `useQuery` lets this hook
-  // re-render the moment a deposit/withdraw is submitted instead of
-  // waiting on the 30s burn-page staleTime.
+  // Subscribe to the journal index so phase/identity changes re-render
+  // before the burn surfaces on Wormholescan.
   const indexQuery = useQuery<string[]>({
     queryKey: ['pending-flow-ids'],
     queryFn: () => [],
@@ -136,10 +126,6 @@ export function useBridgeHistory(owner: PublicKey | null): UseBridgeHistoryResul
   })
   const journalIds = indexQuery.data ?? []
 
-  // Per-flow subscription so phase transitions ('Submitting' →
-  // 'Bridging' → terminal) re-render `rows` even before the burn tx
-  // surfaces on RPC. Each entry's queryKey matches the one
-  // `LiveJournalTracker` writes via `patchFlow`.
   const flowQueries = useQueries({
     queries: journalIds.map(id => ({
       queryKey: ['flow-status', id],
@@ -150,38 +136,118 @@ export function useBridgeHistory(owner: PublicKey | null): UseBridgeHistoryResul
     })),
   })
 
-  const rows: TimelineRow[] = useMemo(() => {
-    const burnRows = allBurns.map((burn, i) => {
-      const op = opQueries[i]?.data ?? null
-      const journal = findJournalEntryBySignature(qc, burn.signature)
-      return mergeRow(burn, op, journal, feeRaw, dismissed)
-    })
-    // Synthesize optimistic rows for journal entries whose burn tx
-    // hasn't been indexed by FOGO RPC yet. Filter to entries owned by
-    // the current viewer and skip any that already have a canonical
-    // row from the burn stream — the real row wins once it appears.
-    const burnSigs = new Set(burnRows.map(r => r.signature))
-    const synthetic: TimelineRow[] = []
+  const actions: DisplayAction[] = useMemo(() => {
+    const journals: PersistedFlowStatus[] = []
     for (const fq of flowQueries) {
       const j = fq.data
-      if (j === undefined || burnSigs.has(j.signature)) {
+      if (j === undefined) {
         continue
       }
       if (ownerB58 !== null && j.ownerB58 !== ownerB58) {
         continue
       }
-      synthetic.push(rowFromJournal(j))
+      journals.push(j)
     }
-    return [...synthetic, ...burnRows].sort((a, b) => b.blockTime - a.blockTime)
-  }, [allBurns, opQueries, qc, feeRaw, flowQueries, ownerB58, dismissed])
+
+    // Pass 0: back-fill `originSig` on orphan actions by matching a
+    // same-owner, same-kind, in-window journal entry. Shares its
+    // matcher with `resolveDepositActions`'s pre-filter — same logic,
+    // two epochs (fetch vs render).
+    const usedJournalSigs = new Set<string>()
+    const consumed: BridgeAction[] = indexerActions.map((action) => {
+      if (action.originSig !== null || action.anchorChain !== 'Solana') {
+        return action
+      }
+      const match = nearestUnusedJournal(journals, action.kind, action.startedAt * 1000, usedJournalSigs)
+      if (match === null) {
+        if (action.kind === 'deposit' && action.sourceMintB58 !== USDC_S_MINT.toBase58()) {
+          console.warn('[bridge-history] orphan deposit unmatched by journal', {
+            actionSig: action.anchorSig,
+            actionStartedAtMs: action.startedAt * 1000,
+            windowMs: ORPHAN_MATCH_WINDOW_MS,
+            clockSkewMs: ORPHAN_MATCH_CLOCK_SKEW_MS,
+          })
+        }
+        return action
+      }
+      usedJournalSigs.add(match.signature)
+      // Extend aliases so the detail page resolves journal-sig URLs.
+      const aliases = new Set(action.aliases)
+      aliases.add(match.signature)
+      return { ...action, originSig: match.signature, aliases }
+    })
+
+    // Pass 0.5: collapse canonical actions sharing an `originSig`.
+    const deduped: BridgeAction[] = dedupByOriginSig(consumed)
+
+    // Pass 1: apply journal precedence via the display decorator.
+    const decorated: DisplayAction[] = deduped.map((action) => {
+      const lookupSig = action.originSig ?? action.anchorSig
+      const journal = findJournalEntryBySignature(qc, lookupSig)
+      return decorateAction(action, journal, dismissed)
+    })
+
+    // Pass 2: synthesize optimistic actions for journal entries whose
+    // burn hasn't yet surfaced on Wormholescan.
+    const knownSigs = new Set<string>()
+    for (const a of decorated) {
+      knownSigs.add(a.anchorSig)
+      if (a.originSig !== null) {
+        knownSigs.add(a.originSig)
+      }
+    }
+    const synthetic: DisplayAction[] = []
+    for (const j of journals) {
+      if (knownSigs.has(j.signature)) {
+        continue
+      }
+      synthetic.push(decorateAction(actionFromJournal(j), j, dismissed))
+    }
+
+    return [...synthetic, ...decorated].sort((a, b) => b.startedAt - a.startedAt)
+  }, [indexerActions, qc, flowQueries, ownerB58, dismissed])
 
   return {
-    rows,
-    isLoading: burnQuery.isLoading,
-    isFetched: burnQuery.isFetched,
-    isError: burnQuery.isError,
-    hasNextPage: burnQuery.hasNextPage ?? false,
-    fetchNextPage: () => { burnQuery.fetchNextPage() },
-    isFetchingNextPage: burnQuery.isFetchingNextPage,
+    actions,
+    isLoading: historyQuery.isLoading,
+    isFetched: historyQuery.isFetched,
+    isError: historyQuery.isError,
+    hasNextPage: historyQuery.hasNextPage ?? false,
+    fetchNextPage: () => { historyQuery.fetchNextPage() },
+    isFetchingNextPage: historyQuery.isFetchingNextPage,
   }
 }
+
+function dedupByOriginSig(actions: BridgeAction[]): BridgeAction[] {
+  const byOrigin = new Map<string, BridgeAction>()
+  const out: BridgeAction[] = []
+  for (const action of actions) {
+    const key = action.originSig
+    if (key === null) {
+      out.push(action)
+      continue
+    }
+    const prev = byOrigin.get(key)
+    if (prev === undefined) {
+      byOrigin.set(key, action)
+      out.push(action)
+      continue
+    }
+    if (prefer(action, prev)) {
+      const idx = out.indexOf(prev)
+      if (idx !== -1) {
+        out[idx] = action
+      }
+      byOrigin.set(key, action)
+    }
+  }
+  return out
+}
+
+function prefer(candidate: BridgeAction, incumbent: BridgeAction): boolean {
+  const score = (a: BridgeAction) =>
+    (a.status === 'delivered' ? 2 : 0) + (a.finalSig !== null ? 1 : 0)
+  return score(candidate) > score(incumbent)
+}
+
+export { WORMHOLESCAN_PAGE_SIZE }

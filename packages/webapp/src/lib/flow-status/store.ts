@@ -38,7 +38,7 @@ export function patchFlow(
 
 /**
  * Past this point, an unresolved withdraw journal is treated as no
- * longer in-flight. Mirrors the `STUCK_PENDING_AGE_MS` heuristic in
+ * longer in-flight. Mirrors the `UNCONFIRMED_AFTER_MS` heuristic in
  * `BridgeHistory.tsx` — the lazy flow-status resolution sometimes
  * never patches a successfully-delivered withdraw from `'pending'` to
  * `'terminal-success'`, which used to permanently block any new

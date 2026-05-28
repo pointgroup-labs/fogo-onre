@@ -2,7 +2,7 @@
 
 import type { FlowStatus } from '@/hooks/useFlowStatus'
 import type { FogoDeliveryReceipt } from '@/lib/bridgeDelivery/fogoReceipt'
-import type { TimelineRow } from '@/lib/bridgeHistory/types'
+import type { DisplayAction } from '@/lib/bridgeHistory/bridgeAction'
 import type { PersistedFlowStatus } from '@/lib/flow-status/types'
 import { isEstablished, isWalletLoading, useSession } from '@fogo/sessions-sdk-react'
 import { PublicKey } from '@solana/web3.js'
@@ -27,7 +27,7 @@ import { findJournalEntryBySignature } from '@/lib/bridgeHistory/merge'
  *      enumerate without an owner.
  *
  * We degrade gracefully across all three:
- *   - `row` is the canonical merged data when available.
+ *   - `action` is the canonical merged DisplayAction when available.
  *   - `journal` is the persisted client-side record (richer fields like
  *     baseline balance + amountStr, only present on the originating
  *     device).
@@ -43,7 +43,7 @@ import { findJournalEntryBySignature } from '@/lib/bridgeHistory/merge'
  */
 export interface TxDetail {
   signature: string
-  row: TimelineRow | null
+  action: DisplayAction | null
   journal: PersistedFlowStatus | null
   flow: FlowStatus | null
   /**
@@ -62,7 +62,7 @@ export interface TxDetail {
    */
   sessionInitializing: boolean
   historyLoading: boolean
-  /** True when the row truly isn't in the connected wallet's recent history. */
+  /** True when the action truly isn't in the connected wallet's recent history. */
   notFound: boolean
 }
 
@@ -79,20 +79,28 @@ export function useTxDetail(signature: string): TxDetail {
 
   const qc = useQueryClient()
   const history = useBridgeHistory(owner)
-  const row = useMemo(
-    () => history.rows.find(r => r.signature === signature) ?? null,
-    [history.rows, signature],
+  const action = useMemo(
+    // Alias-based lookup: each action enumerates every sig that should
+    // resolve to it (anchor, origin, destination, final, delivery
+    // source). Keeps shared/saved URLs working without re-deriving the
+    // disjunction at every call site.
+    () => history.actions.find(a => a.aliases.has(signature)) ?? null,
+    [history.actions, signature],
   )
 
   const journal = useMemo(
-    () => findJournalEntryBySignature(qc, signature),
+    // Orphan deposit-delivery actions are URL-keyed on the Solana
+    // inbound sig, but the local journal is keyed on the FOGO burn
+    // sig — fall through to `action.originSig` (back-filled in
+    // useBridgeHistory) so same-device journal data still surfaces.
+    () => findJournalEntryBySignature(qc, action?.originSig ?? signature),
     // `findJournalEntryBySignature` reads from the QueryClient cache, which
     // mutates without invalidating React-tree subscribers. The journal index
     // query (`['pending-flow-ids']`) inside `useBridgeHistory` already
-    // subscribes us to additions; mirror its `rows` dep here so the journal
-    // lookup re-runs when the index changes.
+    // subscribes us to additions; mirror its `actions` dep here so the
+    // journal lookup re-runs when the index changes.
     // eslint-disable-next-line react/exhaustive-deps
-    [qc, signature, history.rows],
+    [qc, signature, history.actions, action?.originSig],
   )
 
   const flowInput = useMemo(() => {
@@ -116,22 +124,35 @@ export function useTxDetail(signature: string): TxDetail {
     baselineBalance: null,
   })
 
-  // Journal-free delivery oracle. Inputs come from `row` (works on
+  // Journal-free delivery oracle. Inputs come from `action` (works on
   // cold-share / cross-device) with a journal fallback for cases where
-  // the row hasn't merged in yet but the journal already has owner +
+  // the action hasn't merged in yet but the journal already has owner +
   // kind + signature. The hook itself is no-op when its inputs are
   // incomplete, so passing `null`s safely degrades.
-  const kind = row?.kind ?? journal?.kind ?? 'deposit'
-  const ownerB58 = row !== null
+  //
+  // Short-circuit when the action already carries `finalSig`: that
+  // value comes from Wormholescan's authoritative `targetChain.txHash`,
+  // so the ATA-scan oracle has nothing to add and would happily latch
+  // onto an unrelated *recent* mint for old shared URLs (the scan is
+  // "since sourceBlockTime", not "around source"). Passing `null` for
+  // `sourceSignature` is the hook's existing disable channel.
+  const kind = action?.kind ?? journal?.kind ?? 'deposit'
+  const ownerB58 = action !== null
     ? (session && isEstablished(session) ? session.walletPublicKey.toBase58() : null)
     : journal?.ownerB58 ?? null
-  const sourceBlockTime = row?.blockTime ?? (journal ? Math.floor(journal.startedAt / 1000) : null)
+  const sourceBlockTime = action?.startedAt ?? (journal ? Math.floor(journal.startedAt / 1000) : null)
+  const oracleSourceSig = action?.finalSig != null ? null : signature
   const fogoDelivery = useFogoDelivery({
     ownerB58,
     kind,
-    sourceSignature: signature,
+    sourceSignature: oracleSourceSig,
     sourceBlockTime,
   })
+
+  // Only orphan deposit-delivery actions benefit from the relayer-event
+  // lookup, and that recovery now happens inside `useBridgeHistory`'s
+  // queryFn so the action arrives here with USDC already baked into
+  // `displayAmountRaw` / `displayMintB58`. No per-row hook needed.
 
   // `notFound` requires *positive evidence* of absence. Two paths:
   //   1. Connected: history must have actually completed a fetch
@@ -140,12 +161,12 @@ export function useTxDetail(signature: string): TxDetail {
   //      window before owner is wired in).
   //   2. Definitively disconnected: session has settled to a non-
   //      established state and isn't booting. History will never load
-  //      without an owner, so journal/row are our only signals.
+  //      without an owner, so journal/action are our only signals.
   // Without these gates, the page flashes "Transaction not found" on
   // the first render before either the session or the query has had a
   // chance to report.
   const sessionDefinitivelyAbsent = !sessionEstablished && !sessionInitializing
-  const notFound = row === null
+  const notFound = action === null
     && journal === null
     && (
       (sessionEstablished && history.isFetched)
@@ -154,7 +175,7 @@ export function useTxDetail(signature: string): TxDetail {
 
   return {
     signature,
-    row,
+    action,
     journal,
     flow,
     fogoDelivery,

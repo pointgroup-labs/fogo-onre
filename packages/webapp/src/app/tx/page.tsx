@@ -1,7 +1,7 @@
 'use client'
 
-import { Suspense, useEffect, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
+import { Suspense, useEffect, useState } from 'react'
 import { Actions } from '@/components/tx-detail/Actions'
 import { Help } from '@/components/tx-detail/Help'
 import { HeroSummary } from '@/components/tx-detail/HeroSummary'
@@ -72,7 +72,7 @@ function TxDetailInner() {
           {' '}
           <code>?signature=</code>
           {' '}
-          query parameter. Open a row from your bridge history to view its details.
+          query parameter. Open a row from your transaction history to view its details.
         </AlertDescription>
       </Alert>
     )
@@ -97,7 +97,7 @@ function TxDetailInner() {
       <Alert>
         <AlertTitle>Transaction not found</AlertTitle>
         <AlertDescription>
-          This signature isn&apos;t in your bridge history. Double-check the link, or
+          This signature isn&apos;t in your transaction history. Double-check the link, or
           {' '}
           <a className="underline" href={`https://wormholescan.io/#/tx/${signature}`} target="_blank" rel="noopener noreferrer">
             look it up on Wormholescan

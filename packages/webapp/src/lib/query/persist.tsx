@@ -23,6 +23,11 @@ function shouldPersistKey(key: readonly unknown[]): boolean {
   if (key[0] === 'flow-status' && key.length === 2 && typeof key[1] === 'string') {
     return true
   }
+  // Orphan-deposit USDC recovery — value is immutable on-chain, so caching
+  // the resolved bigint (decimal-stringified) collapses the visible jump.
+  if (key[0] === 'deposit-usdc-amount') {
+    return true
+  }
   return false
 }
 
@@ -81,7 +86,8 @@ export default function QueryProviders({ children }: { children: ReactNode }) {
       persistOptions={{
         persister,
         dehydrateOptions: {
-          shouldDehydrateQuery: query => shouldPersistKey(query.queryKey),
+          shouldDehydrateQuery: query =>
+            query.state.status === 'success' && shouldPersistKey(query.queryKey),
         },
       }}
       onSuccess={() => reconcileFlowIndex(queryClient)}

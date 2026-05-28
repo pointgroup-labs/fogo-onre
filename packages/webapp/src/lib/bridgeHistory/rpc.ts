@@ -106,9 +106,20 @@ export function extractBurnRow(
     return null
   }
 
-  // Allowlist check
-  const keys = tx.transaction.message.accountKeys.map(k => k.pubkey.toBase58())
-  if (!keys.some(k => PROGRAM_ALLOWLIST.has(k))) {
+  // Allowlist check. For v0 txs that use an Address Lookup Table
+  // (the deposit path does — see `scripts/deploy-fogo-deposit-lut.mjs`),
+  // the NTT manager program ID is loaded via the LUT and lives in
+  // `tx.meta.loadedAddresses`, NOT in `transaction.message.accountKeys`.
+  // Without scanning both, every LUT-using deposit silently gets dropped
+  // here and the user sees an empty history.
+  const staticKeys = tx.transaction.message.accountKeys.map(k => k.pubkey.toBase58())
+  const loaded = tx.meta.loadedAddresses
+  const loadedKeys = [
+    ...(loaded?.writable?.map(k => k.toString()) ?? []),
+    ...(loaded?.readonly?.map(k => k.toString()) ?? []),
+  ]
+  const allKeys = [...staticKeys, ...loadedKeys]
+  if (!allKeys.some(k => PROGRAM_ALLOWLIST.has(k))) {
     return null
   }
 

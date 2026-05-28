@@ -15,8 +15,8 @@ interface ActionsProps {
  * User-affordance panel. Three actions, each gated on whether it's
  * currently meaningful:
  *   - Share link: always available; copies a deep-link to this page.
- *   - Mark delivered: only when the row is pending AND owner-locally
- *     persisted (row exists in history). Manual dismissal is a
+ *   - Mark delivered: only when the action is pending AND owner-locally
+ *     persisted (action exists in history). Manual dismissal is a
  *     cosmetic, per-device override — see dismissed.ts for rationale.
  *   - Need help: always available; opens the GitHub issues page in a
  *     new tab. Cheap escape hatch; protocol has no in-product support.
@@ -27,11 +27,11 @@ interface ActionsProps {
  * nothing to retry.
  */
 export function Actions({ detail }: ActionsProps) {
-  const { row, signature } = detail
-  const delivered = row?.status === 'delivered'
-    || row?.manuallyDismissed === true
+  const { action, signature } = detail
+  const delivered = action?.status === 'delivered'
+    || action?.manuallyDismissed === true
     || detail.flow?.phase === 'delivered'
-  const canMarkDelivered = !delivered && row !== null
+  const canMarkDelivered = !delivered && action !== null
 
   return (
     <Card>

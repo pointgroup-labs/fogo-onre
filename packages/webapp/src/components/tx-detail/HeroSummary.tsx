@@ -1,10 +1,12 @@
 'use client'
 
 import type { TxDetail } from './use-tx-data'
-import { ArrowDownLeft, ArrowRight, ArrowUpRight, CheckCircle2, Loader2, XCircle } from 'lucide-react'
+import { ArrowDownLeft, ArrowRight, ArrowUpRight, CheckCircle2, HelpCircle, Loader2, XCircle } from 'lucide-react'
 import { TokenIcon } from '@/components/SymbolPill'
 import { Card, CardContent } from '@/components/ui/card'
-import { FOGO_ONYC_DECIMALS, USDC_DECIMALS } from '@/constants'
+import { FOGO_ONYC_DECIMALS, USDC_DECIMALS, USDC_S_MINT } from '@/constants'
+import { UNCONFIRMED_AFTER_MS } from '@/lib/bridgeHistory/displaySla'
+import { parseAmountForDisplay } from '@/lib/bridgeHistory/merge'
 import { formatAmount, formatRelativeTime } from './format'
 
 interface HeroSummaryProps {
@@ -34,9 +36,9 @@ interface HeroSummaryProps {
  * minimalism beats a clever-but-wrong number.
  */
 export function HeroSummary({ detail, nowMs }: HeroSummaryProps) {
-  const { row, flow, journal, fogoDelivery } = detail
+  const { action, flow, journal, fogoDelivery } = detail
 
-  const kind = row?.kind ?? journal?.kind ?? 'deposit'
+  const kind = action?.kind ?? journal?.kind ?? 'deposit'
   const isDeposit = kind === 'deposit'
 
   // `delivered` aggregates every signal that proves the bridge completed.
@@ -46,22 +48,36 @@ export function HeroSummary({ detail, nowMs }: HeroSummaryProps) {
   // FOGO-side delivery oracle has *already* found the mint signature —
   // trust it as authoritative.
   const delivered
-    = row?.status === 'delivered'
-      || row?.manuallyDismissed === true
+    = action?.status === 'delivered'
+      || action?.manuallyDismissed === true
       || flow?.phase === 'delivered'
       || fogoDelivery?.kind === 'delivered'
   const failed = flow?.phase === 'expired'
   const inFlight = !delivered && !failed
 
-  const amountRaw = row?.amountRaw ?? (journal ? BigInt(journal.amountStr) : null)
-  const sourceSymbol = isDeposit ? 'USDC.s' : 'ONyc'
-  const destSymbol = isDeposit ? 'ONyc' : 'USDC.s'
-  const sourceDecimals = isDeposit ? USDC_DECIMALS : FOGO_ONYC_DECIMALS
+  const sourceSymbol = isDeposit ? 'USDC' : 'ONyc'
+  const destSymbol = isDeposit ? 'ONyc' : 'USDC'
+  // Decimals + symbol follow the actual mint behind `displayAmountRaw`.
+  // For orphan deposit actions, `useBridgeHistory` has already resolved
+  // the source USDC amount and re-stamped `displayMintB58` to USDC, so
+  // a single mint-driven branch is enough.
+  const mintIsUsdc = action?.displayMintB58 === USDC_S_MINT.toBase58()
+  const sourceDecimals = action?.displayMintB58 !== undefined
+    ? (mintIsUsdc ? USDC_DECIMALS : FOGO_ONYC_DECIMALS)
+    : (isDeposit ? USDC_DECIMALS : FOGO_ONYC_DECIMALS)
+  const amountSymbol = action?.displayMintB58 !== undefined
+    ? (mintIsUsdc ? 'USDC' : 'ONyc')
+    : sourceSymbol
+  const amountRaw = action?.displayAmountRaw
+    ?? (journal ? parseAmountForDisplay(journal.amountStr, sourceDecimals) : null)
   const amountStr = amountRaw !== null
     ? formatAmount(amountRaw, sourceDecimals)
     : '—'
+  // For orphan delivery actions the amount is in the destination token,
+  // so the source→dest arrow would re-state the same symbol. Drop it.
+  const showArrow = amountSymbol === sourceSymbol
 
-  const startedAt = journal?.startedAt ?? (row ? row.blockTime * 1000 : null)
+  const startedAt = journal?.startedAt ?? (action ? action.startedAt * 1000 : null)
   const elapsedLabel = startedAt !== null
     ? formatRelativeTime(startedAt, nowMs)
     : null
@@ -70,28 +86,35 @@ export function HeroSummary({ detail, nowMs }: HeroSummaryProps) {
   // Threshold matches EtaHint's expectation: deposits ~8 min, redeems ~30 min.
   //
   // Critically, we require *positive in-flight evidence* (a `flow.phase`
-  // or a `row.phase`) before painting amber. Without this guard, a hero
-  // rendered from a stale journal alone (e.g. opened from a cold link
-  // 40 min after `startedAt`) flashes amber for one render before the
-  // live `flow` watcher resolves to `delivered` — the original
+  // or an `action.phase`) before painting amber. Without this guard, a
+  // hero rendered from a stale journal alone (e.g. opened from a cold
+  // link 40 min after `startedAt`) flashes amber for one render before
+  // the live `flow` watcher resolves to `delivered` — the original
   // "yellow-flash" half of the loading cascade.
   const elapsedMs = startedAt !== null ? Math.max(0, nowMs - startedAt) : 0
   const slowThresholdMs = (isDeposit ? 8 : 30) * 60_000
-  const hasLiveStatus = flow?.phase != null || row?.phase != null
+  const hasLiveStatus = flow?.phase != null || action?.phase != null
   const isSlow = inFlight && hasLiveStatus && elapsedMs > slowThresholdMs
+
+  // No live phase + past the SLA window = the indexer never surfaced a
+  // delivery and we have no progress signal. Don't claim "Just started";
+  // say so honestly. Mirrors the history list's "Unconfirmed" badge.
+  const unconfirmed = inFlight && !hasLiveStatus && elapsedMs > UNCONFIRMED_AFTER_MS
 
   const headline = delivered
     ? 'Delivered'
     : failed
       ? 'Stalled'
-      : isSlow
-        ? 'Taking longer than usual'
-        : statusVerb(flow?.phase ?? row?.phase ?? null)
+      : unconfirmed
+        ? 'Unconfirmed'
+        : isSlow
+          ? 'Taking longer than usual'
+          : statusVerb(flow?.phase ?? action?.phase ?? null)
 
   return (
     <Card>
       <CardContent className="flex flex-col items-center gap-3 px-6 py-7 text-center">
-        <DirectionGlyph isDeposit={isDeposit} delivered={delivered} failed={failed} />
+        <DirectionGlyph isDeposit={isDeposit} delivered={delivered} failed={failed} unconfirmed={unconfirmed} />
         <div className="flex flex-col gap-1">
           <div className="text-xs uppercase tracking-wide text-muted-foreground">
             {isDeposit ? 'Deposit' : 'Redeem'}
@@ -102,14 +125,18 @@ export function HeroSummary({ detail, nowMs }: HeroSummaryProps) {
           <div className="mt-1 inline-flex items-center justify-center gap-2 text-sm tabular-nums">
             <span className="font-medium">{amountStr}</span>
             <span className="inline-flex items-center gap-1">
-              <TokenIcon symbol={sourceSymbol} size={16} />
-              <span className="text-muted-foreground">{sourceSymbol}</span>
+              <TokenIcon symbol={amountSymbol} size={16} />
+              <span className="text-muted-foreground">{amountSymbol}</span>
             </span>
-            <ArrowRight aria-hidden className="size-3.5 text-muted-foreground/60" />
-            <span className="inline-flex items-center gap-1">
-              <TokenIcon symbol={destSymbol} size={16} />
-              <span className="text-muted-foreground">{destSymbol}</span>
-            </span>
+            {showArrow && (
+              <>
+                <ArrowRight aria-hidden className="size-3.5 text-muted-foreground/60" />
+                <span className="inline-flex items-center gap-1">
+                  <TokenIcon symbol={destSymbol} size={16} />
+                  <span className="text-muted-foreground">{destSymbol}</span>
+                </span>
+              </>
+            )}
           </div>
         </div>
         {elapsedLabel !== null && (
@@ -121,7 +148,12 @@ export function HeroSummary({ detail, nowMs }: HeroSummaryProps) {
                 : `Started ${elapsedLabel}`}
           </div>
         )}
-        {inFlight && <EtaHint isSlow={isSlow} kind={kind} />}
+        {inFlight && !unconfirmed && <EtaHint isSlow={isSlow} kind={kind} />}
+        {unconfirmed && (
+          <p className="max-w-sm text-xs text-muted-foreground">
+            Older than the typical bridge window and we couldn't confirm delivery from here. Check the timeline below, or your FOGO wallet balance.
+          </p>
+        )}
         {delivered && (
           <p className="text-xs text-muted-foreground">
             <span className="text-foreground/80">{destSymbol}</span>
@@ -166,10 +198,12 @@ function DirectionGlyph({
   isDeposit,
   delivered,
   failed,
+  unconfirmed,
 }: {
   isDeposit: boolean
   delivered: boolean
   failed: boolean
+  unconfirmed: boolean
 }) {
   let Icon = isDeposit ? ArrowUpRight : ArrowDownLeft
   let tone = 'bg-muted text-foreground/70'
@@ -179,10 +213,13 @@ function DirectionGlyph({
   } else if (failed) {
     Icon = XCircle
     tone = 'bg-red-500/10 text-red-600 dark:text-red-400'
+  } else if (unconfirmed) {
+    Icon = HelpCircle
+    tone = 'bg-muted text-muted-foreground'
   }
   return (
     <div aria-hidden className={`flex size-12 items-center justify-center rounded-full ${tone}`}>
-      {delivered || failed
+      {delivered || failed || unconfirmed
         ? <Icon className="size-6" strokeWidth={2} />
         : <Loader2 className="size-6 animate-spin" />}
     </div>
