@@ -86,7 +86,51 @@ async function withRetry<T>(label: string, fn: () => Promise<T>): Promise<T> {
   throw lastErr
 }
 
+/**
+ * Process-global gate so the N independent React Query recovery walks
+ * (one per visible deposit row) don't fire ~3 RPC calls each in parallel
+ * and burst the public endpoint into 429s. Serializing only costs
+ * first-load latency — results are cached + persisted, so warm loads do
+ * zero RPC. The slot is handed directly to the next waiter on release,
+ * so the in-flight count never exceeds the limit.
+ */
+const MAX_CONCURRENT_WALKS = 1
+let activeWalks = 0
+const walkQueue: Array<() => void> = []
+
+function acquireWalkSlot(): Promise<void> {
+  if (activeWalks < MAX_CONCURRENT_WALKS) {
+    activeWalks++
+    return Promise.resolve()
+  }
+  return new Promise<void>((resolve) => {
+    walkQueue.push(resolve)
+  })
+}
+
+function releaseWalkSlot(): void {
+  const next = walkQueue.shift()
+  if (next !== undefined) {
+    // Hand the slot straight to the next waiter; count stays the same.
+    next()
+  } else {
+    activeWalks--
+  }
+}
+
 export async function fetchDepositUsdcAmount(
+  sources: DepositAmountSources,
+  lockOnycSig: string,
+): Promise<bigint | null> {
+  await acquireWalkSlot()
+  try {
+    return await walkDepositUsdcAmount(sources, lockOnycSig)
+  } finally {
+    releaseWalkSlot()
+  }
+}
+
+async function walkDepositUsdcAmount(
   sources: DepositAmountSources,
   lockOnycSig: string,
 ): Promise<bigint | null> {
