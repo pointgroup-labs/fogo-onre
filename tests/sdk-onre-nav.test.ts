@@ -11,6 +11,7 @@ import { resolve } from 'node:path'
 import {
   applySlippageFloor,
   calculateStepPrice,
+  depositExpectedOut,
   MAX_SLIPPAGE_BPS,
   ONRE_OFFER_ACCOUNT_SIZE,
   ONRE_OFFER_MAX_VECTORS,
@@ -53,6 +54,23 @@ describe('redemptionExpectedOut', () => {
 
   it('two-to-one price doubles output', () => {
     expect(redemptionExpectedOut(1_000_000n, 2_000_000_000n, 6, 6)).toBe(2_000_000n)
+  })
+})
+
+describe('depositExpectedOut', () => {
+  it('is the algebraic inverse of redemptionExpectedOut', () => {
+    expect(depositExpectedOut(1_000_000n, 1_000_000_000n, 6, 6)).toBe(1_000_000n)
+    expect(depositExpectedOut(2_000_000n, 2_000_000_000n, 6, 6)).toBe(1_000_000n)
+  })
+
+  it('matches the real OnRe binary mint (e2e-verified fixture)', () => {
+    // 0.5 USDC at the mainnet offer step price the deposit e2e exercises:
+    // the real OnRe `.so` minted 233_069 ONyc gross — exact to the unit.
+    expect(depositExpectedOut(500_000n, 2_145_284_934n, 6, 6)).toBe(233_069n)
+  })
+
+  it('rejects a zero price', () => {
+    expect(() => depositExpectedOut(1_000_000n, 0n, 6, 6)).toThrow('OnreNoActiveVector')
   })
 })
 

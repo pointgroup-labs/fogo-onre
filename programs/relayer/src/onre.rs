@@ -8,8 +8,9 @@
 use anchor_lang::prelude::*;
 
 use crate::constants::{
-    ONRE_APR_SCALE, ONRE_OFFER_ACCOUNT_SIZE, ONRE_OFFER_MAX_VECTORS, ONRE_OFFER_VECTORS_OFFSET,
-    ONRE_OFFER_VECTOR_SIZE, ONRE_PRICE_DENOMINATOR, ONRE_SECONDS_IN_YEAR,
+    ONRE_APR_SCALE, ONRE_DEPOSIT_OFFER_SEED, ONRE_OFFER_ACCOUNT_SIZE, ONRE_OFFER_MAX_VECTORS,
+    ONRE_OFFER_VECTORS_OFFSET, ONRE_OFFER_VECTOR_SIZE, ONRE_PRICE_DENOMINATOR, ONRE_PROGRAM_ID,
+    ONRE_SECONDS_IN_YEAR,
 };
 use crate::error::RelayerError;
 
@@ -117,6 +118,59 @@ pub fn calculate_step_price(v: &OnreOfferVector, now: u64) -> Result<u64> {
         .ok_or(RelayerError::OnreNavOverflow)?;
 
     u64::try_from(price_u128).map_err(|_| error!(RelayerError::OnreNavOverflow))
+}
+
+/// Pin `onre_offer` to OnRe's deposit `Offer` PDA for `(usdc_mint,
+/// onyc_mint)` and return its step-snapped NAV price (1e9 fp). Both swap
+/// legs anchor their slippage floor on this single on-chain oracle read,
+/// so the owner/PDA/mint validation lives here once.
+pub fn read_offer_nav_price(
+    onre_offer: &AccountInfo,
+    usdc_mint: &Pubkey,
+    onyc_mint: &Pubkey,
+    now_unix: u64,
+) -> Result<u64> {
+    require_keys_eq!(
+        *onre_offer.owner,
+        ONRE_PROGRAM_ID,
+        RelayerError::OnreOfferOwnerMismatch
+    );
+    let (expected_offer_pda, _bump) = Pubkey::find_program_address(
+        &[
+            ONRE_DEPOSIT_OFFER_SEED,
+            usdc_mint.as_ref(),
+            onyc_mint.as_ref(),
+        ],
+        &ONRE_PROGRAM_ID,
+    );
+    require_keys_eq!(
+        onre_offer.key(),
+        expected_offer_pda,
+        RelayerError::OnreOfferAddressMismatch
+    );
+
+    let offer_data = onre_offer.try_borrow_data()?;
+    require!(
+        offer_data.len() >= ONRE_OFFER_ACCOUNT_SIZE,
+        RelayerError::OnreOfferTooShort
+    );
+    let in_mint = Pubkey::try_from(&offer_data[8..40])
+        .map_err(|_| error!(RelayerError::OnreOfferTooShort))?;
+    let out_mint = Pubkey::try_from(&offer_data[40..72])
+        .map_err(|_| error!(RelayerError::OnreOfferTooShort))?;
+    require_keys_eq!(
+        in_mint,
+        *usdc_mint,
+        RelayerError::OnreOfferTokenInMintMismatch
+    );
+    require_keys_eq!(
+        out_mint,
+        *onyc_mint,
+        RelayerError::OnreOfferTokenOutMintMismatch
+    );
+
+    let active = parse_active_offer_vector(&offer_data, now_unix)?;
+    calculate_step_price(&active, now_unix)
 }
 
 /// Gross USDC value of redeeming `token_in_amount` at `price` (1e9 fp),

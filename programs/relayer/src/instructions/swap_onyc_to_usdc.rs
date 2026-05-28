@@ -25,15 +25,11 @@ use anchor_lang::solana_program::program::invoke_signed;
 use anchor_lang::solana_program::program_option::COption;
 use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};
 
-use crate::constants::{
-    CONFIG_SEED, FLOW_OUTBOUND_SEED, ONRE_DEPOSIT_OFFER_SEED, ONRE_PROGRAM_ID, RELAYER_SEED,
-};
+use crate::constants::{CONFIG_SEED, FLOW_OUTBOUND_SEED, RELAYER_SEED};
 use crate::cpi::{approve_swap_delegate, relayer_signed_transfer_checked};
 use crate::error::RelayerError;
 use crate::events::OnycSwappedToUsdc;
-use crate::onre::{
-    apply_slippage_floor, calculate_step_price, parse_active_offer_vector, redemption_expected_out,
-};
+use crate::onre::{apply_slippage_floor, read_offer_nav_price, redemption_expected_out};
 use crate::state::{Flow, FlowStatus, RelayerConfig};
 
 pub fn handler<'info>(
@@ -73,49 +69,15 @@ pub fn handler<'info>(
 
     require!(net_onyc > 0, RelayerError::ZeroAmountFlow);
 
-    // 2. NAV floor — pin onre_offer to (owner == ONRE_PROGRAM_ID) AND
-    //    (key == deposit Offer PDA for the bound mints) before reading bytes.
-    require_keys_eq!(
-        *ctx.accounts.onre_offer.owner,
-        ONRE_PROGRAM_ID,
-        RelayerError::OnreOfferOwnerMismatch
-    );
-    let (expected_offer_pda, _bump) = Pubkey::find_program_address(
-        &[
-            ONRE_DEPOSIT_OFFER_SEED,
-            ctx.accounts.relayer_config.usdc_mint.as_ref(),
-            ctx.accounts.relayer_config.onyc_mint.as_ref(),
-        ],
-        &ONRE_PROGRAM_ID,
-    );
-    require_keys_eq!(
-        ctx.accounts.onre_offer.key(),
-        expected_offer_pda,
-        RelayerError::OnreOfferAddressMismatch
-    );
-
+    // 2. NAV floor — pin onre_offer to OnRe's deposit Offer PDA for the
+    //    bound mints, read its step price, derive the slippage floor.
     let nav_floor: u64 = {
-        let offer_data = ctx.accounts.onre_offer.try_borrow_data()?;
-        require!(
-            offer_data.len() >= crate::constants::ONRE_OFFER_ACCOUNT_SIZE,
-            RelayerError::OnreOfferTooShort
-        );
-        let in_mint = Pubkey::try_from(&offer_data[8..40])
-            .map_err(|_| error!(RelayerError::OnreOfferTooShort))?;
-        let out_mint = Pubkey::try_from(&offer_data[40..72])
-            .map_err(|_| error!(RelayerError::OnreOfferTooShort))?;
-        require_keys_eq!(
-            in_mint,
-            ctx.accounts.relayer_config.usdc_mint,
-            RelayerError::OnreOfferTokenInMintMismatch
-        );
-        require_keys_eq!(
-            out_mint,
-            ctx.accounts.relayer_config.onyc_mint,
-            RelayerError::OnreOfferTokenOutMintMismatch
-        );
-        let active = parse_active_offer_vector(&offer_data, now_unix)?;
-        let price = calculate_step_price(&active, now_unix)?;
+        let price = read_offer_nav_price(
+            &ctx.accounts.onre_offer.to_account_info(),
+            &ctx.accounts.relayer_config.usdc_mint,
+            &ctx.accounts.relayer_config.onyc_mint,
+            now_unix,
+        )?;
         let gross_expected = redemption_expected_out(
             net_onyc,
             price,

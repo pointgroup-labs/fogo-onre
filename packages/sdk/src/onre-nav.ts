@@ -93,6 +93,27 @@ export function redemptionExpectedOut(
 }
 
 /**
+ * Mirror of `deposit_expected_out` (USDC in → ONyc out), the algebraic
+ * inverse of `redemptionExpectedOut`. Lets the cranker/webapp preview the
+ * deposit-leg NAV floor that `swap_usdc_to_onyc` enforces on-chain.
+ */
+export function depositExpectedOut(
+  usdcInAmount: bigint,
+  price: bigint,
+  usdcDecimals: number,
+  onycDecimals: number,
+): bigint {
+  if (price <= 0n) {
+    throw new Error('OnreNoActiveVector: price must be positive')
+  }
+  const powOut = 10n ** BigInt(onycDecimals)
+  const powIn = 10n ** BigInt(usdcDecimals)
+  const num = usdcInAmount * powOut * ONRE_PRICE_DENOMINATOR
+  const den = price * powIn
+  return asU64(num / den, 'deposit_expected_out result')
+}
+
+/**
  * Mirror of `parse_active_offer_vector`. Picks the vector with the
  * largest `start_time` satisfying `start_time != 0 && start_time <= now`.
  * Iterates exactly `ONRE_OFFER_MAX_VECTORS` slots.
