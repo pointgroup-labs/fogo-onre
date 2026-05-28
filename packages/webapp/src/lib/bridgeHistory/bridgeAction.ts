@@ -7,6 +7,7 @@ import {
   extractAmount,
   FOGO_CHAIN_ID,
   mapTargetStatus,
+  PAIRING_SKEW_MS,
   PAIRING_WINDOW_MS,
   timestampToSeconds,
 } from './wormholescan-list'
@@ -106,13 +107,14 @@ export interface DisplayAction extends BridgeAction {
 }
 
 /**
- * Produce `BridgeAction[]` from a Wormholescan page. Behavior-identical
- * to the legacy `groupOpsIntoRows` — same pairing heuristic, same
- * orphan handling — just emitting the new shape. The heuristic itself
- * does not change in Phase 1; codex review specifically flagged that
- * NTT sequence threading is not a deterministic pair pointer, so we
- * keep the time-window + token-leg + owner correlation that has been
- * shipping.
+ * Produce `BridgeAction[]` from a Wormholescan page. Outbound burns are
+ * paired to their delivery legs by `matchOutboundsToDeliveries`
+ * (mutual-nearest within `PAIRING_WINDOW_MS`); unpaired inbounds become
+ * standalone delivery/orphan rows. NTT sequence is NOT a deterministic
+ * pair pointer (codex review), so correlation stays time-window +
+ * token-leg + owner — but mutual-nearest makes a wide window safe, so a
+ * delivery that arrives a day late still pairs instead of showing
+ * "Unconfirmed".
  */
 export function classifyOpsIntoActions(ops: WormholescanOp[], userB58: string): BridgeAction[] {
   const classified = classifyOps(ops, userB58)
@@ -126,32 +128,10 @@ export function classifyOpsIntoActions(ops: WormholescanOp[], userB58: string): 
   const consumedIds = new Set<string>()
   const actions: BridgeAction[] = []
 
+  const deliveries = matchOutboundsToDeliveries(outbounds, inbounds)
+
   for (const out of outbounds) {
-    const outMs = timestampToSeconds(out.op.sourceChain.timestamp) * 1000
-    // Withdraw burn (ONyc) pairs with USDC delivery; visible deposit
-    // burn (USDC) pairs with ONyc delivery. Paymaster-wrapped deposits
-    // never appear as outbounds, so the deposit branch only fires when
-    // the user signed the FOGO USDC burn directly.
-    const wantInboundToken: 'usdc' | 'onyc' = out.token === 'onyc' ? 'usdc' : 'onyc'
-
-    let match: Classified | undefined
-    let bestDelta = Number.POSITIVE_INFINITY
-    for (const cand of inbounds) {
-      if (consumedIds.has(cand.op.id) || cand.token !== wantInboundToken) {
-        continue
-      }
-      const candMs = timestampToSeconds(cand.op.sourceChain.timestamp) * 1000
-      const delta = candMs - outMs
-      if (delta < -5_000 || delta > PAIRING_WINDOW_MS) {
-        continue
-      }
-      const dist = Math.abs(delta)
-      if (dist < bestDelta) {
-        match = cand
-        bestDelta = dist
-      }
-    }
-
+    const match = deliveries.get(out.op.id)
     const action = makeOutboundAction(out, match)
     if (action !== null) {
       actions.push(action)
@@ -172,6 +152,57 @@ export function classifyOpsIntoActions(ops: WormholescanOp[], userB58: string): 
   }
 
   return actions
+}
+
+/**
+ * Pair outbound burns to delivery legs by mutual-nearest neighbour: a
+ * burn and a delivery pair iff each is the other's closest eligible
+ * counterpart within the window. Symmetric matching is what lets the
+ * window be wide — a far delivery that truly belongs to a nearer burn is
+ * rejected, so an early failed burn can never steal a later burn's
+ * delivery. Eligibility = matching delivery token (withdraw ONyc → USDC,
+ * visible deposit USDC → ONyc) and delta in `[-PAIRING_SKEW_MS,
+ * PAIRING_WINDOW_MS]`. Each delivery is returned for at most one burn.
+ */
+function matchOutboundsToDeliveries(
+  outbounds: Classified[],
+  inbounds: Classified[],
+): Map<string, Classified> {
+  const nearestInbound = new Map<string, { inb: Classified, dist: number }>()
+  const nearestOutbound = new Map<string, { outId: string, dist: number }>()
+
+  for (const out of outbounds) {
+    const wantInboundToken: 'usdc' | 'onyc' = out.token === 'onyc' ? 'usdc' : 'onyc'
+    const outMs = timestampToSeconds(out.op.sourceChain.timestamp) * 1000
+    for (const inb of inbounds) {
+      if (inb.token !== wantInboundToken) {
+        continue
+      }
+      const inbMs = timestampToSeconds(inb.op.sourceChain.timestamp) * 1000
+      const delta = inbMs - outMs
+      if (delta < -PAIRING_SKEW_MS || delta > PAIRING_WINDOW_MS) {
+        continue
+      }
+      const dist = Math.abs(delta)
+      const bestForOut = nearestInbound.get(out.op.id)
+      if (bestForOut === undefined || dist < bestForOut.dist) {
+        nearestInbound.set(out.op.id, { inb, dist })
+      }
+      const bestForInb = nearestOutbound.get(inb.op.id)
+      if (bestForInb === undefined || dist < bestForInb.dist) {
+        nearestOutbound.set(inb.op.id, { outId: out.op.id, dist })
+      }
+    }
+  }
+
+  const pairs = new Map<string, Classified>()
+  for (const [outId, { inb }] of nearestInbound) {
+    const back = nearestOutbound.get(inb.op.id)
+    if (back !== undefined && back.outId === outId) {
+      pairs.set(outId, inb)
+    }
+  }
+  return pairs
 }
 
 function makeOutboundAction(out: Classified, delivery: Classified | undefined): BridgeAction | null {

@@ -16,11 +16,16 @@ const WORMHOLESCAN_BASE = 'https://api.wormholescan.io/api/v1'
 const REQUEST_TIMEOUT_MS = 8000
 /**
  * How far back to scan for a delivery leg matching an outbound burn.
- * Bridge delivery in normal conditions lands in seconds; a 24h window
- * tolerates RPC stalls, manual relayer recoveries, and Wormhole's
- * guardian-signing latency without ever pairing two unrelated flows.
+ * Normal deliveries land in seconds, but manual relayer recoveries and
+ * guardian-signing stalls can push the USDC return leg past a day. The
+ * window is wide because mutual-nearest pairing (see
+ * `classifyOpsIntoActions`) rejects mismatches — a distant delivery only
+ * pairs when it is also the burn's nearest counterpart, so a wide window
+ * can't silently cross-pair two unrelated flows.
  */
-export const PAIRING_WINDOW_MS = 24 * 60 * 60 * 1_000
+export const PAIRING_WINDOW_MS = 7 * 24 * 60 * 60 * 1_000
+/** Tolerated burn↔delivery clock skew on the "delivery before burn" side. */
+export const PAIRING_SKEW_MS = 5_000
 
 const OperationSchema = z.object({
   id: z.string(),
