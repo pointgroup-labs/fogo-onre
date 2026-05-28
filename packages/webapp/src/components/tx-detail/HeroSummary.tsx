@@ -57,20 +57,19 @@ export function HeroSummary({ detail, nowMs }: HeroSummaryProps) {
 
   const sourceSymbol = isDeposit ? 'USDC' : 'ONyc'
   const destSymbol = isDeposit ? 'ONyc' : 'USDC'
-  // Decimals + symbol follow the actual mint behind `displayAmountRaw`.
-  // For orphan deposit actions, `useBridgeHistory` has already resolved
-  // the source USDC amount and re-stamped `displayMintB58` to USDC, so
-  // a single mint-driven branch is enough.
   const mintIsUsdc = action?.displayMintB58 === USDC_S_MINT.toBase58()
-  const sourceDecimals = action?.displayMintB58 !== undefined
-    ? (mintIsUsdc ? USDC_DECIMALS : FOGO_ONYC_DECIMALS)
-    : (isDeposit ? USDC_DECIMALS : FOGO_ONYC_DECIMALS)
-  const amountSymbol = action?.displayMintB58 !== undefined
-    ? (mintIsUsdc ? 'USDC' : 'ONyc')
-    : sourceSymbol
-  const amountRaw = action?.displayAmountRaw
+  // Deposits always show the USDC the user sent, never the ONyc
+  // received: the amount is sourced only from USDC-denominated data
+  // (the detail-page recovery overlay or the device journal) and falls
+  // to a placeholder otherwise. Withdraws keep their mint-driven branch.
+  const amountSymbol = isDeposit
+    ? 'USDC'
+    : (action?.displayMintB58 !== undefined ? (mintIsUsdc ? 'USDC' : 'ONyc') : sourceSymbol)
+  const sourceDecimals = amountSymbol === 'USDC' ? USDC_DECIMALS : FOGO_ONYC_DECIMALS
+  const actionAmountUsable = isDeposit ? mintIsUsdc : action?.displayMintB58 !== undefined
+  const amountRaw = (actionAmountUsable ? action?.displayAmountRaw : undefined)
     ?? (journal ? parseAmountForDisplay(journal.amountStr, sourceDecimals) : null)
-  const amountStr = amountRaw !== null
+  const amountStr = amountRaw != null
     ? formatAmount(amountRaw, sourceDecimals)
     : '—'
   // For orphan delivery actions the amount is in the destination token,

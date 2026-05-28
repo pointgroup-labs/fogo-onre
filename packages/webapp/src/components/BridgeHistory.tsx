@@ -158,19 +158,16 @@ function SkeletonList({ count }: { count: number }) {
 function BridgeRow({ action, nowMs }: { action: DisplayAction, nowMs: number }) {
   const isDeposit = action.kind === 'deposit'
   const mintIsUsdc = action.displayMintB58 === USDC_S_MINT.toBase58()
-  // `useBridgeHistory` has already resolved orphan-deposit USDC into
-  // `displayAmountRaw`/`displayMintB58`, so a single mint-driven branch
-  // decides the ticker. When the resolver failed (RPC pruned, etc.) the
-  // action keeps its original ONyc-received fallback — we surface that
-  // honestly rather than waving a spinner.
-  const ticker = mintIsUsdc ? 'USDC' : 'ONyc'
+  // Deposits always read as the USDC the user sent — never the ONyc
+  // received. The USDC amount comes from the device journal or the
+  // detail page's lazy recovery; when neither is available here
+  // (cross-device orphan), show the USDC label with a pending
+  // placeholder rather than the wrong-token amount.
+  const depositAmountPending = isDeposit && !mintIsUsdc
+  const ticker = isDeposit ? 'USDC' : (mintIsUsdc ? 'USDC' : 'ONyc')
   const decimals = mintIsUsdc ? USDC_DECIMALS : FOGO_ONYC_DECIMALS
-  const displayRaw = action.displayAmountRaw
+  const amountText = depositAmountPending ? '—' : formatAmount(action.displayAmountRaw, decimals)
   const label = isDeposit ? 'Deposit' : 'Redeem'
-  // For orphan deposits whose USDC recovery failed, the amount is the
-  // *received* ONyc — annotate it so the row isn't read as the user's
-  // intent.
-  const observedOutput = isDeposit && !mintIsUsdc
   const blockMs = action.startedAt * 1000
   const relTime = formatRelativeTime(blockMs, nowMs)
   const { absTime, isoTime } = useMemo(() => {
@@ -220,7 +217,7 @@ function BridgeRow({ action, nowMs }: { action: DisplayAction, nowMs: number }) 
       className="group cursor-pointer py-0 ring-foreground/10 transition-shadow hover:ring-foreground/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:hover:ring-white/70"
       role="link"
       tabIndex={0}
-      aria-label={`View details for ${label} ${formatAmount(displayRaw, decimals)} ${ticker}${observedOutput ? ' received' : ''}`}
+      aria-label={`View details for ${label} ${amountText} ${ticker}`}
       onClick={onRowClick}
       onKeyDown={onRowKey}
     >
@@ -233,17 +230,11 @@ function BridgeRow({ action, nowMs }: { action: DisplayAction, nowMs: number }) 
         </span>
         <div className="flex min-w-0 flex-1 flex-col leading-tight">
           <span className="truncate text-sm font-medium tabular-nums">
-            {formatAmount(displayRaw, decimals)}
+            <span title={depositAmountPending ? 'Deposit amount is confirmed on the details page.' : undefined}>
+              {amountText}
+            </span>
             {' '}
             <span className="font-normal text-muted-foreground">{ticker}</span>
-            {observedOutput && (
-              <span
-                className="ml-1 font-normal text-muted-foreground"
-                title="Received on FOGO. The original USDC sent isn't recoverable from public RPC history on this device."
-              >
-                received
-              </span>
-            )}
           </span>
           <span className="mt-0.5 truncate text-xs text-muted-foreground">
             {label}
