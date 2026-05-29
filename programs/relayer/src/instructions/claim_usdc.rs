@@ -38,9 +38,8 @@ fn validate_skip_path_inbox_item(
 
     let vtm_data = ntt_transceiver_message.try_borrow_data()?;
 
-    // The redeem CPI we skip would have pinned origin to the FOGO peer.
-    // Re-enforce it: `from_chain` (offset 8, u16 LE) must be FOGO, else a
-    // foreign-chain released InboxItem could be paired here.
+    // Skipped redeem CPI would have pinned origin to FOGO; re-enforce:
+    // `from_chain` (offset 8, u16 LE) must equal FOGO.
     require!(
         vtm_data.len() >= TRANSCEIVER_MESSAGE_FROM_CHAIN_OFFSET + 2,
         RelayerError::InvalidTransceiverMessage
@@ -150,20 +149,16 @@ pub fn handler<'info>(
         )?;
     }
 
-    // Trust `inbox_item.amount` as the canonical per-VAA amount.
-    // A pre/post balance delta would be fragile under (a) dust into the
-    // open inbox ATA, (b) concurrent in-flight VAAs sharing the ATA,
-    // (c) the executor-already-released branch (no strict pre/post window).
-    //
-    // Defense in depth: in the skip path NTT release's
-    // `recipient_address == ATA authority` check doesn't run — assert
-    // it here so both branches enforce the recipient binding.
+    // Skip path bypasses NTT's recipient_address == ATA-authority check;
+    // assert it here so both branches enforce the recipient binding.
     let inbox = InboxItem::try_load(&ctx.accounts.ntt_inbox_item)?;
     require_keys_eq!(
         inbox.recipient_address,
         ctx.accounts.user_inbox_authority.key(),
         RelayerError::UserInboxAuthorityMismatch
     );
+    // Trust `inbox_item.amount` as canonical per-VAA: a pre/post balance
+    // delta is fragile under dust, concurrent VAAs, and the skip branch.
     let amount = inbox.amount;
     require!(amount > 0, RelayerError::ZeroAmountFlow);
 
@@ -173,9 +168,8 @@ pub fn handler<'info>(
         RelayerError::InsufficientInboxBalance
     );
 
-    // Sweep this VAA's exact recorded amount into relayer custody. The
-    // inbox PDA may retain non-zero post-balance (dust, concurrent VAAs,
-    // executor over-funding); none corrupt this flow's accounting.
+    // Sweep this VAA's exact recorded amount; the inbox PDA may keep a
+    // non-zero post-balance (dust/concurrent VAAs) without corrupting us.
     let user_wallet_key = ctx.accounts.user_wallet.key();
     let inbox_bump = ctx.bumps.user_inbox_authority;
     let inbox_bump_arr = [inbox_bump];

@@ -106,10 +106,8 @@ pub fn handler<'info>(
         net_onyc,
     )?;
 
-    // 5. CPI into the router under `invoke_signed` so relayer_authority
-    //    can sign Jupiter's `userTransferAuthority` slot. This extends the
-    //    PDA's signer privilege into the callee, so step 6b re-asserts the
-    //    ATAs were not re-authoritied/delegated/closed by a hostile router.
+    // CPI under invoke_signed so relayer_authority can sign Jupiter's
+    // userTransferAuthority slot; step 6b re-asserts the ATAs post-CPI.
     let auth_key = ctx.accounts.relayer_authority.key();
     let metas: Vec<AccountMeta> = ctx
         .remaining_accounts
@@ -151,12 +149,8 @@ pub fn handler<'info>(
         RelayerError::RedeemSlippageBelowFloor
     );
 
-    // 6b. PDA-signer privilege defense: the signed swap CPI could have
-    //     smuggled an SPL SetAuthority/Approve on our ATAs. Require both
-    //     ATAs pristine — owner unchanged, no lingering delegate, no
-    //     close_authority. The exact-consume above forces the bounded
-    //     delegate to zero, so a leftover delegation here means the router
-    //     spent via the PDA signer instead and must revert.
+    // Exact-consume forces the bounded delegate to zero; a leftover
+    // delegation here means the router spent via the PDA signer — revert.
     assert_ata_untampered(&ctx.accounts.onyc_ata, &auth_key)?;
     assert_ata_untampered(&ctx.accounts.usdc_ata, &auth_key)?;
 

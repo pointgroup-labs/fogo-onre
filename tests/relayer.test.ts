@@ -23,7 +23,6 @@ import {
   createSvm,
   expectError,
   expectFailure,
-  failedInProgram,
   findValidatedTransceiverMessagePda,
   FlowStatus,
   logMatches,

@@ -169,9 +169,8 @@ export class RelayerClient {
           ntt: params.ntt,
           programId: NTT_USDC_PROGRAM_ID,
           authority: this.authorityPda,
-          // The release destination is the per-user inbox ATA, not the
-          // long-lived relayer-authority ATA. The handler sweeps the
-          // delta into custody after release.
+          // Release lands in the per-user inbox ATA, not relayer custody;
+          // the handler sweeps the delta into custody after release.
           recipientAta: userInboxAta,
         })
       : null
