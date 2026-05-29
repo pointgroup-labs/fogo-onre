@@ -4,6 +4,13 @@ use crate::constants::{CONFIG_SEED, FEE_TIMELOCK_SLOTS, MAX_FEE_BPS, MAX_SLIPPAG
 use crate::error::RelayerError;
 
 /// `authority` gates governance only; flow instructions are permissionless.
+///
+/// Layout discipline: all fixed-size fields (including `slippage_bps` and the
+/// `reserved` block) come before the two variable-length `Option`s, which stay
+/// last. Future additive fields are carved out of `reserved` — same total size,
+/// so they need no realloc and no migration (old zero bytes read as the new
+/// field's default). `RelayerConfigV0` is the frozen pre-`slippage_bps` mainnet
+/// layout that `migrate_config` reads.
 #[account]
 #[derive(InitSpace)]
 pub struct RelayerConfig {
@@ -23,11 +30,30 @@ pub struct RelayerConfig {
     pub relayer_authority_bump: u8,
     pub bump: u8,
 
+    /// Headroom for future fixed-size fields without another migration.
+    pub reserved: [u8; 128],
+
     /// Promoted to `authority` by `accept_authority` (two-step handoff).
     pub pending_authority: Option<Pubkey>,
 
     /// Staged fee *increase*, auto-promoted on next `configure` once
     /// `ready_slot` elapses. Decreases bypass this.
+    pub pending_fee: Option<PendingFee>,
+}
+
+/// Pre-`slippage_bps` on-chain layout of `RelayerConfig`, frozen so the
+/// one-shot `migrate_config` can read accounts written before launch's upgrade.
+#[derive(AnchorDeserialize)]
+pub struct RelayerConfigV0 {
+    pub usdc_mint: Pubkey,
+    pub onyc_mint: Pubkey,
+    pub authority: Pubkey,
+    pub fee_vault: Pubkey,
+    pub deposit_fee_bps: u16,
+    pub withdraw_fee_bps: u16,
+    pub relayer_authority_bump: u8,
+    pub bump: u8,
+    pub pending_authority: Option<Pubkey>,
     pub pending_fee: Option<PendingFee>,
 }
 

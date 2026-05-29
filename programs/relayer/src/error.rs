@@ -115,4 +115,10 @@ pub enum RelayerError {
 
     #[msg("Relayer ATA authority/delegate/close_authority was mutated by the swap CPI")]
     AtaAuthorityTampered,
+
+    #[msg("relayer_config is already at the current layout — nothing to migrate")]
+    ConfigAlreadyMigrated,
+
+    #[msg("relayer_config could not be read in the pre-slippage layout")]
+    ConfigMigrationFailed,
 }

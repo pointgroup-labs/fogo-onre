@@ -114,4 +114,11 @@ pub mod fogo_onre_relayer {
     pub fn accept_authority(ctx: Context<AcceptAuthority>) -> Result<()> {
         accept_authority::handler(ctx)
     }
+
+    /// One-shot, authority-only. Grows the launch `RelayerConfig` to the
+    /// `slippage_bps` layout and seeds it with `DEFAULT_SLIPPAGE_BPS`.
+    /// Reverts once already migrated.
+    pub fn migrate_config(ctx: Context<MigrateConfig>) -> Result<()> {
+        migrate_config::handler(ctx)
+    }
 }

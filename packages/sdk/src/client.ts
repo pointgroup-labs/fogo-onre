@@ -132,6 +132,23 @@ export class RelayerClient {
   }
 
   /**
+   * One-shot migration of a pre-`slippage_bps` `RelayerConfig` to the
+   * current layout. Authority-only; reverts once already migrated.
+   */
+  migrateConfig(params: { authority?: PublicKey } = {}) {
+    const authority = params.authority ?? this.providerPublicKey()
+    if (!authority) {
+      throw new Error('migrateConfig: no authority provided and provider has no wallet')
+    }
+    return this.program.methods
+      .migrateConfig()
+      .accountsPartial({
+        authority,
+        relayerConfig: this.configPda,
+      })
+  }
+
+  /**
    * Claim bridged USDC.s via NTT (`redeem` + `release_inbound_unlock`) and
    * create an inflight Flow PDA bound to the per-VAA `ntt_inbox_item`.
    * Mirrors `unlockOnyc` but on the USDC mint.

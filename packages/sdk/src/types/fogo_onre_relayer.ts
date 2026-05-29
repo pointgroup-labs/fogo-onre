@@ -921,6 +921,67 @@ export type FogoOnreRelayer = {
       ]
     },
     {
+      "name": "migrateConfig",
+      "docs": [
+        "One-shot, authority-only. Grows the launch `RelayerConfig` to the",
+        "`slippage_bps` layout and seeds it with `DEFAULT_SLIPPAGE_BPS`.",
+        "Reverts once already migrated."
+      ],
+      "discriminator": [
+        92,
+        131,
+        58,
+        105,
+        210,
+        154,
+        224,
+        193
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "relayerConfig",
+          "docs": [
+            "layout, then realloc'd and rewritten. `authority == old.authority`",
+            "is enforced in the handler."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  108,
+                  97,
+                  121,
+                  101,
+                  114,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "systemProgram",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "sendUsdcToUser",
       "docs": [
         "Lock USDC via NTT and atomically emit the outbound VAA back to",
@@ -2075,6 +2136,16 @@ export type FogoOnreRelayer = {
       "code": 6037,
       "name": "ataAuthorityTampered",
       "msg": "Relayer ATA authority/delegate/close_authority was mutated by the swap CPI"
+    },
+    {
+      "code": 6038,
+      "name": "configAlreadyMigrated",
+      "msg": "relayer_config is already at the current layout — nothing to migrate"
+    },
+    {
+      "code": 6039,
+      "name": "configMigrationFailed",
+      "msg": "relayer_config could not be read in the pre-slippage layout"
     }
   ],
   "types": [
@@ -2310,7 +2381,14 @@ export type FogoOnreRelayer = {
     {
       "name": "relayerConfig",
       "docs": [
-        "`authority` gates governance only; flow instructions are permissionless."
+        "`authority` gates governance only; flow instructions are permissionless.",
+        "",
+        "Layout discipline: all fixed-size fields (including `slippage_bps` and the",
+        "`reserved` block) come before the two variable-length `Option`s, which stay",
+        "last. Future additive fields are carved out of `reserved` — same total size,",
+        "so they need no realloc and no migration (old zero bytes read as the new",
+        "field's default). `RelayerConfigV0` is the frozen pre-`slippage_bps` mainnet",
+        "layout that `migrate_config` reads."
       ],
       "type": {
         "kind": "struct",
@@ -2354,6 +2432,18 @@ export type FogoOnreRelayer = {
           {
             "name": "bump",
             "type": "u8"
+          },
+          {
+            "name": "reserved",
+            "docs": [
+              "Headroom for future fixed-size fields without another migration."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                128
+              ]
+            }
           },
           {
             "name": "pendingAuthority",
