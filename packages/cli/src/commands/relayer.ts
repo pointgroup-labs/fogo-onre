@@ -252,5 +252,48 @@ export function relayerCommands(): Command {
       console.log(chalk.dim(`  tx: ${sig}`))
     })
 
+  relayer
+    .command('migrate')
+    .description('One-shot upgrade of a pre-slippage_bps RelayerConfig (authority-only)')
+    .option('--confirm', 'Actually broadcast the transaction (default: dry-run)')
+    .action(async (opts: { confirm?: boolean }) => {
+      const { connection, keypair, client } = useContext()
+
+      const acct = await connection.getAccountInfo(client.configPda)
+      if (!acct) {
+        throw new Error('RelayerConfig not found — relayer is not initialized')
+      }
+      const newSize = client.program.account.relayerConfig.size
+      if (acct.data.length >= newSize) {
+        throw new Error(`RelayerConfig is already ${acct.data.length} bytes (>= ${newSize}) — nothing to migrate`)
+      }
+
+      // Authority lives at byte 72 of the V0 layout: 8 disc + 32 usdc_mint
+      // + 32 onyc_mint. Read it raw — the typed fetch fails on the short account.
+      const authority = new PublicKey(acct.data.subarray(72, 104))
+      if (!authority.equals(keypair.publicKey)) {
+        throw new Error(
+          `signer ${keypair.publicKey.toBase58()} is not the current authority (${authority.toBase58()})`,
+        )
+      }
+
+      console.log(chalk.cyan('Migrate plan'))
+      console.log(chalk.dim(`  signer (authority): ${authority.toBase58()}`))
+      console.log(chalk.dim(`  configPda:          ${client.configPda.toBase58()}`))
+      console.log(chalk.dim(`  size:               ${acct.data.length} → ${newSize} bytes`))
+
+      if (!opts.confirm) {
+        console.log()
+        console.log(chalk.yellow('dry-run only. Re-run with --confirm to broadcast.'))
+        return
+      }
+
+      console.log()
+      const sig = await runTx(async () => client.migrateConfig({ authority }).rpc())
+
+      console.log(chalk.green('Relayer config migrated'))
+      console.log(chalk.dim(`  tx: ${sig}`))
+    })
+
   return relayer
 }
