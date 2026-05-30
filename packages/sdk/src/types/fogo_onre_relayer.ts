@@ -1674,6 +1674,9 @@ export type FogoOnreRelayer = {
         },
         {
           "name": "onycAta",
+          "docs": [
+            "Sweep destination — long-lived relayer-authority ONyc ATA."
+          ],
           "writable": true,
           "pda": {
             "seeds": [
@@ -1730,13 +1733,120 @@ export type FogoOnreRelayer = {
           }
         },
         {
-          "name": "nttInboxItem"
+          "name": "userWallet",
+          "docs": [
+            "Originating FOGO wallet (Solana keys are chain-agnostic).",
+            "Pinned via `user_inbox_authority` PDA derivation + NTT release",
+            "ATA-authority check. See handler doc."
+          ]
+        },
+        {
+          "name": "userInboxAuthority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  117,
+                  115,
+                  101,
+                  114,
+                  95,
+                  105,
+                  110,
+                  98,
+                  111,
+                  120
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "userWallet"
+              }
+            ]
+          }
+        },
+        {
+          "name": "userInboxAta",
+          "docs": [
+            "NTT release_inbound deposits here; sweep moves exactly",
+            "`flow.amount` to `onyc_ata`. Not `init_if_needed`: FOGO",
+            "`bridge_ntt_tokens` arg `pay_destination_ata_rent: true` makes",
+            "the executor create the ATA on first delivery."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "userInboxAuthority"
+              },
+              {
+                "kind": "account",
+                "path": "tokenProgram"
+              },
+              {
+                "kind": "account",
+                "path": "onycMint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "nttInboxItem",
+          "docs": [
+            "No `#[account(owner = ...)]` here: on a fresh unlock NTT redeem",
+            "creates this account, so a pre-handler owner constraint would fail",
+            "every first-time unlock. The owner check runs in",
+            "`validate_skip_path_inbox_item` — the only path where forgery is",
+            "possible (no NTT CPI runs)."
+          ]
         },
         {
           "name": "nttTransceiverMessage"
         },
         {
           "name": "outflightFlow",
+          "docs": [
+            "`init` blocks double-unlocks against the same inbox item."
+          ],
           "writable": true,
           "pda": {
             "seeds": [
@@ -2488,6 +2598,18 @@ export type FogoOnreRelayer = {
       "name": "nttUsdcProgramId",
       "type": "pubkey",
       "value": "nttu74CdAmsErx5daJVCQNoDZujswFrskMzonoZSdGk"
+    },
+    {
+      "name": "onreIntentProgramId",
+      "docs": [
+        "SECURITY-CRITICAL CROSS-PROGRAM PIN — second member of the permanent",
+        "{OnRe, Fogo} setter allowlist. This is the OnRe fork of Fogo's",
+        "`intent_transfer` (same source, `declare_id!` only). Compile-time",
+        "constant by design: a runtime-rotatable pin would let a stolen",
+        "authority redirect deposit/redeem flow (see the Fogo pin doc above)."
+      ],
+      "type": "pubkey",
+      "value": "inTFf5S7ZtYr8SkwGG85mjDwAyJwjqEPdH2p2nuyrL9"
     },
     {
       "name": "onreProgramId",

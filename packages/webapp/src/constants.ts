@@ -1,4 +1,4 @@
-import { FOGO_ONYC_DECIMALS, USDC_DECIMALS } from '@fogo-onre/sdk'
+import { FOGO_ONYC_DECIMALS, ONRE_INTENT_PROGRAM_ID, USDC_DECIMALS } from '@fogo-onre/sdk'
 import { Network } from '@fogo/sessions-sdk-react'
 import { PublicKey } from '@solana/web3.js'
 
@@ -65,22 +65,22 @@ export const SOLANA_USDC_MINT = new PublicKey('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wE
 // NTT-bridged ONyc on FOGO. The user receives this on deposit, burns it on withdraw.
 export const FOGO_ONYC_MINT = new PublicKey('oNyCm1QsAatj3ckaEwZjtAPWvstPn3Zm5MAYPtkjEfa')
 
-// Per-call paymaster routing for the deposit bridge tx. We point the
-// bridge tx at Fogo Labs' generic `sessions` paymaster (sponsor
-// `47aX6R…`) under the permissive `Intent NTT Bridge` variation
-// rather than our own APP_DOMAIN lane — Fogo Labs sponsors gas for
-// any client that submits a `bridge_ntt_tokens` ix shaped like the
-// whitelisted variation, so we get free FOGO gas and the user pays
-// the executor's baseFee in USDC.s (deducted by intent_transfer
-// itself). This avoids the paymaster.toml/OnReDeposit lane entirely
-// and removes the FOGO native-gas top-up dependency on a key we
-// don't custody (`3AcB…`).
-//
-// Wired through to `sessionState.sendTransaction`'s sendTxOptions
-// in `useFogoNttTransfer.ts`; @fogo/sessions-sdk's context.js:22
-// spreads `paymasterDomain` and `variation` into sendToPaymaster.
-export const FOGO_BRIDGE_PAYMASTER_DOMAIN = 'sessions'
-export const FOGO_BRIDGE_VARIATION = 'Intent NTT Bridge'
+// Per-call paymaster routing for the deposit bridge tx. We use OUR
+// APP_DOMAIN lane (sponsor autoassigned by the Fogo paymaster for our
+// domain) under the `OnReBridge` variation, NOT Fogo Labs' generic
+// `sessions` lane. Our sponsor pays the FOGO landing gas and, because
+// the bridge fee lands in the sponsor's ATA, the deposit fee accrues
+// to us. Wired through `sendTransaction`'s sendTxOptions in the
+// deposit hooks; the sponsor pubkey is resolved per-call from
+// `/api/sponsor_pubkey?domain=<APP_DOMAIN>` in depositContext.ts.
+export const FOGO_BRIDGE_PAYMASTER_DOMAIN = APP_DOMAIN
+export const FOGO_BRIDGE_VARIATION = 'OnReBridge'
+
+// Program the deposit `bridge_ntt_tokens` ix targets. The OnRe fork of
+// Fogo's audited intent_transfer (source-identical, declare_id! only);
+// the relayer pins its setter PDA. Swap back to `INTENT_TRANSFER_PROGRAM_ID`
+// to revert deposits to Fogo's program.
+export const DEPOSIT_INTENT_PROGRAM_ID = ONRE_INTENT_PROGRAM_ID
 
 // FOGO-side NTT manager program IDs. Burning-mode managers, one per
 // bridged mint. The user-signed `transfer_burn` instruction is dispatched

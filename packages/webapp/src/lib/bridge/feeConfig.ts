@@ -19,8 +19,8 @@
  */
 
 import type { Connection } from '@solana/web3.js'
-import { INTENT_TRANSFER_PROGRAM_ID } from '@fogo-onre/sdk'
 import { PublicKey } from '@solana/web3.js'
+import { DEPOSIT_INTENT_PROGRAM_ID } from '@/constants'
 
 const FEE_CONFIG_SEED = Buffer.from('fee_config')
 const FEE_CONFIG_BRIDGE_FEE_OFFSET = 16
@@ -29,7 +29,7 @@ const FEE_CONFIG_BRIDGE_FEE_OFFSET = 16
 export function findFeeConfigPda(mint: PublicKey): PublicKey {
   const [pda] = PublicKey.findProgramAddressSync(
     [FEE_CONFIG_SEED, mint.toBuffer()],
-    INTENT_TRANSFER_PROGRAM_ID,
+    DEPOSIT_INTENT_PROGRAM_ID,
   )
   return pda
 }

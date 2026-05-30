@@ -78,6 +78,27 @@ pub const INTENT_TRANSFER_PROGRAM_ID: Pubkey =
 
 pub const INTENT_TRANSFER_SETTER_SEED: &[u8] = b"intent_transfer";
 
+/// SECURITY-CRITICAL CROSS-PROGRAM PIN — second member of the permanent
+/// {OnRe, Fogo} setter allowlist. This is the OnRe fork of Fogo's
+/// `intent_transfer` (same source, `declare_id!` only). Compile-time
+/// constant by design: a runtime-rotatable pin would let a stolen
+/// authority redirect deposit/redeem flow (see the Fogo pin doc above).
+#[constant]
+pub const ONRE_INTENT_PROGRAM_ID: Pubkey =
+    pubkey!("inTFf5S7ZtYr8SkwGG85mjDwAyJwjqEPdH2p2nuyrL9");
+
+/// Permanent two-element setter allowlist accepted by `claim_usdc` and
+/// `unlock_onyc`. Keeping Fogo's setter trusted is what preserves the
+/// deposit switch-back fallback; adding OnRe's is what lets us own the
+/// fee. Never remove either at runtime.
+pub fn allowed_intent_setters() -> [Pubkey; 2] {
+    let (onre, _) =
+        Pubkey::find_program_address(&[INTENT_TRANSFER_SETTER_SEED], &ONRE_INTENT_PROGRAM_ID);
+    let (fogo, _) =
+        Pubkey::find_program_address(&[INTENT_TRANSFER_SETTER_SEED], &INTENT_TRANSFER_PROGRAM_ID);
+    [onre, fogo]
+}
+
 /// Hard ceiling on the authority-configurable slippage tolerance
 /// (`RelayerConfig.slippage_bps`). Bounds the worst-case haircut a
 /// compromised authority key can apply to the NAV floor on both swap
@@ -109,3 +130,21 @@ pub const ONRE_PRICE_DECIMALS: u32 = 9;
 pub const ONRE_PRICE_DENOMINATOR: u128 = 1_000_000_000;
 pub const ONRE_APR_SCALE: u128 = 1_000_000;
 pub const ONRE_SECONDS_IN_YEAR: u128 = 31_536_000;
+
+#[cfg(test)]
+mod allowlist_tests {
+    use super::*;
+
+    #[test]
+    fn allowlist_has_distinct_onre_and_fogo_setters() {
+        let setters = allowed_intent_setters();
+        let (fogo, _) =
+            Pubkey::find_program_address(&[INTENT_TRANSFER_SETTER_SEED], &INTENT_TRANSFER_PROGRAM_ID);
+        let (onre, _) =
+            Pubkey::find_program_address(&[INTENT_TRANSFER_SETTER_SEED], &ONRE_INTENT_PROGRAM_ID);
+        assert_eq!(setters.len(), 2);
+        assert!(setters.contains(&fogo));
+        assert!(setters.contains(&onre));
+        assert_ne!(fogo, onre, "fork must re-derive a distinct setter PDA");
+    }
+}

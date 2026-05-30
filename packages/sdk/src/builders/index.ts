@@ -1,5 +1,5 @@
-export * from './fogo'
 export * from './fogo-redeem'
+export * from './fogo-redeem-intent'
 export * from './intent-transfer'
 export * from './jupiter'
 export * from './ntt'

@@ -16,6 +16,7 @@ import { fetchVaaBytes } from '../utils/wormhole'
 import { readNttInboxAmount, readSplTokenAmount } from './account-layouts'
 import { prepareTransceiverMessage } from './prepare-transceiver-message'
 import { isLostRace } from './race-classifier'
+import { flagDormantSetterReplay } from './replay-monitor'
 
 // NTT `Redeem` inits the `inbox_item` PDA via `invoke_signed` under the
 // relayer-authority PDA, debiting rent (~1.41M lamports observed) from
@@ -63,6 +64,10 @@ export async function claimUsdc(
       timeoutMs: ctx.wormholescanTimeoutMs,
     })
     const resolved = resolveNttVaa({ vaaBytes, nttProgramId: nttProgram })
+
+    // Observational replay monitor: flags a VAA routed through the dormant
+    // intent program. Does not gate — the on-chain allowlist decides.
+    flagDormantSetterReplay({ senderOnSource: resolved.senderOnSource, leg: 'deposit', metrics, log: ctx.log })
 
     // Pre-flight 0: skip non-OnRe deposits without an RPC. The OnRe
     // deposit path sets `recipient_address` to `findUserInboxAuthorityPda`

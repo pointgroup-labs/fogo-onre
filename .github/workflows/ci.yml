@@ -41,6 +41,22 @@ jobs:
       - name: Unit tests
         run: cargo test -p fogo-onre-relayer --lib
 
+  intent-fork:
+    name: intent-fork (audit-carryover source-diff gate)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      # Asserts the vendored fork `src/` differs from the pinned upstream
+      # commit by ONLY `declare_id!`. The reproducible-build hash half of
+      # the gate needs Docker + solana-verify and runs at deploy time
+      # (deploy-mainnet.md §3.1), so skip it here; the source-diff is the
+      # property that must hold on every PR.
+      - name: Source-diff against pinned upstream
+        env:
+          SKIP_REPRODUCIBLE_BUILD: '1'
+        run: scripts/verify-intent-fork.sh
+
   typescript:
     name: typescript (lint + tests)
     runs-on: ubuntu-latest

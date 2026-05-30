@@ -56,13 +56,17 @@ export function findUserInboxAuthorityPda(
 }
 
 /**
- * `intent_transfer`'s singleton setter PDA. Deterministic — pinned by
- * the relayer as the only valid `NttManagerMessage.sender` for inbound
- * deposits.
+ * `intent_transfer`'s singleton setter PDA — the `NttManagerMessage.sender`
+ * the relayer pins for inbound flows. Defaults to Fogo's program; pass
+ * `ONRE_INTENT_PROGRAM_ID` for the fork's (distinct) setter. The relayer
+ * allowlists both, so callers comparing an observed sender must derive
+ * each program's setter separately.
  */
-export function findIntentTransferSetterPda() {
+export function findIntentTransferSetterPda(
+  programId: PublicKey = INTENT_TRANSFER_PROGRAM_ID,
+) {
   return PublicKey.findProgramAddressSync(
     [INTENT_TRANSFER_SETTER_SEED],
-    INTENT_TRANSFER_PROGRAM_ID,
+    programId,
   )
 }

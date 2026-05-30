@@ -1,0 +1,79 @@
+#![allow(unexpected_cfgs)] // warning: unexpected `cfg` condition value: `anchor-debug`
+
+declare_id!("inTFf5S7ZtYr8SkwGG85mjDwAyJwjqEPdH2p2nuyrL9");
+
+use anchor_lang::prelude::*;
+
+pub mod bridge;
+pub mod config;
+mod error;
+mod fees;
+mod intrachain;
+mod nonce;
+mod verify;
+
+use crate::config::state::fee_config::FeeConfig;
+use bridge::processor::bridge_ntt_tokens::*;
+use config::processor::register_fee_config::*;
+use config::processor::register_ntt_config::*;
+use intrachain::processor::send_native::*;
+use intrachain::processor::send_tokens::*;
+
+const INTENT_TRANSFER_SEED: &[u8] = b"intent_transfer";
+
+#[program]
+pub mod intent_transfer {
+    use super::*;
+
+    #[instruction(discriminator = [0])]
+    pub fn send_tokens<'info>(ctx: Context<'_, '_, '_, 'info, SendTokens<'info>>) -> Result<()> {
+        ctx.accounts
+            .verify_and_send(&[&[INTENT_TRANSFER_SEED, &[ctx.bumps.intent_transfer_setter]]])
+    }
+
+    #[instruction(discriminator = [1])]
+    pub fn bridge_ntt_tokens<'info>(
+        ctx: Context<'_, '_, '_, 'info, BridgeNttTokens<'info>>,
+        args: BridgeNttTokensArgs,
+    ) -> Result<()> {
+        ctx.accounts.verify_and_initiate_bridge(
+            &[&[INTENT_TRANSFER_SEED, &[ctx.bumps.intent_transfer_setter]]],
+            args,
+        )
+    }
+
+    #[instruction(discriminator = [2])]
+    pub fn register_ntt_config<'info>(
+        ctx: Context<'_, '_, '_, 'info, RegisterNttConfig<'info>>,
+    ) -> Result<()> {
+        ctx.accounts.process()
+    }
+
+    #[instruction(discriminator = [3])]
+    pub fn register_fee_config<'info>(
+        ctx: Context<'_, '_, '_, 'info, RegisterFeeConfig<'info>>,
+        fee_config: FeeConfig,
+    ) -> Result<()> {
+        ctx.accounts.process(fee_config)
+    }
+
+    #[instruction(discriminator = [4])]
+    pub fn send_native<'info>(ctx: Context<'_, '_, '_, 'info, SendNative<'info>>) -> Result<()> {
+        ctx.accounts
+            .verify_and_send(&[&[INTENT_TRANSFER_SEED, &[ctx.bumps.intent_transfer_setter]]])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use fogo_sessions_sdk::intent_transfer::INTENT_TRANSFER_SETTER;
+
+    #[test]
+    fn test_session_setter_pda_derivation() {
+        assert_eq!(
+            INTENT_TRANSFER_SETTER,
+            Pubkey::find_program_address(&[INTENT_TRANSFER_SEED], &ID).0
+        );
+    }
+}

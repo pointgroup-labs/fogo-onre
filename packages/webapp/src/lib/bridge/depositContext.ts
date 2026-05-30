@@ -3,9 +3,9 @@
 /**
  * Deposit-side `BridgeContextProvider` factory.
  *
- * Builds the `DepositBridgeContext` shape that
- * `useFogoNttTransfer.ts::buildDepositIxs` consumes for the FOGO →
- * Solana USDC.s deposit path through `intent_transfer.bridge_ntt_tokens`.
+ * Builds the `BridgeContext` shape that the transfer hook consumes for
+ * the FOGO → Solana USDC.s deposit path through
+ * `intent_transfer.bridge_ntt_tokens`.
  *
  * Split of responsibilities:
  *   - **This module** owns IDL-derived intent_transfer PDAs (nonce,
@@ -24,10 +24,9 @@
  * has the executor URL baked in (`https://executor.labsapis.com`).
  */
 
-import type { BridgeContextProvider } from '@/hooks/useFogoNttTransfer'
+import type { BridgeContextProvider } from './context'
 import {
   findUserInboxAuthorityPda,
-  INTENT_TRANSFER_PROGRAM_ID,
   INTENT_TRANSFER_SETTER_SEED,
   RELAYER_PROGRAM_ID,
 } from '@fogo-onre/sdk'
@@ -35,6 +34,7 @@ import { Network } from '@fogo/sessions-sdk-react'
 import { getAssociatedTokenAddressSync } from '@solana/spl-token'
 import { PublicKey } from '@solana/web3.js'
 import {
+  DEPOSIT_INTENT_PROGRAM_ID,
   FOGO_BRIDGE_PAYMASTER_DOMAIN,
   FOGO_NETWORK,
   SOLANA_USDC_MINT,
@@ -113,14 +113,12 @@ function paymasterUrl(): string {
     ?? DEFAULT_PAYMASTER_URL_BY_NETWORK[FOGO_NETWORK]
 }
 
-// Cache the resolved `sessions` sponsor pubkey for the process lifetime.
-// The pubkey is rotated extremely rarely (it's Fogo Labs' top-level
-// generic sponsor), and the SDK's own connection layer caches it the
-// same way.
-const sessionsSponsorCache = new Map<string, PublicKey>()
-async function fetchSessionsSponsor(): Promise<PublicKey> {
+// Cache the resolved bridge sponsor pubkey for the process lifetime.
+// It rotates rarely (autoassigned per domain by the paymaster).
+const bridgeSponsorCache = new Map<string, PublicKey>()
+async function fetchBridgeSponsor(): Promise<PublicKey> {
   const domain = FOGO_BRIDGE_PAYMASTER_DOMAIN
-  const cached = sessionsSponsorCache.get(domain)
+  const cached = bridgeSponsorCache.get(domain)
   if (cached) {
     return cached
   }
@@ -130,11 +128,11 @@ async function fetchSessionsSponsor(): Promise<PublicKey> {
   const response = await fetch(url.toString())
   if (!response.ok) {
     throw new Error(
-      `Failed to resolve sessions sponsor pubkey (HTTP ${response.status}): ${await response.text()}`,
+      `Failed to resolve bridge sponsor pubkey (HTTP ${response.status}): ${await response.text()}`,
     )
   }
   const sponsor = new PublicKey((await response.text()).trim())
-  sessionsSponsorCache.set(domain, sponsor)
+  bridgeSponsorCache.set(domain, sponsor)
   return sponsor
 }
 
@@ -162,34 +160,16 @@ export function createDepositBridgeContextProvider(
   overrides: DepositBridgeConfig = {},
 ): BridgeContextProvider {
   return async ({ walletPublicKey, recipientAddress, amount, outboxItem }) => {
-    // Resolve the `sessions`-domain sponsor pubkey (Fogo Labs' generic
-    // `47aX6R…`). It's used in two roles on every deposit:
-    //   1. `bridge_ntt_tokens.sponsor` account on the ix
-    //   2. owner of the `feeDestination` USDC.s ATA
-    //
-    // Both must equal the *fee payer* of the assembled tx — which the
-    // per-call `paymasterDomain="sessions"` override in
-    // `useFogoNttTransfer.ts` swaps to this same pubkey. Aligning all
-    // three roles collapses what would otherwise be two distinct
-    // signer-w slots into one, keeping the paymaster-rebuilt tx under
-    // the 1232 B legacy-tx limit.
-    const sessionsSponsor = await fetchSessionsSponsor()
-    // Default fee token is USDC.s. The executor's signed `baseFee` is
-    // converted to USDC.s by intent_transfer itself when fee_mint is
-    // a stablecoin with a registered FeeConfig — the user's USDC.s
-    // input pays both the bridged amount and the cross-chain delivery
-    // escrow in a single token, no FOGO native gas top-up required.
-    //
-    // Pairs with `domain="sessions"` + `variation="Intent NTT Bridge"`
-    // (see FOGO_BRIDGE_PAYMASTER_DOMAIN/FOGO_BRIDGE_VARIATION in
-    // constants.ts): Fogo Labs' generic sponsor pays the FOGO-side
-    // landing gas, the user pays the bridge fee in USDC.s, and we
-    // never have to fund or rotate our own paymaster wallet.
-    //
-    // The symbol must match the on-chain Metaplex metadata for the
-    // fee mint exactly (intent_transfer's `verify_symbol_or_mint`
-    // does a byte-for-byte compare against the metadata `symbol`
-    // field, which for USDC.s reads as `USDC.s`).
+    // Our bridge sponsor (autoassigned for APP_DOMAIN). Same pubkey in
+    // three roles — `bridge_ntt_tokens.sponsor`, `feeDestination` ATA
+    // owner, and tx fee payer (the per-call paymasterDomain override) —
+    // so the paymaster-rebuilt tx stays under the 1232 B legacy limit.
+    const bridgeSponsor = await fetchBridgeSponsor()
+    // Default fee token is USDC.s: intent_transfer converts the
+    // executor's signed baseFee to USDC.s via the registered FeeConfig,
+    // so the user's USDC.s pays both the bridged amount and the delivery
+    // escrow. The fee symbol must byte-match the mint's Metaplex
+    // metadata (`verify_symbol_or_mint`); for USDC.s that reads `USDC.s`.
     const { feeMint, feeSymbol } = resolveFeeIdentity(overrides)
     const pdas = derivePdas(walletPublicKey, feeMint)
 
@@ -197,7 +177,7 @@ export function createDepositBridgeContextProvider(
     const feeSource = overrides.feeSource
       ?? getAssociatedTokenAddressSync(feeMint, walletPublicKey)
     const feeDestination = overrides.feeDestination
-      ?? getAssociatedTokenAddressSync(feeMint, sessionsSponsor, true)
+      ?? getAssociatedTokenAddressSync(feeMint, bridgeSponsor, true)
 
     // Sanity-check the recipient handed in by the hook against the SDK's
     // PDA derivation. A mismatch here means hook/SDK version skew and
@@ -266,6 +246,7 @@ export function createDepositBridgeContextProvider(
         nonce: nonceValue + 1n,
       },
       topLevel: {
+        intentTransferProgramId: DEPOSIT_INTENT_PROGRAM_ID,
         fromChainId: overrides.fromChainIdAccount ?? pdas.fromChainIdAccount,
         intentTransferSetter: pdas.intentTransferSetter,
         source: pdas.sourceAta,
@@ -274,7 +255,7 @@ export function createDepositBridgeContextProvider(
         metadata: overrides.metadata ?? findMetaplexMetadataPda(USDC_S_MINT),
         expectedNttConfig: overrides.expectedNttConfig ?? pdas.expectedNttConfig,
         nonce: pdas.noncePda,
-        sponsor: sessionsSponsor,
+        sponsor: bridgeSponsor,
         feeSource,
         feeDestination,
         feeMint,
@@ -323,19 +304,19 @@ function derivePdas(walletPublicKey: PublicKey, feeMint: PublicKey): {
   const sourceAta = getAssociatedTokenAddressSync(USDC_S_MINT, walletPublicKey)
   const [intentTransferSetter] = PublicKey.findProgramAddressSync(
     [INTENT_TRANSFER_SETTER_SEED],
-    INTENT_TRANSFER_PROGRAM_ID,
+    DEPOSIT_INTENT_PROGRAM_ID,
   )
   const [noncePda] = PublicKey.findProgramAddressSync(
     [IT_SEED_NONCE, walletPublicKey.toBuffer()],
-    INTENT_TRANSFER_PROGRAM_ID,
+    DEPOSIT_INTENT_PROGRAM_ID,
   )
   const [intermediateTokenAccount] = PublicKey.findProgramAddressSync(
     [IT_SEED_INTERMEDIATE, sourceAta.toBuffer()],
-    INTENT_TRANSFER_PROGRAM_ID,
+    DEPOSIT_INTENT_PROGRAM_ID,
   )
   const [expectedNttConfig] = PublicKey.findProgramAddressSync(
     [IT_SEED_EXPECTED_NTT_CONFIG, USDC_S_MINT.toBuffer()],
-    INTENT_TRANSFER_PROGRAM_ID,
+    DEPOSIT_INTENT_PROGRAM_ID,
   )
   const feeConfig = findFeeConfigPda(feeMint)
   const [fromChainIdAccount] = PublicKey.findProgramAddressSync(

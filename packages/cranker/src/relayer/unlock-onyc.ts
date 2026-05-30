@@ -1,20 +1,24 @@
 import type { AdvanceContext, AdvanceResult } from './types'
 import {
+  deriveUserWalletFromFogoTx,
   describeStatus,
   findAuthorityPda,
   findNttPeerPda,
+  findUserInboxAuthorityPda,
   FOGO_WORMHOLE_CHAIN_ID,
   NTT_ONYC_PROGRAM_ID,
   NTT_USDC_PROGRAM_ID,
   resolveNttVaa,
   WH_TRANSCEIVER_ONYC_PROGRAM_ID,
 } from '@fogo-onre/sdk'
+import { createAssociatedTokenAccountIdempotentInstruction, getAssociatedTokenAddressSync } from '@solana/spl-token'
 import { PublicKey, SystemProgram } from '@solana/web3.js'
 import { makePriorityFeeIx } from '../utils/priority-fee'
 import { withTimeout } from '../utils/rpc'
 import { fetchVaaBytes } from '../utils/wormhole'
 import { prepareTransceiverMessage } from './prepare-transceiver-message'
 import { isLostRace } from './race-classifier'
+import { flagDormantSetterReplay } from './replay-monitor'
 
 // NTT `redeem` inits `inbox_item` PDA via invoke_signed under
 // `relayer_authority`, which means the PDA pays rent. Its current
@@ -27,26 +31,26 @@ const RELAYER_AUTH_TOPUP = 3_000_000n
 export type UnlockOnycInput = {
   fogoTx: string
   vaaHex?: string
+  userWallet?: PublicKey
   onycMint?: PublicKey
   nttProgram?: PublicKey
 }
 
 /**
  * Step 1 of the withdraw chain. Drives `unlock_onyc` on Solana: NTT
- * `redeem` + `release_inbound_unlock` for the FOGO ONyc burn VAA, plus
- * init of the **outflight** Flow PDA. Status: (no flow) → `Claimed`,
- * surfaced to the daemon as `WithdrawPending` → `WithdrawClaimed` (the
- * synthetic leg-prefixed strings from `enumerate.ts:synthesizeStatus`
- * — the on-chain enum is shared between deposit/withdraw, so dispatch
- * needs the prefix to disambiguate).
+ * `redeem` + `release_inbound_unlock` for the FOGO ONyc burn VAA, the
+ * per-user inbox sweep, plus init of the **outflight** Flow PDA. Status:
+ * (no flow) → `Claimed`, surfaced to the daemon as `WithdrawPending` →
+ * `WithdrawClaimed` (the synthetic leg-prefixed strings from
+ * `enumerate.ts:synthesizeStatus` — the on-chain enum is shared between
+ * deposit/withdraw, so dispatch needs the prefix to disambiguate).
  *
- * Sender derivation (key difference from `claimUsdc`): the on-chain
- * handler parses `fogo_sender` from the VAA's
- * `ValidatedTransceiverMessage` payload directly. The cranker doesn't
- * need to recover the user wallet from the FOGO tx — VTM is a Solana
- * account, never expires, and is unforgeable. This sidesteps the
- * "FOGO RPC retention" failure mode that gates `claimUsdc` (where a
- * VAA whose source tx has aged out is unrecoverable).
+ * Wallet recovery (hard mirror of `claimUsdc`): redeem now routes through
+ * the OnRe `intent_transfer` fork, so the VTM `sender` is the setter PDA
+ * (constant per program) and attribution rides on the NTT
+ * `recipient_address` = per-user inbox PDA. Neither is invertible, so we
+ * recover `userWallet` from the FOGO source tx's `bridge_ntt_tokens`
+ * source-ATA owner and validate it derives the VAA recipient.
  *
  * Pre-flight noops (versus errors) are chosen so the daemon doesn't
  * burn cooldown when the gate is operational, not protocol:
@@ -57,6 +61,7 @@ export type UnlockOnycInput = {
  *     gate, not corruption.
  *   - outflight Flow PDA already exists → noop (another cranker won
  *     the race, or this VAA was already advanced in a prior tick).
+ *   - FOGO tx beyond RPC history retention → noop (unrecoverable).
  */
 export async function unlockOnyc(
   ctx: AdvanceContext,
@@ -78,6 +83,10 @@ export async function unlockOnyc(
     // outflight Flow PDA seed (`["outflight", inbox_item]`) would not
     // match what the on-chain handler initializes.
     const resolved = resolveNttVaa({ vaaBytes, nttProgramId: nttProgram })
+
+    // Observational replay monitor: flags a VAA routed through the dormant
+    // intent program. Does not gate — the on-chain allowlist decides.
+    flagDormantSetterReplay({ senderOnSource: resolved.senderOnSource, leg: 'withdraw', metrics, log: ctx.log })
 
     // Pre-flight 0: the ONyc NTT manager *must* be a real deployment.
     // While NTT_ONYC_PROGRAM_ID still aliases NTT_USDC_PROGRAM_ID per
@@ -109,6 +118,49 @@ export async function unlockOnyc(
     const cfg = await client.fetchConfig()
     const onycMint = input.onycMint ?? (cfg.onycMint as PublicKey)
 
+    // The intent redeem sets `recipient_address` to the per-user inbox
+    // PDA (off-curve). An on-curve recipient is a direct user→user
+    // bridge, not ours to unlock. Symmetric with `claimUsdc`.
+    if (PublicKey.isOnCurve(resolved.recipientOnSolana.toBytes())) {
+      return {
+        kind: 'noop',
+        reason: `VAA recipient ${resolved.recipientOnSolana.toBase58()} is on-curve (raw wallet) — non-OnRe direct bridge, not unlockable by relayer`,
+      }
+    }
+
+    // Recover userWallet from the FOGO source tx and validate it derives
+    // the VAA recipient. Cached across scans.
+    function deriveInboxAuthority(wallet: PublicKey): PublicKey {
+      const [pda] = findUserInboxAuthorityPda(wallet, client.program.programId)
+      return pda
+    }
+    let userWallet: PublicKey
+    if (input.userWallet) {
+      userWallet = input.userWallet
+    } else {
+      const cached = ctx.userWalletCache.get(input.fogoTx)
+      const recovered = cached
+        ?? await withTimeout(
+          deriveUserWalletFromFogoTx(ctx.fogoConnection, input.fogoTx),
+          ctx.rpcTimeoutMs,
+          'deriveUserWalletFromFogoTx',
+        ).catch(() => null)
+      if (!recovered) {
+        return {
+          kind: 'noop',
+          reason: `FOGO tx ${input.fogoTx} not found — likely beyond RPC history retention; VAA recipient ${resolved.recipientOnSolana.toBase58()}`,
+        }
+      }
+      if (!deriveInboxAuthority(recovered).equals(resolved.recipientOnSolana)) {
+        return {
+          kind: 'noop',
+          reason: `recovered wallet ${recovered.toBase58()} from FOGO tx ${input.fogoTx} doesn't derive VAA recipient ${resolved.recipientOnSolana.toBase58()} — not an OnRe redeem`,
+        }
+      }
+      userWallet = recovered
+      ctx.userWalletCache.set(input.fogoTx, recovered)
+    }
+
     // Pre-flight 2: outflight Flow PDA must NOT already exist. If it
     // does, either we (or another cranker) already submitted unlock for
     // this VAA — the next leg is `requestRedemptionOnyc`, not us.
@@ -137,6 +189,19 @@ export async function unlockOnyc(
         reason: `FOGO peer not registered on ONyc NTT manager (${fogoPeerPda.toBase58()})`,
       }
     }
+
+    // Per-user inbox ATA the NTT release lands in; the handler sweeps the
+    // recorded amount into relayer custody. Created idempotently — FOGO
+    // `bridge_ntt_tokens` with `pay_destination_ata_rent` usually
+    // pre-creates it, but the cranker must not depend on that.
+    const [userInboxAuthority] = findUserInboxAuthorityPda(userWallet, client.program.programId)
+    const userInboxAta = getAssociatedTokenAddressSync(onycMint, userInboxAuthority, true)
+    const ensureUserInboxAtaIx = createAssociatedTokenAccountIdempotentInstruction(
+      keypair.publicKey,
+      userInboxAta,
+      userInboxAuthority,
+      onycMint,
+    )
 
     // Pre-step: ensure ntt_transceiver_message PDA exists on Solana,
     // owned by the ONyc NTT manager. Wormhole's auto-relayer is not
@@ -191,6 +256,7 @@ export async function unlockOnyc(
     const sig = await client
       .unlockOnyc({
         payer: keypair.publicKey,
+        userWallet,
         onycMint,
         nttInboxItem: resolved.nttInboxItem,
         nttTransceiverMessage: resolved.nttTransceiverMessage,
@@ -201,7 +267,7 @@ export async function unlockOnyc(
         // deposit-side `claimUsdc` uses.
         ntt: { transceiverAddress: nttProgram },
       })
-      .preInstructions([makePriorityFeeIx(ctx.priorityFeeMicroLamports), ...fundIxs])
+      .preInstructions([makePriorityFeeIx(ctx.priorityFeeMicroLamports), ...fundIxs, ensureUserInboxAtaIx])
       .rpc()
 
     metrics.txSent.inc({ instruction: 'unlock_onyc', result: 'ok' })

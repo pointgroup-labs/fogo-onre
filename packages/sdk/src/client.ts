@@ -349,6 +349,13 @@ export class RelayerClient {
    */
   unlockOnyc(params: {
     payer: PublicKey
+    /**
+     * Originating FOGO wallet (= same pubkey on Solana). Drives the
+     * `[user_inbox, user_wallet]` PDA derivation that scopes the
+     * release_inbound destination ATA + sweep authority. Must match the
+     * wallet that signed the FOGO redeem intent.
+     */
+    userWallet: PublicKey
     onycMint: PublicKey
     nttInboxItem: PublicKey
     nttTransceiverMessage: PublicKey
@@ -356,6 +363,10 @@ export class RelayerClient {
     redeemAccountsLen?: number
   }) {
     const { outflightFlow } = this.flowPdas(params.nttInboxItem)
+    const { userInboxAuthority, userInboxAta } = this.userInboxBindings(
+      params.userWallet,
+      params.onycMint,
+    )
     const built = params.ntt
       ? buildNttRedeemReleaseAccounts({
           mint: params.onycMint,
@@ -364,9 +375,9 @@ export class RelayerClient {
           ntt: params.ntt,
           programId: NTT_ONYC_PROGRAM_ID,
           authority: this.authorityPda,
-          // ONyc release: route to the long-lived relayer custody ATA
-          // (the standard `unlock_onyc` path).
-          recipientAta: this.relayerAta(params.onycMint),
+          // Release lands in the per-user inbox ATA, not relayer custody;
+          // the handler sweeps the recorded amount into custody after release.
+          recipientAta: userInboxAta,
         })
       : null
 
@@ -378,6 +389,9 @@ export class RelayerClient {
         relayerAuthority: this.authorityPda,
         onycMint: params.onycMint,
         onycAta: this.relayerAta(params.onycMint),
+        userWallet: params.userWallet,
+        userInboxAuthority,
+        userInboxAta,
         nttInboxItem: params.nttInboxItem,
         nttTransceiverMessage: params.nttTransceiverMessage,
         outflightFlow,

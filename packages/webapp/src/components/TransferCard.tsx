@@ -47,7 +47,7 @@ interface KindConfig {
   unavailable: { title: string, description: string } | null
 }
 
-function configFor(kind: FlowKind): KindConfig {
+function configFor(kind: FlowKind, providerWired: boolean): KindConfig {
   if (kind === 'deposit') {
     return {
       srcMintB58: USDC_S_MINT.toBase58(),
@@ -63,6 +63,11 @@ function configFor(kind: FlowKind): KindConfig {
       unavailable: null,
     }
   }
+  // Withdraw rides the same intent `bridge_ntt_tokens` path as deposit,
+  // so it needs both the deployment gate AND a wired bridge-context
+  // provider. Until the ONyc redeem provider lands, withdraw stays
+  // "coming soon" rather than failing at submit.
+  const ready = FOGO_ONYC_DEPLOYMENT_READY && providerWired
   return {
     srcMintB58: FOGO_ONYC_MINT.toBase58(),
     destMintB58: USDC_S_MINT.toBase58(),
@@ -73,8 +78,8 @@ function configFor(kind: FlowKind): KindConfig {
     submitLabel: 'Redeem',
     submittingLabel: 'Redeeming…',
     insufficientLabel: 'Insufficient ONyc',
-    ready: FOGO_ONYC_DEPLOYMENT_READY,
-    unavailable: FOGO_ONYC_DEPLOYMENT_READY
+    ready,
+    unavailable: ready
       ? null
       : {
           title: 'Redemptions coming soon',
@@ -84,12 +89,17 @@ function configFor(kind: FlowKind): KindConfig {
 }
 
 export default function TransferCard({ kind }: TransferCardProps) {
-  const ui = configFor(kind)
+  const bridgeContextProvider = useMemo(
+    () => kind === 'deposit' ? createDepositBridgeContextProvider() : null,
+    [kind],
+  )
+  const ui = configFor(kind, bridgeContextProvider !== null)
   const sessionState = useSession()
   const sessionEstablished = isEstablished(sessionState)
   const { snapshot: balances } = useBalances(sessionState)
   const protocol = useProtocolState()
   const bridgeFee = useBridgeFee()
+  const submit = useTransferMutation({ bridgeContextProvider })
 
   // Deposit: fee_mint = USDC.s, intent_transfer pulls `amount + fee`
   // from the same ATA, so the schema's max must net out the fee. For
@@ -121,12 +131,6 @@ export default function TransferCard({ kind }: TransferCardProps) {
       void form.trigger('amount')
     }
   }, [maxAmountStr, ui.srcDecimals, form])
-
-  const bridgeContextProvider = useMemo(
-    () => kind === 'deposit' ? createDepositBridgeContextProvider() : null,
-    [kind],
-  )
-  const submit = useTransferMutation({ bridgeContextProvider })
 
   const amountInput = form.watch('amount')
   const parsed = parseAmount(amountInput, ui.srcDecimals, ui.srcSymbol)

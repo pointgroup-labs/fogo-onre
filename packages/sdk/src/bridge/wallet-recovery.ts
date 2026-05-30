@@ -1,6 +1,9 @@
 import type { Connection } from '@solana/web3.js'
 import { PublicKey } from '@solana/web3.js'
-import { INTENT_TRANSFER_PROGRAM_ID } from '../constants'
+import { INTENT_TRANSFER_PROGRAM_ID, ONRE_INTENT_PROGRAM_ID } from '../constants'
+
+/** Deposit may route through the OnRe fork or Fogo's program (switch-back). */
+const DEFAULT_INTENT_PROGRAM_IDS: PublicKey[] = [ONRE_INTENT_PROGRAM_ID, INTENT_TRANSFER_PROGRAM_ID]
 
 /**
  * Recover the user's Solana wallet from the FOGO source tx that emitted
@@ -20,6 +23,7 @@ import { INTENT_TRANSFER_PROGRAM_ID } from '../constants'
 export async function deriveUserWalletFromFogoTx(
   fogoConnection: Connection,
   fogoTx: string,
+  intentProgramIds: PublicKey[] = DEFAULT_INTENT_PROGRAM_IDS,
 ): Promise<PublicKey | null> {
   if (!fogoTx) {
     return null
@@ -36,7 +40,7 @@ export async function deriveUserWalletFromFogoTx(
   const keys = msg.getAccountKeys({ accountKeysFromLookups: tx.meta?.loadedAddresses })
   for (const ix of msg.compiledInstructions) {
     const programId = keys.get(ix.programIdIndex)
-    if (!programId?.equals(INTENT_TRANSFER_PROGRAM_ID)) {
+    if (!programId || !intentProgramIds.some(p => p.equals(programId))) {
       continue
     }
     // intent_transfer.bridge_ntt_tokens IDL: keys[3] = source ATA

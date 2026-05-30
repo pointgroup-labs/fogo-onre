@@ -1,5 +1,8 @@
 [workspace]
 members = ["programs/*"]
+# Vendored ID-only fork; own workspace root + upstream anchor 0.31.1
+# toolchain/profile. Must NOT inherit this repo's hardened profile.
+exclude = ["programs/intent-transfer"]
 resolver = "2"
 
 [workspace.package]

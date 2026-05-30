@@ -3,6 +3,13 @@ anchor_version = "1.0.2"
 solana_version = "3.1.8"
 package_manager = "pnpm"
 
+# Vendored ID-only fork; built separately under its own anchor 0.31.1
+# toolchain/profile (see programs/intent-transfer/Cargo.toml). Excluded
+# from `anchor build`'s programs/ scan, mirroring the Cargo workspace
+# exclude in the root Cargo.toml.
+[workspace]
+exclude = ["programs/intent-transfer"]
+
 [features]
 seeds = false
 resolution = true

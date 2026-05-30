@@ -4,7 +4,14 @@
  *   1. NTT `redeem`                  — reads a pre-validated TransceiverMessage
  *                                      and writes an InboxItem.
  *   2. NTT `release_inbound_unlock`  — transfers ONyc out of custody to the
- *                                      relayer's ATA.
+ *                                      per-user inbox ATA.
+ *   3. unlock_onyc sweeps the recorded amount into relayer custody.
+ *
+ * Redeem now routes through the OnRe `intent_transfer` fork, so unlock_onyc
+ * is a structural mirror of `claim_usdc`: the VTM `sender` is the intent
+ * setter PDA (pinned to the {OnRe, Fogo} allowlist), and attribution rides
+ * on the NTT `recipient_address` = per-user inbox PDA. `flow.fogo_sender`
+ * is the recovered `userWallet`, not the VTM sender.
  *
  * Strategy: we skip the guardian-signed VAA + transceiver `receive_message`
  * dance by injecting a `ValidatedTransceiverMessage` account directly (this
@@ -20,6 +27,7 @@ import {
   findInboxItemPda,
   findOutflightFlowPda,
   findTokenAuthorityPda,
+  findUserInboxAuthorityPda,
   FOGO_WORMHOLE_CHAIN_ID,
   NTT_ONYC_PROGRAM_ID,
   RelayerClient,
@@ -34,6 +42,7 @@ import {
   createMintWithAuthority,
   createProvider,
   createSvm,
+  expectError,
   findValidatedTransceiverMessagePda,
   loadAndPatchNttConfig,
   loadAndPatchNttInboxRateLimit,
@@ -43,6 +52,13 @@ import {
   setRegisteredTransceiver,
   setValidatedTransceiverMessage,
 } from './utils'
+
+const INTENT_TRANSFER_SETTER_SEED = Buffer.from('intent_transfer')
+const FOGO_INTENT_PROGRAM_ID = new PublicKey('Xfry4dW9m42ncAqm8LyEnyS5V6xu5DSJTMRQLiGkARD')
+const ONRE_INTENT_PROGRAM_ID = new PublicKey('inTFf5S7ZtYr8SkwGG85mjDwAyJwjqEPdH2p2nuyrL9')
+function intentSetterBytes(programId: PublicKey): Uint8Array {
+  return PublicKey.findProgramAddressSync([INTENT_TRANSFER_SETTER_SEED], programId)[0].toBytes()
+}
 
 describe('unlock_onyc e2e (NTT redeem + release_inbound_unlock, Locking mode)', () => {
   let svm: LiteSVM
@@ -57,6 +73,7 @@ describe('unlock_onyc e2e (NTT redeem + release_inbound_unlock, Locking mode)', 
   let peerPda: PublicKey
 
   const CUSTODY_BALANCE = 10_000_000n // 10 ONyc in custody
+  const onreSetter = intentSetterBytes(ONRE_INTENT_PROGRAM_ID)
 
   beforeEach(async () => {
     svm = createSvm()
@@ -83,7 +100,7 @@ describe('unlock_onyc e2e (NTT redeem + release_inbound_unlock, Locking mode)', 
       })
       .rpc()
 
-    // Relayer's ONyc ATA (created by `initialize`) — recipient of the release
+    // Sweep destination — relayer's ONyc ATA (created by `initialize`).
     onycAta = getAssociatedTokenAddressSync(onycMint.publicKey, relayerAuthorityPda, true)
 
     // Custody ATA owned by NTT token_authority — pre-fund it with ONyc so
@@ -123,42 +140,33 @@ describe('unlock_onyc e2e (NTT redeem + release_inbound_unlock, Locking mode)', 
     svm.airdrop(nttTokenAuthorityPda, BigInt(1e9))
   })
 
-  it('unlock_onyc releases ONyc from custody and records an outflight flow', async () => {
-    const amount = 1_000_000n // 1 ONyc
-    const fogoSender = new Uint8Array(32).fill(0x7F)
-
-    // Build the NTT message. Critical constraints enforced by `redeem`:
-    //   - source_ntt_manager == peer.address (read from the fixture)
-    //   - recipient_ntt_manager == NTT_ONYC_PROGRAM_ID
-    //   - to_chain == config.chain_id (Solana = 1)
-    //   - owner of ValidatedTransceiverMessage == transceiver.transceiver_address
-    //
-    // We also set `to = relayerAuthorityPda` so the released ONyc lands in
-    // the relayer's ATA (recipient ATA authority == inbox_item.recipient_address).
+  /**
+   * Inject a validated transceiver message + return the derived inbox-item
+   * PDA. `sender` is the VTM `NttManagerMessage.sender`; `recipient` is the
+   * per-user inbox PDA the released ONyc lands in.
+   */
+  function stageRedeemMessage(sender: Uint8Array, recipient: PublicKey, amount: bigint): {
+    inboxItemPda: PublicKey
+    validatedMsgPda: PublicKey
+  } {
     const peerAddress = readPeerAddress(svm, peerPda)
     const messageId = new Uint8Array(32)
     crypto.getRandomValues(messageId)
-    const sourceToken = new Uint8Array(32).fill(0x22)
-
     const message = {
       id: messageId,
-      sender: fogoSender,
+      sender,
       trimmedAmount: amount,
       trimmedDecimals: 6, // ONyc decimals — scaled back to 6 == amount exact
-      sourceToken,
+      sourceToken: new Uint8Array(32).fill(0x22),
       toChain: 1, // Solana
-      to: relayerAuthorityPda.toBytes(),
+      to: recipient.toBytes(),
     }
 
-    // Derive the validated transceiver message PDA — only the owner matters
-    // to `redeem` (not the address itself), but using the canonical PDA keeps
-    // the test close to how `receive_message` writes it on mainnet.
     const [validatedMsgPda] = findValidatedTransceiverMessagePda(
       FOGO_WORMHOLE_CHAIN_ID,
       messageId,
       NTT_ONYC_PROGRAM_ID,
     )
-
     setValidatedTransceiverMessage(svm, validatedMsgPda, NTT_ONYC_PROGRAM_ID, {
       fromChain: FOGO_WORMHOLE_CHAIN_ID,
       sourceNttManager: peerAddress,
@@ -166,17 +174,31 @@ describe('unlock_onyc e2e (NTT redeem + release_inbound_unlock, Locking mode)', 
       message,
     })
 
-    // Content-addressed inbox_item PDA
     const msgHash = computeInboxItemHash(FOGO_WORMHOLE_CHAIN_ID, message, keccak_256)
     const [inboxItemPda] = findInboxItemPda(msgHash, NTT_ONYC_PROGRAM_ID)
-
     // Ensure the registered_transceiver PDA exists for the redeem CPI
     setRegisteredTransceiver(svm, NTT_ONYC_PROGRAM_ID, 0, NTT_ONYC_PROGRAM_ID)
+    return { inboxItemPda, validatedMsgPda }
+  }
+
+  it('releases ONyc to the per-user inbox, sweeps to custody, binds userWallet', async () => {
+    const amount = 1_000_000n // 1 ONyc
+    const userWallet = Keypair.generate()
+    const [userInboxAuthority] = findUserInboxAuthorityPda(userWallet.publicKey, client.program.programId)
+    // Release lands in the per-user inbox ATA; the sweep moves it to custody.
+    createAta(svm, authority, onycMint.publicKey, userInboxAuthority)
+
+    const { inboxItemPda, validatedMsgPda } = stageRedeemMessage(
+      onreSetter,
+      userInboxAuthority,
+      amount,
+    )
 
     try {
       await client
         .unlockOnyc({
           payer: authority.publicKey,
+          userWallet: userWallet.publicKey,
           onycMint: onycMint.publicKey,
           nttInboxItem: inboxItemPda,
           nttTransceiverMessage: validatedMsgPda,
@@ -193,26 +215,79 @@ describe('unlock_onyc e2e (NTT redeem + release_inbound_unlock, Locking mode)', 
       throw e
     }
 
-    // Assert: outflight flow PDA exists with correct fogo_sender and net amount
+    // Outflight flow exists with fogo_sender = userWallet (NOT the setter)
+    // and the gross amount swept from NTT custody.
     const [outflightPda] = findOutflightFlowPda(inboxItemPda, client.program.programId)
     const flowAcct = svm.getAccount(outflightPda)
     expect(flowAcct).not.toBeNull()
     const flowData = new Uint8Array(flowAcct!.data)
     // Flow layout: disc(8) + fogo_sender(32) + status(1) + amount(8) + payer(32) + bump(1)
     const recordedFogoSender = flowData.slice(8, 40)
-    expect(Buffer.from(recordedFogoSender).equals(Buffer.from(fogoSender))).toBe(true)
+    expect(Buffer.from(recordedFogoSender).equals(userWallet.publicKey.toBuffer())).toBe(true)
     const status = flowData[40]
     expect(status).toBe(0) // FlowStatus.Claimed (variant 0 in declaration order)
     const recordedAmount = new DataView(flowData.buffer, flowData.byteOffset).getBigUint64(41, true)
-    // unlock_onyc is now a pure pass-through — the withdrawal fee is
-    // applied later (pre-swap) inside `swap_onyc_to_usdc`. Flow.amount
-    // here equals the gross amount released from NTT custody.
     expect(recordedAmount).toBe(amount)
 
-    // Assert: ONyc landed in relayer's ATA
+    // ONyc swept into relayer custody ATA.
     const relayerAtaAcct = svm.getAccount(onycAta)!
     const relayerBalance = new DataView(relayerAtaAcct.data.buffer, relayerAtaAcct.data.byteOffset)
       .getBigUint64(64, true)
     expect(relayerBalance).toBe(amount)
+  })
+
+  it('accepts the Fogo setter (allowlist member 1)', async () => {
+    const amount = 1_000_000n
+    const userWallet = Keypair.generate()
+    const [userInboxAuthority] = findUserInboxAuthorityPda(userWallet.publicKey, client.program.programId)
+    createAta(svm, authority, onycMint.publicKey, userInboxAuthority)
+
+    const { inboxItemPda, validatedMsgPda } = stageRedeemMessage(
+      intentSetterBytes(FOGO_INTENT_PROGRAM_ID),
+      userInboxAuthority,
+      amount,
+    )
+
+    await client
+      .unlockOnyc({
+        payer: authority.publicKey,
+        userWallet: userWallet.publicKey,
+        onycMint: onycMint.publicKey,
+        nttInboxItem: inboxItemPda,
+        nttTransceiverMessage: validatedMsgPda,
+        ntt: { transceiverAddress: NTT_ONYC_PROGRAM_ID },
+      })
+      .rpc()
+
+    const flow = await client.fetchOutflightFlow(inboxItemPda)
+    expect(flow.status).toEqual({ claimed: {} })
+    expect(BigInt(flow.amount.toString())).toBe(amount)
+  })
+
+  it('setter pin: rejects a non-setter VTM sender', async () => {
+    const amount = 1_000_000n
+    const userWallet = Keypair.generate()
+    const [userInboxAuthority] = findUserInboxAuthorityPda(userWallet.publicKey, client.program.programId)
+    createAta(svm, authority, onycMint.publicKey, userInboxAuthority)
+
+    // Stranger sender (a direct, non-intent NTT bridge to the same inbox).
+    const { inboxItemPda, validatedMsgPda } = stageRedeemMessage(
+      new Uint8Array(32).fill(0x7F),
+      userInboxAuthority,
+      amount,
+    )
+
+    await expectError(
+      async () =>
+        (await client.unlockOnyc({
+          payer: authority.publicKey,
+          userWallet: userWallet.publicKey,
+          onycMint: onycMint.publicKey,
+          nttInboxItem: inboxItemPda,
+          nttTransceiverMessage: validatedMsgPda,
+          ntt: { transceiverAddress: NTT_ONYC_PROGRAM_ID },
+        })).rpc(),
+      'UnexpectedFogoSender',
+    )
   })
 })

@@ -457,7 +457,7 @@ export function crankerCommands(): Command {
       // deposit, the `sender` is the **session keypair** (whatever
       // signed the bridge ix), NOT the user's main wallet — and the
       // per-user inbox PDA is seeded on the main wallet (see
-      // `useFogoNttTransfer.ts:269` deriving from
+      // `useTransferMutation.ts::buildIntentBridgeIxs` deriving from
       // `sessionState.walletPublicKey`).
       //
       // Auto-detection strategy when `--user-wallet` is unset: probe
@@ -1152,7 +1152,7 @@ export function crankerCommands(): Command {
       const flowStatus = flow ? describeStatus(flow.status) : '(none)'
       const claimDone = inboxItemInfo !== null
       const needClaim = !claimDone
-      const needSwap = !flow && !claimDone || (flow !== null && flowStatus === 'Claimed')
+      const needSwap = (!flow && !claimDone) || (flow !== null && flowStatus === 'Claimed')
       const needLock = (flow !== null && (flowStatus === 'Claimed' || flowStatus === 'Swapped'))
         || (!flow && !claimDone) // brand-new path: lock is needed but in a 2nd tx after claim+swap
 
@@ -1694,18 +1694,24 @@ export function crankerCommands(): Command {
     .description('Redeem ONyc burn VAA from FOGO + init outflight Flow (withdraw leg, step 1)')
     .requiredOption('--fogo-tx <signature>', 'FOGO tx signature that emitted the burn VAA')
     .option('--vaa <hex>', 'Override Wormholescan lookup with raw signed VAA bytes (hex)')
+    .option('--user-wallet <pubkey>', 'Override wallet attribution (default: auto-detect from FOGO tx)')
     .option('--ntt-program <pubkey>', `NTT ONyc manager program id (default: ${NTT_ONYC_PROGRAM_ID.toBase58()})`)
     .option('--wormholescan-url <url>', `Wormholescan REST base URL [default: ${DEFAULT_WORMHOLESCAN_URL}]`)
+    .option('--fogo-rpc <url>', `FOGO RPC URL for Sessions wallet recovery [env: FOGO_RPC_URL, default: ${FOGO_RPC_DEFAULT}]`)
     .option('--confirm', 'Actually broadcast the transaction (default: dry-run)')
     .action(async (opts: {
       fogoTx: string
       vaa?: string
+      userWallet?: string
       nttProgram?: string
       wormholescanUrl?: string
+      fogoRpc?: string
       confirm?: boolean
     }) => {
       const { connection, keypair, client } = useContext()
       const nttProgram = opts.nttProgram ? new PublicKey(opts.nttProgram) : NTT_ONYC_PROGRAM_ID
+      const fogoRpcUrl = opts.fogoRpc ?? process.env.FOGO_RPC_URL ?? FOGO_RPC_DEFAULT
+      const fogoConnection = new Connection(fogoRpcUrl, 'confirmed')
 
       const vaaBytes = await fetchVaaBytes({ fogoTx: opts.fogoTx, vaaHex: opts.vaa, wormholescanUrl: opts.wormholescanUrl })
       const resolved = resolveNttVaa({ vaaBytes, nttProgramId: nttProgram })
@@ -1717,6 +1723,34 @@ export function crankerCommands(): Command {
       }
       const cfg = await client.fetchConfig()
       const onycMint = cfg.onycMint as PublicKey
+
+      // Redeem routes through the OnRe intent fork, so the VTM sender is
+      // the setter PDA and attribution rides on the NTT recipient =
+      // per-user inbox PDA. Recover `userWallet` the same way `claim-usdc`
+      // does: probe [signer, VAA sender, FOGO source-ATA owner] for the
+      // one that derives the inbox-authority PDA the VAA targets.
+      let userWallet: PublicKey
+      let userWalletSource: UserWalletSource
+      if (opts.userWallet) {
+        userWallet = new PublicKey(opts.userWallet)
+        userWalletSource = 'flag'
+      } else {
+        const auto = await autoDetectUserWallet({
+          programId: client.program.programId,
+          signer: keypair.publicKey,
+          resolved,
+          fogoConnection,
+          fogoTx: opts.fogoTx,
+        })
+        if (auto) {
+          userWallet = auto.wallet
+          userWalletSource = auto.source
+        } else {
+          userWallet = resolved.senderOnSource
+          userWalletSource = 'sender-fallback'
+        }
+      }
+      const defaultedUserWallet = userWalletSource !== 'flag'
 
       // Pre-flight 2: outflight Flow must NOT exist.
       const existing = await client.fetchOutflightFlow(resolved.nttInboxItem).catch(() => null)
@@ -1737,12 +1771,37 @@ export function crankerCommands(): Command {
         )
       }
 
+      // Pre-flight 4: derived inbox-authority must equal the VAA recipient
+      // (else unlock_onyc trips UserInboxAuthorityMismatch mid-tx). The
+      // per-user inbox ATA is created idempotently — FOGO
+      // `bridge_ntt_tokens` usually pre-funds it, but the manual crank
+      // path can't assume the executor ran.
+      const [userInboxAuthority] = findUserInboxAuthorityPda(userWallet, client.program.programId)
+      const userInboxAta = getAssociatedTokenAddressSync(onycMint, userInboxAuthority, true)
+      if (!userInboxAuthority.equals(resolved.recipientOnSolana)) {
+        const hint = defaultedUserWallet
+          ? ` The CLI exhausted all three auto-detect probes (signer, VAA sender, FOGO source-ATA owner) and fell back to the VAA sender (${resolved.senderOnSource.toBase58()}); none derived a matching PDA.`
+          : ''
+        throw new Error(
+          `derived inbox-authority PDA (${userInboxAuthority.toBase58()}) does not match the VAA's recorded recipient (${resolved.recipientOnSolana.toBase58()}).${hint} Re-run with --user-wallet=<main_fogo_wallet> matching the wallet that initiated the redeem on FOGO.`,
+        )
+      }
+      const ensureUserInboxAtaIx = createAssociatedTokenAccountIdempotentInstruction(
+        keypair.publicKey,
+        userInboxAta,
+        userInboxAuthority,
+        onycMint,
+      )
+
       console.log(chalk.cyan('unlock-onyc plan'))
       console.log(chalk.dim(`  payer (signer):         ${keypair.publicKey.toBase58()}`))
+      console.log(chalk.dim(`  userWallet:             ${userWallet.toBase58()}${userWalletSource === 'flag' ? '' : chalk.dim(` (auto: ${userWalletSource})`)}`))
       console.log(chalk.dim(`  onycMint:               ${onycMint.toBase58()}`))
       console.log(chalk.dim(`  nttProgram:             ${nttProgram.toBase58()}`))
       console.log(chalk.dim(`  nttInboxItem:           ${resolved.nttInboxItem.toBase58()}`))
       console.log(chalk.dim(`  nttTransceiverMessage:  ${resolved.nttTransceiverMessage.toBase58()}`))
+      console.log(chalk.dim(`  userInboxAuthority:     ${userInboxAuthority.toBase58()}`))
+      console.log(chalk.dim(`  userInboxAta:           ${userInboxAta.toBase58()} (ensure-idempotent)`))
       console.log(chalk.dim(`  trimmedAmount:          ${resolved.manager.trimmedAmount} (decimals=${resolved.manager.trimmedDecimals})`))
       console.log(chalk.dim(`  fogoPeerPda:            ${fogoPeerPda.toBase58()} ✓`))
 
@@ -1757,11 +1816,13 @@ export function crankerCommands(): Command {
         client
           .unlockOnyc({
             payer: keypair.publicKey,
+            userWallet,
             onycMint,
             nttInboxItem: resolved.nttInboxItem,
             nttTransceiverMessage: resolved.nttTransceiverMessage,
             ntt: { transceiverAddress: nttProgram },
           })
+          .preInstructions([ensureUserInboxAtaIx])
           .rpc(),
       )
       console.log(chalk.green('unlock-onyc landed'))
@@ -1884,8 +1945,6 @@ export function crankerCommands(): Command {
       console.log(chalk.green('send-usdc-to-user landed'))
       console.log(chalk.dim(`  tx: ${sig}`))
     })
-
-  cranker
 
   return cranker
 }

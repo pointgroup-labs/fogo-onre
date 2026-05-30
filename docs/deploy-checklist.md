@@ -95,6 +95,25 @@ Treat this key with the **same handling as the upgrade authority**:
 Config authority address: ___________________________
 Same as upgrade authority? (Y/N):___________________________
 
+### 2c. Intent-fork upgrade authority
+
+The OnRe `intent_transfer` fork (`inTFf5S7ZtYr8Sk…nuyrL9`) carries an
+audit by source-identity to upstream (`scripts/verify-intent-fork.sh`
+proves the only diff is `declare_id!`). An upgradeable fork lets its
+holder replace that audited bytecode, voiding the carryover. Freeze it
+once **both** legs pass the §8 / deploy-mainnet.md §8 smoke test.
+
+- [ ] CI `intent-fork` job green on the deploy commit (source-diff gate —
+      `.github/workflows/ci.yml`). Reproducible-build hash recorded per
+      deploy-mainnet.md §3.1.
+- [ ] Fork upgrade authority frozen to the **same multisig as the
+      relayer** (§2) — or `--final`. Decided here to avoid a second
+      signer roster; either key alone is already total over its program.
+- [ ] **NEVER** leave the fork upgrade authority on a single hot/warm
+      key once both legs are live.
+
+Fork upgrade authority (post-freeze):___________________________
+
 ## 3. External security audit
 
 The CPI flow into Wormhole NTT (USDC.s + ONyc managers) and OnRe is the

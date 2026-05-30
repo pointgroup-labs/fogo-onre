@@ -521,6 +521,59 @@ describe('relayer', () => {
       }
     }
 
+    // Drives claim_usdc only far enough to hit the setter-allowlist check
+    // (handler's first guard, before any NTT CPI). Used by the
+    // non-allowlisted-sender rejection tests below.
+    async function claimUsdcWithSender(senderBytes: Uint8Array) {
+      const nttInboxItem = Keypair.generate()
+      const userWallet = Keypair.generate()
+      const [userInboxAuthority] = findUserInboxAuthorityPda(userWallet.publicKey, client.program.programId)
+      createAta(svm, authority, usdcMint.publicKey, userInboxAuthority)
+      createAta(svm, authority, usdcMint.publicKey, client.authorityPda)
+
+      const messageId = new Uint8Array(32)
+      crypto.getRandomValues(messageId)
+      const [validatedMsgPda] = findValidatedTransceiverMessagePda(
+        FOGO_WORMHOLE_CHAIN_ID,
+        messageId,
+        NTT_USDC_PROGRAM_ID,
+      )
+      setValidatedTransceiverMessage(
+        svm,
+        validatedMsgPda,
+        NTT_USDC_PROGRAM_ID,
+        makeTransceiverMessage(senderBytes, messageId),
+      )
+
+      return client
+        .claimUsdc({
+          payer: authority.publicKey,
+          userWallet: userWallet.publicKey,
+          usdcMint: usdcMint.publicKey,
+          nttInboxItem: nttInboxItem.publicKey,
+          nttTransceiverMessage: validatedMsgPda,
+          redeemAccountsLen: 1,
+        })
+        .remainingAccounts([
+          { pubkey: NTT_USDC_PROGRAM_ID, isSigner: false, isWritable: false },
+          { pubkey: client.authorityPda, isSigner: false, isWritable: false },
+        ])
+        .rpc()
+    }
+
+    it('claim_usdc rejects a non-allowlisted sender', async () => {
+      const stranger = Keypair.generate().publicKey
+      await expectError(() => claimUsdcWithSender(stranger.toBytes()), 'UnexpectedFogoSender')
+    })
+
+    it('claim_usdc rejects a direct NTT bridge (sender = user session authority)', async () => {
+      // A plain NTT transfer (no intent_transfer) surfaces the user's own
+      // session authority as the VAA sender — not a setter PDA. Must be
+      // rejected so only fee-bearing intent bridges can deposit here.
+      const userSessionAuthority = Keypair.generate().publicKey
+      await expectError(() => claimUsdcWithSender(userSessionAuthority.toBytes()), 'UnexpectedFogoSender')
+    })
+
     it('claim_usdc rejects replay when inflight Flow PDA already exists', async () => {
       const nttInboxItem = Keypair.generate()
       const userWallet = Keypair.generate()
@@ -936,6 +989,19 @@ describe('relayer', () => {
 
   describe('withdrawal flow', () => {
     const fogoSender = new Uint8Array(32).fill(0xCD)
+    // A real {OnRe, Fogo} setter PDA — passes the unlock_onyc allowlist
+    // pin so VTM-driven negatives can reach their intended check.
+    const setterSender = findIntentTransferSetterPda()[0].toBytes()
+
+    // Per-user inbox the release lands in. unlock_onyc resolves the ATA as
+    // an InterfaceAccount before the handler runs, so it must exist even
+    // for negatives that revert in the handler body.
+    function setupUserInbox(): { userWallet: PublicKey, userInboxAta: PublicKey } {
+      const userWallet = Keypair.generate().publicKey
+      const [userInboxAuthority] = findUserInboxAuthorityPda(userWallet, client.program.programId)
+      const userInboxAta = createAta(svm, authority, onycMint.publicKey, userInboxAuthority)
+      return { userWallet, userInboxAta }
+    }
 
     beforeEach(async () => {
       await client
@@ -971,6 +1037,7 @@ describe('relayer', () => {
 
     it('unlock_onyc rejects zero fogo_sender', async () => {
       const nttInboxItem = Keypair.generate()
+      const { userWallet } = setupUserInbox()
       const messageId = new Uint8Array(32)
       crypto.getRandomValues(messageId)
       const [validatedMsgPda] = findValidatedTransceiverMessagePda(
@@ -985,15 +1052,15 @@ describe('relayer', () => {
         makeTransceiverMessage(new Uint8Array(32), messageId),
       )
 
-      // The handler explicitly checks `fogo_sender != [0u8; 32]` after
-      // parsing the validated transceiver message. Asserting on the code
-      // proves we hit THIS check and not, say, the discriminator or
-      // length checks earlier in the same handler.
+      // `parse_fogo_sender_from_vtm` rejects the all-zero sender before the
+      // setter-allowlist pin, so a zero VTM sender surfaces ZeroFogoSender
+      // (not UnexpectedFogoSender).
       await expectError(
         () =>
           client
             .unlockOnyc({
               payer: authority.publicKey,
+              userWallet,
               onycMint: onycMint.publicKey,
               nttInboxItem: nttInboxItem.publicKey,
               nttTransceiverMessage: validatedMsgPda,
@@ -1010,6 +1077,7 @@ describe('relayer', () => {
 
     it('unlock_onyc rejects invalid account split (redeem_accounts_len=0)', async () => {
       const nttInboxItem = Keypair.generate()
+      const { userWallet } = setupUserInbox()
       const messageId = new Uint8Array(32)
       crypto.getRandomValues(messageId)
       const [validatedMsgPda] = findValidatedTransceiverMessagePda(
@@ -1021,7 +1089,7 @@ describe('relayer', () => {
         svm,
         validatedMsgPda,
         NTT_ONYC_PROGRAM_ID,
-        makeTransceiverMessage(fogoSender, messageId),
+        makeTransceiverMessage(setterSender, messageId),
       )
 
       // Handler validates redeem_accounts_len > 0 before splitting
@@ -1032,6 +1100,7 @@ describe('relayer', () => {
           client
             .unlockOnyc({
               payer: authority.publicKey,
+              userWallet,
               onycMint: onycMint.publicKey,
               nttInboxItem: nttInboxItem.publicKey,
               nttTransceiverMessage: validatedMsgPda,
@@ -1048,6 +1117,7 @@ describe('relayer', () => {
 
     it('unlock_onyc rejects double unlock (same ntt_inbox_item)', async () => {
       const nttInboxItem = Keypair.generate()
+      const { userWallet } = setupUserInbox()
       const [outflightPda, bump] = findOutflightFlowPda(nttInboxItem.publicKey, client.program.programId)
 
       // Inject an existing outflight flow to simulate prior unlock
@@ -1070,7 +1140,7 @@ describe('relayer', () => {
         svm,
         validatedMsgPda,
         NTT_ONYC_PROGRAM_ID,
-        makeTransceiverMessage(fogoSender, messageId),
+        makeTransceiverMessage(setterSender, messageId),
       )
 
       // init constraint on outflight_flow should fail (account already exists).
@@ -1081,6 +1151,7 @@ describe('relayer', () => {
           client
             .unlockOnyc({
               payer: authority.publicKey,
+              userWallet,
               onycMint: onycMint.publicKey,
               nttInboxItem: nttInboxItem.publicKey,
               nttTransceiverMessage: validatedMsgPda,
@@ -1127,6 +1198,7 @@ describe('relayer', () => {
 
     it('unlock_onyc rejects TransceiverMessageMismatch when redeem[3] differs from named ntt_transceiver_message', async () => {
       const nttInboxItem = Keypair.generate()
+      const { userWallet } = setupUserInbox()
       const messageId = new Uint8Array(32)
       crypto.getRandomValues(messageId)
       const [validatedMsgPda] = findValidatedTransceiverMessagePda(
@@ -1138,7 +1210,7 @@ describe('relayer', () => {
         svm,
         validatedMsgPda,
         NTT_ONYC_PROGRAM_ID,
-        makeTransceiverMessage(fogoSender, messageId),
+        makeTransceiverMessage(setterSender, messageId),
       )
 
       const [authorityPda] = findAuthorityPda(client.program.programId)
@@ -1150,6 +1222,7 @@ describe('relayer', () => {
           client
             .unlockOnyc({
               payer: authority.publicKey,
+              userWallet,
               onycMint: onycMint.publicKey,
               nttInboxItem: nttInboxItem.publicKey,
               nttTransceiverMessage: validatedMsgPda,
@@ -1168,6 +1241,7 @@ describe('relayer', () => {
 
     it('unlock_onyc rejects InboxItemMismatch when redeem[6] differs from named ntt_inbox_item', async () => {
       const nttInboxItem = Keypair.generate()
+      const { userWallet } = setupUserInbox()
       const messageId = new Uint8Array(32)
       crypto.getRandomValues(messageId)
       const [validatedMsgPda] = findValidatedTransceiverMessagePda(
@@ -1179,7 +1253,7 @@ describe('relayer', () => {
         svm,
         validatedMsgPda,
         NTT_ONYC_PROGRAM_ID,
-        makeTransceiverMessage(fogoSender, messageId),
+        makeTransceiverMessage(setterSender, messageId),
       )
 
       const [authorityPda] = findAuthorityPda(client.program.programId)
@@ -1191,6 +1265,7 @@ describe('relayer', () => {
           client
             .unlockOnyc({
               payer: authority.publicKey,
+              userWallet,
               onycMint: onycMint.publicKey,
               nttInboxItem: nttInboxItem.publicKey,
               nttTransceiverMessage: validatedMsgPda,
@@ -1207,8 +1282,9 @@ describe('relayer', () => {
       )
     })
 
-    it('unlock_onyc rejects RecipientAtaMismatch when release[3] differs from named onyc_ata', async () => {
+    it('unlock_onyc rejects RecipientAtaMismatch when release[3] differs from named user_inbox_ata', async () => {
       const nttInboxItem = Keypair.generate()
+      const { userWallet } = setupUserInbox()
       const messageId = new Uint8Array(32)
       crypto.getRandomValues(messageId)
       const [validatedMsgPda] = findValidatedTransceiverMessagePda(
@@ -1220,13 +1296,13 @@ describe('relayer', () => {
         svm,
         validatedMsgPda,
         NTT_ONYC_PROGRAM_ID,
-        makeTransceiverMessage(fogoSender, messageId),
+        makeTransceiverMessage(setterSender, messageId),
       )
 
       // The recipient ATA position-bind protects against an attacker
       // redirecting the NTT release to an attacker-owned ATA while the
-      // relayer's named `onyc_ata` (which feeds the post-CPI delta-amount
-      // calculation) reports a stale balance.
+      // relayer's named `user_inbox_ata` (which the sweep reads) reports a
+      // stale balance.
       const wrongAta = Keypair.generate().publicKey
 
       await expectError(
@@ -1234,6 +1310,7 @@ describe('relayer', () => {
           client
             .unlockOnyc({
               payer: authority.publicKey,
+              userWallet,
               onycMint: onycMint.publicKey,
               nttInboxItem: nttInboxItem.publicKey,
               nttTransceiverMessage: validatedMsgPda,

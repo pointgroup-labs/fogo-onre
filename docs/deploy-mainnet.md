@@ -191,6 +191,42 @@ pnpm lint                                # informational only — see deploy-che
 
 ---
 
+## 3.1. OnRe intent fork — audit-carryover gate
+
+`programs/intent-transfer/` is an **ID-only fork** of Fogo's audited
+`intent_transfer` (upstream tag `intent-transfer/v0.1.2`, commit
+`f372c48df8215f5db76d51e914a6d4e9dc31f69e`). The only source change vs
+upstream is the `declare_id!` line. The fork is workspace-excluded and
+builds under its own upstream-matching profile (anchor `0.31.1`,
+`overflow-checks`/`lto = "fat"`/`codegen-units = 1`, no `opt-level = z`).
+
+Before deploying the fork, run the gate from the repo root:
+
+```bash
+scripts/verify-intent-fork.sh
+```
+
+It asserts (a) the vendored `src/` differs from the pinned upstream
+commit by only `declare_id!`, then (b) runs `solana-verify build
+--library-name intent_transfer` and writes the deterministic
+`.so` hash to `target/deploy/intent_transfer.sha256`. Record that hash
+in the deploy log. Set `SKIP_REPRODUCIBLE_BUILD=1` to run only the
+source-diff check on hosts without Docker.
+
+CI runs half (a) of this gate on every PR (the `intent-fork` job in
+`.github/workflows/ci.yml`, with `SKIP_REPRODUCIBLE_BUILD=1`), so a
+source drift beyond `declare_id!` fails the build before merge. Half
+(b) — the reproducible-build hash — needs Docker and stays a deploy-time
+step you run here.
+
+> Known non-fatal diagnostic: the SBF linker reports a stack-offset
+> overage on `BridgeNttTokens::try_accounts` (~136 bytes). It originates
+> in the audited upstream source (anchor account-validation codegen),
+> not our change, and the `.so` links and runs. Cross-check it appears
+> identically against an upstream-only build.
+
+---
+
 ## 4. Configure the deploy environment
 
 Two ways to point at mainnet:
@@ -484,6 +520,115 @@ peer and custody accounts.
   doesn't need it to function.
 - Adding FOGO to the NTT CLI's chain registry if it isn't already
   known — coordinate with the Wormhole / FOGO teams.
+
+---
+
+### 7.2. OnRe intent fork — deploy, dual-mint config, sponsor
+
+The deposit leg routes `bridge_ntt_tokens` through the OnRe fork of
+Fogo's `intent_transfer` (`inTFf5S7ZtYr8SkwGG85mjDwAyJwjqEPdH2p2nuyrL9`,
+source-identical to upstream except `declare_id!`; see §3.1). The
+redeem leg routes through the **same** fork — the hard cutover dropped
+the legacy plain-NTT withdraw, so there is no `REDEEM_VIA_INTENT` flag
+to flip: redeem is unconditional in code and goes live the moment its
+ONyc fee/NTT config (step 3) is registered and the sponsor lane (step 4)
+is funded. The relayer pins this program's setter PDA as an allowlisted
+VAA originator, and the webapp targets it via `DEPOSIT_INTENT_PROGRAM_ID`.
+Until the fork is deployed and its per-mint config registered, neither
+leg can land on it.
+
+**Prerequisites.**
+
+- Fork program keypair `.keys/inTFf5S7ZtYr8SkwGG85mjDwAyJwjqEPdH2p2nuyrL9.json`
+  (user-custodied; do not regenerate — the pubkey is pinned in
+  `constants.rs`, the SDK, and the webapp).
+- The fork's BPF **upgrade authority** keypair — `register_ntt_config`
+  and `register_fee_config` are gated by `UpgradeAuthority` (the
+  program-data upgrade authority must sign).
+- Fee levels per mint (Open Q1): `bridge_transfer_fee` must cover gas
+  sponsorship + the executor relay baseFee. Decide before registering.
+
+**1. Build + deploy the fork.** It is excluded from `anchor build`
+(its own anchor 0.31.1 workspace), so build it standalone:
+
+```bash
+# Deterministic build (same path the audit-carryover gate uses, §3.1)
+cd programs/intent-transfer
+solana-verify build --library-name intent_transfer
+# → programs/intent-transfer/target/deploy/intent_transfer.so
+
+solana program deploy target/deploy/intent_transfer.so \
+  --program-id <REPO>/.keys/inTFf5S7ZtYr8SkwGG85mjDwAyJwjqEPdH2p2nuyrL9.json \
+  --upgrade-authority <FORK_UPGRADE_AUTH>.json \
+  --url <MAINNET_RPC>
+# Verify it landed at the pinned address:
+solana program show inTFf5S7ZtYr8SkwGG85mjDwAyJwjqEPdH2p2nuyrL9 --url <MAINNET_RPC>
+```
+
+**2. Initialize the setter PDA** (`["intent_transfer"]`) per the fork's
+setup, exactly as Fogo initializes upstream. The relayer and webapp
+both derive this PDA deterministically; it must exist before the first
+`bridge_ntt_tokens`.
+
+**3. Register NTT + fee config for BOTH mints.** `register_ntt_config`
+writes `ExpectedNttConfig[mint].manager` (PDA `["expected_ntt_config",
+mint]`); `register_fee_config` writes `FeeConfig[mint]` =
+`{ intrachain_transfer_fee, bridge_transfer_fee }` (PDA `["fee_config",
+mint]`). Both are signed by the fork upgrade authority. Run for:
+
+| Mint   | Address                                       | NTT manager (`ntt_manager` arg)               |
+| ------ | --------------------------------------------- | --------------------------------------------- |
+| USDC.s | `USDC_S_MINT` (`constants.rs`)                | `nttu74CdAmsErx5daJVCQNoDZujswFrskMzonoZSdGk` |
+| ONyc   | `oNyCm1QsAatj3ckaEwZjtAPWvstPn3Zm5MAYPtkjEfa` | `nttpna5vXW7BN2Aa4AfTbkCncJWTEoBsnWvjS87Xgsd` |
+
+(ONyc config is for the Phase-2 redeem leg; register it now to avoid a
+second admin pass.)
+
+**4. Stand up OUR paymaster lane + fund the sponsor.** The webapp uses
+`FOGO_BRIDGE_PAYMASTER_DOMAIN = APP_DOMAIN` (`https://app.ignitionfi.xyz`)
+and `FOGO_BRIDGE_VARIATION = 'OnReBridge'`. Configure the paymaster to
+sponsor `bridge_ntt_tokens` shaped for the fork under `OnReBridge`, then
+fund the autoassigned sponsor:
+
+```bash
+# Resolve our domain's sponsor (the pubkey the webapp pins per deposit)
+curl 'https://fogo-mainnet.dourolabs-paymaster.xyz/api/sponsor_pubkey?domain=https%3A%2F%2Fapp.ignitionfi.xyz&index=autoassign'
+# Fund that pubkey with FOGO native gas; it also owns the fee_destination
+# ATA, so the deposit bridge fee accrues to us.
+```
+
+**5. Freeze the fork's upgrade authority (Open Q4).** While the fork is
+upgradeable, its holder can replace the audited bytecode and void the
+carryover the §3.1 gate proves. Once **both** legs have passed the §8
+smoke test, freeze it — and use the **same multisig as the relayer's
+upgrade authority** (deploy-checklist.md §2). There is no operational
+reason to split them: either key alone is already total over its
+program, so a second roster only widens the signer surface.
+
+```bash
+solana program set-upgrade-authority \
+  inTFf5S7ZtYr8SkwGG85mjDwAyJwjqEPdH2p2nuyrL9 \
+  --new-upgrade-authority <RELAYER_UPGRADE_MULTISIG> \
+  --url <MAINNET_RPC>
+# Or `--final` for an immutable fork (no future patch path; matches a
+# `--final` relayer per deploy-checklist.md §2 option 1).
+```
+
+Do **not** freeze before §8 passes — keep a patch path open while the
+legs are still being validated.
+
+**6. Record the results** (fill after execution):
+
+| Item                          | Value / tx sig |
+| ----------------------------- | -------------- |
+| Fork deploy sig               | `…`            |
+| Setter PDA init sig           | `…`            |
+| Fork upgrade-authority freeze | `…`            |
+| `register_ntt_config` USDC.s  | `…`            |
+| `register_fee_config` USDC.s  | `…`            |
+| `register_ntt_config` ONyc    | `…`            |
+| `register_fee_config` ONyc    | `…`            |
+| `OnReBridge` sponsor pubkey   | `…`            |
 
 ---
 

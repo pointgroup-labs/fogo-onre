@@ -53,6 +53,12 @@ export function createMetrics(opts: MetricsOptions) {
     labelNames: ['reason'] as const,
     registers: [registry],
   })
+  const intentReplayObserved = new Counter({
+    name: 'cranker_intent_replay_observed_total',
+    help: 'Inbound VAAs whose NTT sender is the dormant intent program\'s setter PDA — a cross-program replay signal (still on-chain-accepted via the {OnRe,Fogo} allowlist, so this is observational only). Any nonzero value warrants investigation.',
+    labelNames: ['leg'] as const,
+    registers: [registry],
+  })
   const bridgeRedeemed = new Counter({
     name: 'cranker_bridge_redeemed_total',
     help: 'Outcome of bridge VAA redeem attempts (decoupled from relayer Flow advances)',
@@ -122,6 +128,7 @@ export function createMetrics(opts: MetricsOptions) {
     rpcErrors,
     flowAdvance,
     flowSkipped,
+    intentReplayObserved,
     bridgeRedeemed,
     bridgeScanIterations,
     solBalance,

@@ -61,6 +61,13 @@ export const USER_INBOX_SEED = Buffer.from('user_inbox')
  */
 export const INTENT_TRANSFER_PROGRAM_ID = new PublicKey('Xfry4dW9m42ncAqm8LyEnyS5V6xu5DSJTMRQLiGkARD')
 
+/**
+ * OnRe fork of Fogo's `intent_transfer` (source-identical, `declare_id!`
+ * only). Deposit + redeem route here once activated; the relayer pins the
+ * matching setter PDA. Keep `INTENT_TRANSFER_PROGRAM_ID` for switch-back.
+ */
+export const ONRE_INTENT_PROGRAM_ID = new PublicKey('inTFf5S7ZtYr8SkwGG85mjDwAyJwjqEPdH2p2nuyrL9')
+
 /** Singleton setter-PDA seed inside `intent_transfer`. */
 export const INTENT_TRANSFER_SETTER_SEED = Buffer.from('intent_transfer')
 

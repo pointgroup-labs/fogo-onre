@@ -80,6 +80,12 @@ describe('deposit flow e2e (claim_usdc → swap_usdc_to_onyc)', () => {
   // therefore set `sender` to that PDA's bytes, not an arbitrary
   // attribution value — `flow.fogo_sender` comes from `userWallet`.
   const fogoSender = findIntentTransferSetterPda()[0].toBytes()
+  // OnRe fork of intent_transfer (same source, declare_id! only). Its
+  // setter PDA is the second member of the relayer's permanent allowlist.
+  const ONRE_INTENT_PROGRAM_ID = new PublicKey('inTFf5S7ZtYr8SkwGG85mjDwAyJwjqEPdH2p2nuyrL9')
+  const onreSetter = PublicKey.findProgramAddressSync(
+    [Buffer.from('intent_transfer')], ONRE_INTENT_PROGRAM_ID,
+  )[0].toBytes()
   const depositAmount = 500_000n // 0.5 USDC gross
   // ONyc the OnRe vault holds (must be enough for the swap's output)
   const VAULT_ONYC_BALANCE = 10_000_000n
@@ -290,5 +296,53 @@ describe('deposit flow e2e (claim_usdc → swap_usdc_to_onyc)', () => {
     // The Flow PDA still exists at status=Swapped (closed only by leg 4).
     const [inflightPda] = findInflightFlowPda(inboxItemPda, client.program.programId)
     expect(svm.getAccount(inflightPda)).not.toBeNull()
+  })
+
+  it('claim_usdc accepts the OnRe fork setter (allowlist member 2)', async () => {
+    const userWallet = Keypair.generate()
+    const [userInboxAuthority] = findUserInboxAuthorityPda(userWallet.publicKey, client.program.programId)
+    createAta(svm, authority, usdcMint.publicKey, userInboxAuthority)
+    createAta(svm, authority, usdcMint.publicKey, relayerAuthorityPda)
+
+    const peerAddress = readPeerAddress(svm, peerPda)
+    const messageId = new Uint8Array(32)
+    crypto.getRandomValues(messageId)
+    const message = {
+      id: messageId,
+      sender: onreSetter,
+      trimmedAmount: depositAmount,
+      trimmedDecimals: 6,
+      sourceToken: new Uint8Array(32).fill(0x33),
+      toChain: 1,
+      to: userInboxAuthority.toBytes(),
+    }
+
+    const [validatedMsgPda] = findValidatedTransceiverMessagePda(
+      FOGO_WORMHOLE_CHAIN_ID, messageId, NTT_USDC_PROGRAM_ID,
+    )
+    setValidatedTransceiverMessage(svm, validatedMsgPda, NTT_USDC_PROGRAM_ID, {
+      fromChain: FOGO_WORMHOLE_CHAIN_ID,
+      sourceNttManager: peerAddress,
+      recipientNttManager: NTT_USDC_PROGRAM_ID.toBytes(),
+      message,
+    })
+
+    const msgHash = computeInboxItemHash(FOGO_WORMHOLE_CHAIN_ID, message, keccak_256)
+    const [inboxItemPda] = findInboxItemPda(msgHash, NTT_USDC_PROGRAM_ID)
+
+    await client
+      .claimUsdc({
+        payer: authority.publicKey,
+        userWallet: userWallet.publicKey,
+        usdcMint: usdcMint.publicKey,
+        nttInboxItem: inboxItemPda,
+        nttTransceiverMessage: validatedMsgPda,
+        ntt: { transceiverAddress: NTT_USDC_PROGRAM_ID },
+      })
+      .rpc()
+
+    const flow = await client.fetchInflightFlow(inboxItemPda)
+    expect(flow.status).toEqual({ claimed: {} })
+    expect(BigInt(flow.amount.toString())).toEqual(depositAmount)
   })
 })

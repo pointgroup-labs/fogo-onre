@@ -4,9 +4,8 @@ use anchor_spl::token_interface::{
 };
 
 use crate::constants::{
-    CONFIG_SEED, FLOW_INBOUND_SEED, FOGO_WORMHOLE_CHAIN_ID, INTENT_TRANSFER_PROGRAM_ID,
-    INTENT_TRANSFER_SETTER_SEED, NTT_REDEEM_IX, NTT_RELEASE_INBOUND_UNLOCK_IX, NTT_USDC_PROGRAM_ID,
-    RELAYER_SEED, USER_INBOX_SEED,
+    allowed_intent_setters, CONFIG_SEED, FLOW_INBOUND_SEED, FOGO_WORMHOLE_CHAIN_ID, NTT_REDEEM_IX,
+    NTT_RELEASE_INBOUND_UNLOCK_IX, NTT_USDC_PROGRAM_ID, RELAYER_SEED, USER_INBOX_SEED,
 };
 use crate::cpi::invoke_relayer_signed;
 use crate::error::RelayerError;
@@ -84,12 +83,12 @@ pub fn handler<'info>(
 ) -> Result<()> {
     let fogo_sender_raw = parse_fogo_sender_from_vtm(&ctx.accounts.ntt_transceiver_message)?;
 
-    // Pin VAA's NTT sender to intent_transfer's singleton setter PDA.
-    // Anything else is a non-intent path and must not deposit here.
-    let (expected_setter, _) =
-        Pubkey::find_program_address(&[INTENT_TRANSFER_SETTER_SEED], &INTENT_TRANSFER_PROGRAM_ID);
+    // Pin VAA's NTT sender to the permanent {OnRe, Fogo} intent setter
+    // allowlist. Any other sender is a non-intent path and must not
+    // deposit here. Keeping Fogo's setter preserves deposit switch-back.
+    let allowed = allowed_intent_setters();
     require!(
-        fogo_sender_raw == expected_setter.to_bytes(),
+        allowed.iter().any(|s| s.to_bytes() == fogo_sender_raw),
         RelayerError::UnexpectedFogoSender
     );
 

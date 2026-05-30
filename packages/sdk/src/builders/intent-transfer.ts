@@ -8,7 +8,6 @@ import {
   SYSVAR_RENT_PUBKEY,
   TransactionInstruction,
 } from '@solana/web3.js'
-import { INTENT_TRANSFER_PROGRAM_ID } from '../constants'
 import { readonly, signerWritable, writable } from '../utils/accountMeta'
 
 /**
@@ -154,8 +153,12 @@ export interface NttBridgeSubAccounts {
 }
 
 export interface BuildBridgeNttIxParams {
-  /** Defaults to `INTENT_TRANSFER_PROGRAM_ID`. */
-  intentTransferProgramId?: PublicKey
+  /**
+   * Which `intent_transfer` program to target. Required and explicit —
+   * there is no default, so a caller can never silently route to the
+   * dormant Fogo program. Deposit/redeem pass `ONRE_INTENT_PROGRAM_ID`.
+   */
+  intentTransferProgramId: PublicKey
 
   // Common accounts
   fromChainId: PublicKey
@@ -195,7 +198,7 @@ export function buildBridgeNttTokensIx(
       `signedQuoteBytes must be exactly 165 bytes, got ${params.signedQuoteBytes.length}`,
     )
   }
-  const programId = params.intentTransferProgramId ?? INTENT_TRANSFER_PROGRAM_ID
+  const programId = params.intentTransferProgramId
 
   const PUBKEY_NULL = SystemProgram.programId // sentinel for `Option<None>` Anchor accounts
 
