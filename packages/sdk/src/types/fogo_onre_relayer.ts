@@ -138,13 +138,13 @@ export type FogoOnreRelayer = {
           }
         },
         {
-          "name": "usdcMint",
+          "name": "baseMint",
           "relations": [
             "relayerConfig"
           ]
         },
         {
-          "name": "usdcAta",
+          "name": "baseAta",
           "docs": [
             "Sweep destination — long-lived relayer-authority USDC ATA."
           ],
@@ -161,7 +161,7 @@ export type FogoOnreRelayer = {
               },
               {
                 "kind": "account",
-                "path": "usdcMint"
+                "path": "baseMint"
               }
             ],
             "program": {
@@ -258,7 +258,7 @@ export type FogoOnreRelayer = {
               },
               {
                 "kind": "account",
-                "path": "usdcMint"
+                "path": "baseMint"
               }
             ],
             "program": {
@@ -430,13 +430,13 @@ export type FogoOnreRelayer = {
           }
         },
         {
-          "name": "onycMint",
+          "name": "assetMint",
           "relations": [
             "relayerConfig"
           ]
         },
         {
-          "name": "onycAta",
+          "name": "assetAta",
           "pda": {
             "seeds": [
               {
@@ -449,7 +449,7 @@ export type FogoOnreRelayer = {
               },
               {
                 "kind": "account",
-                "path": "onycMint"
+                "path": "assetMint"
               }
             ],
             "program": {
@@ -597,13 +597,13 @@ export type FogoOnreRelayer = {
           }
         },
         {
-          "name": "usdcMint"
+          "name": "baseMint"
         },
         {
-          "name": "onycMint"
+          "name": "assetMint"
         },
         {
-          "name": "usdcAta",
+          "name": "baseAta",
           "writable": true,
           "pda": {
             "seeds": [
@@ -617,7 +617,7 @@ export type FogoOnreRelayer = {
               },
               {
                 "kind": "account",
-                "path": "usdcMint"
+                "path": "baseMint"
               }
             ],
             "program": {
@@ -660,7 +660,7 @@ export type FogoOnreRelayer = {
           }
         },
         {
-          "name": "onycAta",
+          "name": "assetAta",
           "writable": true,
           "pda": {
             "seeds": [
@@ -674,7 +674,7 @@ export type FogoOnreRelayer = {
               },
               {
                 "kind": "account",
-                "path": "onycMint"
+                "path": "assetMint"
               }
             ],
             "program": {
@@ -815,13 +815,13 @@ export type FogoOnreRelayer = {
           }
         },
         {
-          "name": "onycMint",
+          "name": "assetMint",
           "relations": [
             "relayerConfig"
           ]
         },
         {
-          "name": "onycAta",
+          "name": "assetAta",
           "writable": true,
           "pda": {
             "seeds": [
@@ -835,7 +835,7 @@ export type FogoOnreRelayer = {
               },
               {
                 "kind": "account",
-                "path": "onycMint"
+                "path": "assetMint"
               }
             ],
             "program": {
@@ -924,7 +924,7 @@ export type FogoOnreRelayer = {
       "name": "sendUsdcToUser",
       "docs": [
         "Lock USDC via NTT and atomically emit the outbound VAA back to",
-        "`flow.fogo_sender`. `transfer_lock_account_count` splits",
+        "`flow.recipient`. `transfer_lock_account_count` splits",
         "`remaining_accounts` between `transfer_lock` and",
         "`release_wormhole_outbound` (mirrors `lock_onyc`)."
       ],
@@ -990,13 +990,13 @@ export type FogoOnreRelayer = {
           }
         },
         {
-          "name": "usdcMint",
+          "name": "baseMint",
           "relations": [
             "relayerConfig"
           ]
         },
         {
-          "name": "usdcAta",
+          "name": "baseAta",
           "writable": true,
           "pda": {
             "seeds": [
@@ -1010,7 +1010,7 @@ export type FogoOnreRelayer = {
               },
               {
                 "kind": "account",
-                "path": "usdcMint"
+                "path": "baseMint"
               }
             ],
             "program": {
@@ -1169,19 +1169,19 @@ export type FogoOnreRelayer = {
           }
         },
         {
-          "name": "onycMint",
+          "name": "assetMint",
           "relations": [
             "relayerConfig"
           ]
         },
         {
-          "name": "usdcMint",
+          "name": "baseMint",
           "relations": [
             "relayerConfig"
           ]
         },
         {
-          "name": "onycAta",
+          "name": "assetAta",
           "writable": true,
           "pda": {
             "seeds": [
@@ -1195,7 +1195,7 @@ export type FogoOnreRelayer = {
               },
               {
                 "kind": "account",
-                "path": "onycMint"
+                "path": "assetMint"
               }
             ],
             "program": {
@@ -1238,7 +1238,7 @@ export type FogoOnreRelayer = {
           }
         },
         {
-          "name": "usdcAta",
+          "name": "baseAta",
           "writable": true,
           "pda": {
             "seeds": [
@@ -1252,7 +1252,7 @@ export type FogoOnreRelayer = {
               },
               {
                 "kind": "account",
-                "path": "usdcMint"
+                "path": "baseMint"
               }
             ],
             "program": {
@@ -1426,19 +1426,19 @@ export type FogoOnreRelayer = {
           }
         },
         {
-          "name": "usdcMint",
+          "name": "baseMint",
           "relations": [
             "relayerConfig"
           ]
         },
         {
-          "name": "onycMint",
+          "name": "assetMint",
           "relations": [
             "relayerConfig"
           ]
         },
         {
-          "name": "usdcAta",
+          "name": "baseAta",
           "writable": true,
           "pda": {
             "seeds": [
@@ -1452,7 +1452,7 @@ export type FogoOnreRelayer = {
               },
               {
                 "kind": "account",
-                "path": "usdcMint"
+                "path": "baseMint"
               }
             ],
             "program": {
@@ -1495,7 +1495,7 @@ export type FogoOnreRelayer = {
           }
         },
         {
-          "name": "onycAta",
+          "name": "assetAta",
           "writable": true,
           "pda": {
             "seeds": [
@@ -1509,7 +1509,7 @@ export type FogoOnreRelayer = {
               },
               {
                 "kind": "account",
-                "path": "onycMint"
+                "path": "assetMint"
               }
             ],
             "program": {
@@ -1667,13 +1667,13 @@ export type FogoOnreRelayer = {
           }
         },
         {
-          "name": "onycMint",
+          "name": "assetMint",
           "relations": [
             "relayerConfig"
           ]
         },
         {
-          "name": "onycAta",
+          "name": "assetAta",
           "docs": [
             "Sweep destination — long-lived relayer-authority ONyc ATA."
           ],
@@ -1690,7 +1690,7 @@ export type FogoOnreRelayer = {
               },
               {
                 "kind": "account",
-                "path": "onycMint"
+                "path": "assetMint"
               }
             ],
             "program": {
@@ -1787,7 +1787,7 @@ export type FogoOnreRelayer = {
               },
               {
                 "kind": "account",
-                "path": "onycMint"
+                "path": "assetMint"
               }
             ],
             "program": {
@@ -1917,81 +1917,42 @@ export type FogoOnreRelayer = {
   ],
   "events": [
     {
-      "name": "onycLocked",
+      "name": "received",
       "discriminator": [
-        204,
-        229,
-        7,
-        145,
-        121,
-        187,
-        201,
-        215
+        64,
+        93,
+        61,
+        227,
+        221,
+        171,
+        20,
+        177
       ]
     },
     {
-      "name": "onycSwapped",
+      "name": "sent",
       "discriminator": [
-        220,
-        205,
-        135,
-        206,
-        94,
-        131,
-        34,
-        57
-      ]
-    },
-    {
-      "name": "onycSwappedToUsdc",
-      "discriminator": [
-        244,
-        135,
-        210,
-        3,
-        159,
-        210,
-        101,
-        216
-      ]
-    },
-    {
-      "name": "onycUnlocked",
-      "discriminator": [
-        66,
-        7,
-        6,
-        253,
-        214,
+        230,
+        90,
+        111,
+        254,
+        186,
         174,
-        42,
-        160
+        45,
+        74
       ]
     },
     {
-      "name": "usdcClaimed",
+      "name": "swapped",
       "discriminator": [
-        213,
-        24,
-        255,
-        203,
-        163,
-        162,
-        154,
-        137
-      ]
-    },
-    {
-      "name": "usdcSentToUser",
-      "discriminator": [
-        175,
-        37,
-        177,
-        185,
-        231,
-        238,
-        242,
-        73
+        217,
+        52,
+        52,
+        83,
+        147,
+        135,
+        96,
+        109
       ]
     }
   ],
@@ -2189,6 +2150,20 @@ export type FogoOnreRelayer = {
   ],
   "types": [
     {
+      "name": "direction",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "deposit"
+          },
+          {
+            "name": "withdraw"
+          }
+        ]
+      }
+    },
+    {
       "name": "flow",
       "docs": [
         "One-shot receipt binding an inbound bridge message to a FOGO wallet.",
@@ -2199,7 +2174,7 @@ export type FogoOnreRelayer = {
         "kind": "struct",
         "fields": [
           {
-            "name": "fogoSender",
+            "name": "recipient",
             "docs": [
               "Originator on FOGO; outbound recipient on the return leg."
             ],
@@ -2239,153 +2214,10 @@ export type FogoOnreRelayer = {
         "kind": "enum",
         "variants": [
           {
-            "name": "claimed"
+            "name": "received"
           },
           {
             "name": "swapped"
-          }
-        ]
-      }
-    },
-    {
-      "name": "onycLocked",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "flow",
-            "type": "pubkey"
-          },
-          {
-            "name": "nttInboxItem",
-            "type": "pubkey"
-          },
-          {
-            "name": "fogoSender",
-            "type": {
-              "array": [
-                "u8",
-                32
-              ]
-            }
-          },
-          {
-            "name": "amount",
-            "type": "u64"
-          }
-        ]
-      }
-    },
-    {
-      "name": "onycSwapped",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "flow",
-            "type": "pubkey"
-          },
-          {
-            "name": "grossAmount",
-            "type": "u64"
-          },
-          {
-            "name": "feeAmount",
-            "type": "u64"
-          },
-          {
-            "name": "netAmount",
-            "type": "u64"
-          }
-        ]
-      }
-    },
-    {
-      "name": "onycSwappedToUsdc",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "flow",
-            "type": "pubkey"
-          },
-          {
-            "name": "grossOnyc",
-            "docs": [
-              "Pre-fee ONyc unlocked by `unlock_onyc` (== `flow.amount` at entry)."
-            ],
-            "type": "u64"
-          },
-          {
-            "name": "feeOnyc",
-            "docs": [
-              "Withdraw fee in ONyc, transferred to `fee_vault`."
-            ],
-            "type": "u64"
-          },
-          {
-            "name": "netOnyc",
-            "docs": [
-              "Post-fee ONyc spent in the swap (== gross_onyc - fee_onyc)."
-            ],
-            "type": "u64"
-          },
-          {
-            "name": "onycConsumed",
-            "docs": [
-              "Actual ONyc consumed by the swap; asserted == net_onyc on-chain."
-            ],
-            "type": "u64"
-          },
-          {
-            "name": "usdcReceived",
-            "docs": [
-              "USDC delta on the relayer-authority USDC ATA; asserted >= nav_floor."
-            ],
-            "type": "u64"
-          },
-          {
-            "name": "navFloor",
-            "docs": [
-              "NAV-anchored slippage floor the swap had to clear."
-            ],
-            "type": "u64"
-          },
-          {
-            "name": "swapProgram",
-            "docs": [
-              "Router program ID — operator-chosen, surfaced for off-chain audit."
-            ],
-            "type": "pubkey"
-          }
-        ]
-      }
-    },
-    {
-      "name": "onycUnlocked",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "flow",
-            "type": "pubkey"
-          },
-          {
-            "name": "nttInboxItem",
-            "type": "pubkey"
-          },
-          {
-            "name": "fogoSender",
-            "type": {
-              "array": [
-                "u8",
-                32
-              ]
-            }
-          },
-          {
-            "name": "amount",
-            "type": "u64"
           }
         ]
       }
@@ -2418,6 +2250,43 @@ export type FogoOnreRelayer = {
       }
     },
     {
+      "name": "received",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "flow",
+            "type": "pubkey"
+          },
+          {
+            "name": "nttInboxItem",
+            "type": "pubkey"
+          },
+          {
+            "name": "recipient",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "direction",
+            "type": {
+              "defined": {
+                "name": "direction"
+              }
+            }
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
       "name": "relayerConfig",
       "docs": [
         "`authority` gates governance only; flow instructions are permissionless.",
@@ -2432,11 +2301,11 @@ export type FogoOnreRelayer = {
         "kind": "struct",
         "fields": [
           {
-            "name": "usdcMint",
+            "name": "baseMint",
             "type": "pubkey"
           },
           {
-            "name": "onycMint",
+            "name": "assetMint",
             "type": "pubkey"
           },
           {
@@ -2456,7 +2325,7 @@ export type FogoOnreRelayer = {
             "type": "u16"
           },
           {
-            "name": "slippageBps",
+            "name": "maxSlippageBps",
             "docs": [
               "Authority-tunable NAV slippage tolerance applied on both swap legs.",
               "Hard-capped at `MAX_SLIPPAGE_BPS` by `validate`."
@@ -2510,7 +2379,7 @@ export type FogoOnreRelayer = {
       }
     },
     {
-      "name": "usdcClaimed",
+      "name": "sent",
       "type": {
         "kind": "struct",
         "fields": [
@@ -2523,12 +2392,20 @@ export type FogoOnreRelayer = {
             "type": "pubkey"
           },
           {
-            "name": "fogoSender",
+            "name": "recipient",
             "type": {
               "array": [
                 "u8",
                 32
               ]
+            }
+          },
+          {
+            "name": "direction",
+            "type": {
+              "defined": {
+                "name": "direction"
+              }
             }
           },
           {
@@ -2539,7 +2416,7 @@ export type FogoOnreRelayer = {
       }
     },
     {
-      "name": "usdcSentToUser",
+      "name": "swapped",
       "type": {
         "kind": "struct",
         "fields": [
@@ -2548,21 +2425,32 @@ export type FogoOnreRelayer = {
             "type": "pubkey"
           },
           {
-            "name": "nttInboxItem",
-            "type": "pubkey"
-          },
-          {
-            "name": "fogoSender",
+            "name": "direction",
             "type": {
-              "array": [
-                "u8",
-                32
-              ]
+              "defined": {
+                "name": "direction"
+              }
             }
           },
           {
-            "name": "amount",
+            "name": "grossIn",
             "type": "u64"
+          },
+          {
+            "name": "fee",
+            "type": "u64"
+          },
+          {
+            "name": "netOut",
+            "type": "u64"
+          },
+          {
+            "name": "floor",
+            "type": "u64"
+          },
+          {
+            "name": "swapProgram",
+            "type": "pubkey"
           }
         ]
       }

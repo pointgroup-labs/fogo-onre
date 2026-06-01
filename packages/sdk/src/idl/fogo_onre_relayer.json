@@ -132,13 +132,13 @@
           }
         },
         {
-          "name": "usdc_mint",
+          "name": "base_mint",
           "relations": [
             "relayer_config"
           ]
         },
         {
-          "name": "usdc_ata",
+          "name": "base_ata",
           "docs": [
             "Sweep destination — long-lived relayer-authority USDC ATA."
           ],
@@ -155,7 +155,7 @@
               },
               {
                 "kind": "account",
-                "path": "usdc_mint"
+                "path": "base_mint"
               }
             ],
             "program": {
@@ -252,7 +252,7 @@
               },
               {
                 "kind": "account",
-                "path": "usdc_mint"
+                "path": "base_mint"
               }
             ],
             "program": {
@@ -424,13 +424,13 @@
           }
         },
         {
-          "name": "onyc_mint",
+          "name": "asset_mint",
           "relations": [
             "relayer_config"
           ]
         },
         {
-          "name": "onyc_ata",
+          "name": "asset_ata",
           "pda": {
             "seeds": [
               {
@@ -443,7 +443,7 @@
               },
               {
                 "kind": "account",
-                "path": "onyc_mint"
+                "path": "asset_mint"
               }
             ],
             "program": {
@@ -591,13 +591,13 @@
           }
         },
         {
-          "name": "usdc_mint"
+          "name": "base_mint"
         },
         {
-          "name": "onyc_mint"
+          "name": "asset_mint"
         },
         {
-          "name": "usdc_ata",
+          "name": "base_ata",
           "writable": true,
           "pda": {
             "seeds": [
@@ -611,7 +611,7 @@
               },
               {
                 "kind": "account",
-                "path": "usdc_mint"
+                "path": "base_mint"
               }
             ],
             "program": {
@@ -654,7 +654,7 @@
           }
         },
         {
-          "name": "onyc_ata",
+          "name": "asset_ata",
           "writable": true,
           "pda": {
             "seeds": [
@@ -668,7 +668,7 @@
               },
               {
                 "kind": "account",
-                "path": "onyc_mint"
+                "path": "asset_mint"
               }
             ],
             "program": {
@@ -809,13 +809,13 @@
           }
         },
         {
-          "name": "onyc_mint",
+          "name": "asset_mint",
           "relations": [
             "relayer_config"
           ]
         },
         {
-          "name": "onyc_ata",
+          "name": "asset_ata",
           "writable": true,
           "pda": {
             "seeds": [
@@ -829,7 +829,7 @@
               },
               {
                 "kind": "account",
-                "path": "onyc_mint"
+                "path": "asset_mint"
               }
             ],
             "program": {
@@ -918,7 +918,7 @@
       "name": "send_usdc_to_user",
       "docs": [
         "Lock USDC via NTT and atomically emit the outbound VAA back to",
-        "`flow.fogo_sender`. `transfer_lock_account_count` splits",
+        "`flow.recipient`. `transfer_lock_account_count` splits",
         "`remaining_accounts` between `transfer_lock` and",
         "`release_wormhole_outbound` (mirrors `lock_onyc`)."
       ],
@@ -984,13 +984,13 @@
           }
         },
         {
-          "name": "usdc_mint",
+          "name": "base_mint",
           "relations": [
             "relayer_config"
           ]
         },
         {
-          "name": "usdc_ata",
+          "name": "base_ata",
           "writable": true,
           "pda": {
             "seeds": [
@@ -1004,7 +1004,7 @@
               },
               {
                 "kind": "account",
-                "path": "usdc_mint"
+                "path": "base_mint"
               }
             ],
             "program": {
@@ -1163,19 +1163,19 @@
           }
         },
         {
-          "name": "onyc_mint",
+          "name": "asset_mint",
           "relations": [
             "relayer_config"
           ]
         },
         {
-          "name": "usdc_mint",
+          "name": "base_mint",
           "relations": [
             "relayer_config"
           ]
         },
         {
-          "name": "onyc_ata",
+          "name": "asset_ata",
           "writable": true,
           "pda": {
             "seeds": [
@@ -1189,7 +1189,7 @@
               },
               {
                 "kind": "account",
-                "path": "onyc_mint"
+                "path": "asset_mint"
               }
             ],
             "program": {
@@ -1232,7 +1232,7 @@
           }
         },
         {
-          "name": "usdc_ata",
+          "name": "base_ata",
           "writable": true,
           "pda": {
             "seeds": [
@@ -1246,7 +1246,7 @@
               },
               {
                 "kind": "account",
-                "path": "usdc_mint"
+                "path": "base_mint"
               }
             ],
             "program": {
@@ -1420,19 +1420,19 @@
           }
         },
         {
-          "name": "usdc_mint",
+          "name": "base_mint",
           "relations": [
             "relayer_config"
           ]
         },
         {
-          "name": "onyc_mint",
+          "name": "asset_mint",
           "relations": [
             "relayer_config"
           ]
         },
         {
-          "name": "usdc_ata",
+          "name": "base_ata",
           "writable": true,
           "pda": {
             "seeds": [
@@ -1446,7 +1446,7 @@
               },
               {
                 "kind": "account",
-                "path": "usdc_mint"
+                "path": "base_mint"
               }
             ],
             "program": {
@@ -1489,7 +1489,7 @@
           }
         },
         {
-          "name": "onyc_ata",
+          "name": "asset_ata",
           "writable": true,
           "pda": {
             "seeds": [
@@ -1503,7 +1503,7 @@
               },
               {
                 "kind": "account",
-                "path": "onyc_mint"
+                "path": "asset_mint"
               }
             ],
             "program": {
@@ -1661,13 +1661,13 @@
           }
         },
         {
-          "name": "onyc_mint",
+          "name": "asset_mint",
           "relations": [
             "relayer_config"
           ]
         },
         {
-          "name": "onyc_ata",
+          "name": "asset_ata",
           "docs": [
             "Sweep destination — long-lived relayer-authority ONyc ATA."
           ],
@@ -1684,7 +1684,7 @@
               },
               {
                 "kind": "account",
-                "path": "onyc_mint"
+                "path": "asset_mint"
               }
             ],
             "program": {
@@ -1781,7 +1781,7 @@
               },
               {
                 "kind": "account",
-                "path": "onyc_mint"
+                "path": "asset_mint"
               }
             ],
             "program": {
@@ -1911,81 +1911,42 @@
   ],
   "events": [
     {
-      "name": "OnycLocked",
+      "name": "Received",
       "discriminator": [
-        204,
-        229,
-        7,
-        145,
-        121,
-        187,
-        201,
-        215
+        64,
+        93,
+        61,
+        227,
+        221,
+        171,
+        20,
+        177
       ]
     },
     {
-      "name": "OnycSwapped",
+      "name": "Sent",
       "discriminator": [
-        220,
-        205,
-        135,
-        206,
-        94,
-        131,
-        34,
-        57
-      ]
-    },
-    {
-      "name": "OnycSwappedToUsdc",
-      "discriminator": [
-        244,
-        135,
-        210,
-        3,
-        159,
-        210,
-        101,
-        216
-      ]
-    },
-    {
-      "name": "OnycUnlocked",
-      "discriminator": [
-        66,
-        7,
-        6,
-        253,
-        214,
+        230,
+        90,
+        111,
+        254,
+        186,
         174,
-        42,
-        160
+        45,
+        74
       ]
     },
     {
-      "name": "UsdcClaimed",
+      "name": "Swapped",
       "discriminator": [
-        213,
-        24,
-        255,
-        203,
-        163,
-        162,
-        154,
-        137
-      ]
-    },
-    {
-      "name": "UsdcSentToUser",
-      "discriminator": [
-        175,
-        37,
-        177,
-        185,
-        231,
-        238,
-        242,
-        73
+        217,
+        52,
+        52,
+        83,
+        147,
+        135,
+        96,
+        109
       ]
     }
   ],
@@ -2183,6 +2144,20 @@
   ],
   "types": [
     {
+      "name": "Direction",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Deposit"
+          },
+          {
+            "name": "Withdraw"
+          }
+        ]
+      }
+    },
+    {
       "name": "Flow",
       "docs": [
         "One-shot receipt binding an inbound bridge message to a FOGO wallet.",
@@ -2193,7 +2168,7 @@
         "kind": "struct",
         "fields": [
           {
-            "name": "fogo_sender",
+            "name": "recipient",
             "docs": [
               "Originator on FOGO; outbound recipient on the return leg."
             ],
@@ -2233,153 +2208,10 @@
         "kind": "enum",
         "variants": [
           {
-            "name": "Claimed"
+            "name": "Received"
           },
           {
             "name": "Swapped"
-          }
-        ]
-      }
-    },
-    {
-      "name": "OnycLocked",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "flow",
-            "type": "pubkey"
-          },
-          {
-            "name": "ntt_inbox_item",
-            "type": "pubkey"
-          },
-          {
-            "name": "fogo_sender",
-            "type": {
-              "array": [
-                "u8",
-                32
-              ]
-            }
-          },
-          {
-            "name": "amount",
-            "type": "u64"
-          }
-        ]
-      }
-    },
-    {
-      "name": "OnycSwapped",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "flow",
-            "type": "pubkey"
-          },
-          {
-            "name": "gross_amount",
-            "type": "u64"
-          },
-          {
-            "name": "fee_amount",
-            "type": "u64"
-          },
-          {
-            "name": "net_amount",
-            "type": "u64"
-          }
-        ]
-      }
-    },
-    {
-      "name": "OnycSwappedToUsdc",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "flow",
-            "type": "pubkey"
-          },
-          {
-            "name": "gross_onyc",
-            "docs": [
-              "Pre-fee ONyc unlocked by `unlock_onyc` (== `flow.amount` at entry)."
-            ],
-            "type": "u64"
-          },
-          {
-            "name": "fee_onyc",
-            "docs": [
-              "Withdraw fee in ONyc, transferred to `fee_vault`."
-            ],
-            "type": "u64"
-          },
-          {
-            "name": "net_onyc",
-            "docs": [
-              "Post-fee ONyc spent in the swap (== gross_onyc - fee_onyc)."
-            ],
-            "type": "u64"
-          },
-          {
-            "name": "onyc_consumed",
-            "docs": [
-              "Actual ONyc consumed by the swap; asserted == net_onyc on-chain."
-            ],
-            "type": "u64"
-          },
-          {
-            "name": "usdc_received",
-            "docs": [
-              "USDC delta on the relayer-authority USDC ATA; asserted >= nav_floor."
-            ],
-            "type": "u64"
-          },
-          {
-            "name": "nav_floor",
-            "docs": [
-              "NAV-anchored slippage floor the swap had to clear."
-            ],
-            "type": "u64"
-          },
-          {
-            "name": "swap_program",
-            "docs": [
-              "Router program ID — operator-chosen, surfaced for off-chain audit."
-            ],
-            "type": "pubkey"
-          }
-        ]
-      }
-    },
-    {
-      "name": "OnycUnlocked",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "flow",
-            "type": "pubkey"
-          },
-          {
-            "name": "ntt_inbox_item",
-            "type": "pubkey"
-          },
-          {
-            "name": "fogo_sender",
-            "type": {
-              "array": [
-                "u8",
-                32
-              ]
-            }
-          },
-          {
-            "name": "amount",
-            "type": "u64"
           }
         ]
       }
@@ -2412,6 +2244,43 @@
       }
     },
     {
+      "name": "Received",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "flow",
+            "type": "pubkey"
+          },
+          {
+            "name": "ntt_inbox_item",
+            "type": "pubkey"
+          },
+          {
+            "name": "recipient",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "direction",
+            "type": {
+              "defined": {
+                "name": "Direction"
+              }
+            }
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
       "name": "RelayerConfig",
       "docs": [
         "`authority` gates governance only; flow instructions are permissionless.",
@@ -2426,11 +2295,11 @@
         "kind": "struct",
         "fields": [
           {
-            "name": "usdc_mint",
+            "name": "base_mint",
             "type": "pubkey"
           },
           {
-            "name": "onyc_mint",
+            "name": "asset_mint",
             "type": "pubkey"
           },
           {
@@ -2450,7 +2319,7 @@
             "type": "u16"
           },
           {
-            "name": "slippage_bps",
+            "name": "max_slippage_bps",
             "docs": [
               "Authority-tunable NAV slippage tolerance applied on both swap legs.",
               "Hard-capped at `MAX_SLIPPAGE_BPS` by `validate`."
@@ -2504,7 +2373,7 @@
       }
     },
     {
-      "name": "UsdcClaimed",
+      "name": "Sent",
       "type": {
         "kind": "struct",
         "fields": [
@@ -2517,12 +2386,20 @@
             "type": "pubkey"
           },
           {
-            "name": "fogo_sender",
+            "name": "recipient",
             "type": {
               "array": [
                 "u8",
                 32
               ]
+            }
+          },
+          {
+            "name": "direction",
+            "type": {
+              "defined": {
+                "name": "Direction"
+              }
             }
           },
           {
@@ -2533,7 +2410,7 @@
       }
     },
     {
-      "name": "UsdcSentToUser",
+      "name": "Swapped",
       "type": {
         "kind": "struct",
         "fields": [
@@ -2542,21 +2419,32 @@
             "type": "pubkey"
           },
           {
-            "name": "ntt_inbox_item",
-            "type": "pubkey"
-          },
-          {
-            "name": "fogo_sender",
+            "name": "direction",
             "type": {
-              "array": [
-                "u8",
-                32
-              ]
+              "defined": {
+                "name": "Direction"
+              }
             }
           },
           {
-            "name": "amount",
+            "name": "gross_in",
             "type": "u64"
+          },
+          {
+            "name": "fee",
+            "type": "u64"
+          },
+          {
+            "name": "net_out",
+            "type": "u64"
+          },
+          {
+            "name": "floor",
+            "type": "u64"
+          },
+          {
+            "name": "swap_program",
+            "type": "pubkey"
           }
         ]
       }

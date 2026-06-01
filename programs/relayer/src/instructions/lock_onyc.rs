@@ -7,12 +7,12 @@ use crate::constants::{
 };
 use crate::cpi::{approve_ntt_session_authority, invoke_relayer_signed};
 use crate::error::RelayerError;
-use crate::events::OnycLocked;
+use crate::events::Sent;
 use crate::ntt::{derive_session_authority, NttReleaseOutboundArgs, NttTransferArgs};
-use crate::state::{Flow, FlowStatus, RelayerConfig};
+use crate::state::{Direction, Flow, FlowStatus, RelayerConfig};
 
 /// Lock the flow's ONyc via Wormhole NTT and atomically publish the
-/// outbound VAA to `flow.fogo_sender`. Permissionless.
+/// outbound VAA to `flow.recipient`. Permissionless.
 ///
 /// `transfer_lock_account_count` partitions `remaining_accounts`:
 ///   `[..N]` → NTT `transfer_lock`
@@ -31,7 +31,7 @@ pub fn handler<'info>(
     let amount = flow.amount;
     require!(amount > 0, RelayerError::ZeroAmountFlow);
 
-    let recipient = flow.fogo_sender;
+    let recipient = flow.recipient;
 
     let transfer_args = NttTransferArgs {
         amount,
@@ -51,7 +51,7 @@ pub fn handler<'info>(
 
     approve_ntt_session_authority(
         &ctx.accounts.token_program.to_account_info(),
-        &ctx.accounts.onyc_ata.to_account_info(),
+        &ctx.accounts.asset_ata.to_account_info(),
         &ctx.accounts.relayer_authority.to_account_info(),
         bump,
         session_authority,
@@ -94,10 +94,11 @@ pub fn handler<'info>(
         bump,
     )?;
 
-    emit!(OnycLocked {
+    emit!(Sent {
         flow: ctx.accounts.inflight_flow.key(),
         ntt_inbox_item: ctx.accounts.ntt_inbox_item.key(),
-        fogo_sender: recipient,
+        recipient,
+        direction: Direction::Deposit,
         amount,
     });
 
@@ -112,7 +113,7 @@ pub struct LockOnyc<'info> {
     #[account(
         seeds = [CONFIG_SEED],
         bump = relayer_config.bump,
-        has_one = onyc_mint,
+        has_one = asset_mint,
     )]
     pub relayer_config: Account<'info, RelayerConfig>,
 
@@ -120,15 +121,15 @@ pub struct LockOnyc<'info> {
     #[account(seeds = [RELAYER_SEED], bump = relayer_config.relayer_authority_bump)]
     pub relayer_authority: UncheckedAccount<'info>,
 
-    pub onyc_mint: InterfaceAccount<'info, Mint>,
+    pub asset_mint: InterfaceAccount<'info, Mint>,
 
     #[account(
         mut,
-        associated_token::mint = onyc_mint,
+        associated_token::mint = asset_mint,
         associated_token::authority = relayer_authority,
         associated_token::token_program = token_program,
     )]
-    pub onyc_ata: InterfaceAccount<'info, TokenAccount>,
+    pub asset_ata: InterfaceAccount<'info, TokenAccount>,
 
     /// CHECK: seed material only; validated transitively via the flow PDA.
     pub ntt_inbox_item: UncheckedAccount<'info>,

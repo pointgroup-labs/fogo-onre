@@ -16,16 +16,16 @@ const FLOW_DISCRIMINATOR = new Uint8Array([126, 151, 86, 177, 58, 153, 167, 203]
  * Flow status enum variants matching Anchor Borsh serialization.
  *
  * Source order pinned by `flow_status_borsh_tag_invariant` in
- * `programs/relayer/src/state.rs`: Claimed=0, Swapped=1.
+ * `programs/relayer/src/state.rs`: Received=0, Swapped=1.
  */
 export const FlowStatus = {
-  Claimed: 0,
+  Received: 0,
   Swapped: 1,
 } as const
 
 export interface FlowData {
-  fogoSender: Uint8Array // 32 bytes
-  status: number // 0=Claimed, 1=Swapped
+  recipient: Uint8Array // 32 bytes
+  status: number // 0=Received, 1=Swapped
   amount: bigint
   payer: PublicKey
   bump: number
@@ -33,7 +33,7 @@ export interface FlowData {
 
 /**
  * Serialize a Flow account in Anchor format:
- *   discriminator(8) + fogo_sender(32) + status(1) + amount(8) + payer(32) + bump(1)
+ *   discriminator(8) + recipient(32) + status(1) + amount(8) + payer(32) + bump(1)
  * Total: 82 bytes
  */
 export function serializeFlow(flow: FlowData): Uint8Array {
@@ -44,7 +44,7 @@ export function serializeFlow(flow: FlowData): Uint8Array {
   data.set(FLOW_DISCRIMINATOR, offset)
   offset += 8
 
-  data.set(flow.fogoSender, offset)
+  data.set(flow.recipient, offset)
   offset += 32
 
   data[offset++] = flow.status

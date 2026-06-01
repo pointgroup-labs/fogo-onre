@@ -16,22 +16,22 @@ pub fn handler(
     let config = &mut ctx.accounts.relayer_config;
     config.authority = ctx.accounts.authority.key();
     config.pending_authority = None;
-    config.usdc_mint = ctx.accounts.usdc_mint.key();
-    config.onyc_mint = ctx.accounts.onyc_mint.key();
+    config.base_mint = ctx.accounts.base_mint.key();
+    config.asset_mint = ctx.accounts.asset_mint.key();
     config.fee_vault = ctx.accounts.fee_vault.key();
     config.bump = ctx.bumps.relayer_config;
     config.relayer_authority_bump = ctx.bumps.relayer_authority;
     config.deposit_fee_bps = deposit_fee_bps;
     config.withdraw_fee_bps = withdraw_fee_bps;
-    config.slippage_bps = crate::constants::DEFAULT_SLIPPAGE_BPS;
+    config.max_slippage_bps = crate::constants::DEFAULT_SLIPPAGE_BPS;
     // Explicit even though `init` zero-fills.
     config.pending_fee = None;
     config.validate()?;
 
     msg!(
         "Relayer initialized. USDC ATA: {}. ONyc ATA: {}. Fee vault: {}.",
-        ctx.accounts.usdc_ata.key(),
-        ctx.accounts.onyc_ata.key(),
+        ctx.accounts.base_ata.key(),
+        ctx.accounts.asset_ata.key(),
         ctx.accounts.fee_vault.key(),
     );
 
@@ -59,34 +59,34 @@ pub struct Initialize<'info> {
     )]
     pub relayer_authority: UncheckedAccount<'info>,
 
-    pub usdc_mint: InterfaceAccount<'info, Mint>,
+    pub base_mint: InterfaceAccount<'info, Mint>,
 
-    pub onyc_mint: InterfaceAccount<'info, Mint>,
-
-    #[account(
-        init,
-        payer = authority,
-        associated_token::mint = usdc_mint,
-        associated_token::authority = relayer_authority,
-        associated_token::token_program = token_program,
-    )]
-    pub usdc_ata: Box<InterfaceAccount<'info, TokenAccount>>,
+    pub asset_mint: InterfaceAccount<'info, Mint>,
 
     #[account(
         init,
         payer = authority,
-        associated_token::mint = onyc_mint,
+        associated_token::mint = base_mint,
         associated_token::authority = relayer_authority,
         associated_token::token_program = token_program,
     )]
-    pub onyc_ata: Box<InterfaceAccount<'info, TokenAccount>>,
+    pub base_ata: Box<InterfaceAccount<'info, TokenAccount>>,
+
+    #[account(
+        init,
+        payer = authority,
+        associated_token::mint = asset_mint,
+        associated_token::authority = relayer_authority,
+        associated_token::token_program = token_program,
+    )]
+    pub asset_ata: Box<InterfaceAccount<'info, TokenAccount>>,
 
     /// Forbid `fee_vault == onyc_ata` to prevent self-transfer no-ops
     /// that would commingle user funds with fees.
     #[account(
-        token::mint = onyc_mint,
+        token::mint = asset_mint,
         token::token_program = token_program,
-        constraint = fee_vault.key() != onyc_ata.key() @ RelayerError::FeeVaultAliasesUserAta,
+        constraint = fee_vault.key() != asset_ata.key() @ RelayerError::FeeVaultAliasesUserAta,
     )]
     pub fee_vault: Box<InterfaceAccount<'info, TokenAccount>>,
 

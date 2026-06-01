@@ -56,7 +56,7 @@ pub const NTT_SESSION_AUTHORITY_SEED: &[u8] = b"session_authority";
 /// Per-user inbox authority PDA seed: `[USER_INBOX_SEED, user_wallet]`.
 /// The webapp signs an intent whose recipient is this PDA's USDC ATA;
 /// `claim_usdc` PDA-signs a sweep from that ATA into the relayer USDC ATA,
-/// recording `user_wallet` as `flow.fogo_sender` for the return leg.
+/// recording `user_wallet` as `flow.recipient` for the return leg.
 pub const USER_INBOX_SEED: &[u8] = b"user_inbox";
 
 /// SECURITY-CRITICAL CROSS-PROGRAM PIN (deposit flow trust chain):

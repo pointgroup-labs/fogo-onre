@@ -5,7 +5,7 @@ use crate::error::RelayerError;
 
 /// `authority` gates governance only; flow instructions are permissionless.
 ///
-/// Layout discipline: all fixed-size fields (including `slippage_bps` and the
+/// Layout discipline: all fixed-size fields (including `max_slippage_bps` and the
 /// `reserved` block) come before the two variable-length `Option`s, which stay
 /// last. Future additive fields are carved out of `reserved` — same total size,
 /// so they need no realloc and no migration (old zero bytes read as the new
@@ -13,8 +13,8 @@ use crate::error::RelayerError;
 #[account]
 #[derive(InitSpace)]
 pub struct RelayerConfig {
-    pub usdc_mint: Pubkey,
-    pub onyc_mint: Pubkey,
+    pub base_mint: Pubkey,
+    pub asset_mint: Pubkey,
 
     pub authority: Pubkey,
     pub fee_vault: Pubkey,
@@ -24,7 +24,7 @@ pub struct RelayerConfig {
 
     /// Authority-tunable NAV slippage tolerance applied on both swap legs.
     /// Hard-capped at `MAX_SLIPPAGE_BPS` by `validate`.
-    pub slippage_bps: u16,
+    pub max_slippage_bps: u16,
 
     pub relayer_authority_bump: u8,
     pub bump: u8,
@@ -69,7 +69,7 @@ impl RelayerConfig {
             RelayerError::FeeBpsTooHigh
         );
         require!(
-            self.slippage_bps <= MAX_SLIPPAGE_BPS,
+            self.max_slippage_bps <= MAX_SLIPPAGE_BPS,
             RelayerError::SlippageBpsTooHigh
         );
         if let Some(p) = &self.pending_fee {
@@ -182,8 +182,14 @@ pub(crate) fn apply_fee_bps(gross: u64, bps: u16) -> Result<(u64, u64)> {
 #[derive(InitSpace, AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(test, derive(Debug))]
 pub enum FlowStatus {
-    Claimed,
+    Received,
     Swapped,
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, InitSpace, Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Direction {
+    Deposit,
+    Withdraw,
 }
 
 /// One-shot receipt binding an inbound bridge message to a FOGO wallet.
@@ -193,7 +199,7 @@ pub enum FlowStatus {
 #[derive(InitSpace)]
 pub struct Flow {
     /// Originator on FOGO; outbound recipient on the return leg.
-    pub fogo_sender: [u8; 32],
+    pub recipient: [u8; 32],
 
     pub status: FlowStatus,
 

@@ -35,8 +35,8 @@ describe('relayer', () => {
   let svm: LiteSVM
   let authority: Keypair
   let client: RelayerClient
-  let usdcMint: Keypair
-  let onycMint: Keypair
+  let baseMint: Keypair
+  let assetMint: Keypair
   // External ONyc fee vault — any pre-existing ONyc account that is NOT
   // the relayer's operating ONyc ATA. Tests use an authority-owned ATA.
   let feeVault: PublicKey
@@ -46,9 +46,9 @@ describe('relayer', () => {
     authority = Keypair.generate()
     const provider = createProvider(svm, authority)
     client = new RelayerClient(provider as any)
-    usdcMint = createMint(svm, authority, 6)
-    onycMint = createMint(svm, authority, 6)
-    feeVault = createAta(svm, authority, onycMint.publicKey, authority.publicKey)
+    baseMint = createMint(svm, authority, 6)
+    assetMint = createMint(svm, authority, 6)
+    feeVault = createAta(svm, authority, assetMint.publicKey, authority.publicKey)
   })
 
   describe('initialize', () => {
@@ -56,8 +56,8 @@ describe('relayer', () => {
       await client
         .initialize({
           authority: authority.publicKey,
-          usdcMint: usdcMint.publicKey,
-          onycMint: onycMint.publicKey,
+          baseMint: baseMint.publicKey,
+          assetMint: assetMint.publicKey,
           feeVault,
           depositFeeBps: 50,
           withdrawFeeBps: 100,
@@ -66,8 +66,8 @@ describe('relayer', () => {
 
       const config = await client.fetchConfig()
       expect(config.authority.toBase58()).toBe(authority.publicKey.toBase58())
-      expect(config.usdcMint.toBase58()).toBe(usdcMint.publicKey.toBase58())
-      expect(config.onycMint.toBase58()).toBe(onycMint.publicKey.toBase58())
+      expect(config.baseMint.toBase58()).toBe(baseMint.publicKey.toBase58())
+      expect(config.assetMint.toBase58()).toBe(assetMint.publicKey.toBase58())
       expect(config.depositFeeBps).toBe(50)
       expect(config.withdrawFeeBps).toBe(100)
     })
@@ -80,8 +80,8 @@ describe('relayer', () => {
           client
             .initialize({
               authority: authority.publicKey,
-              usdcMint: usdcMint.publicKey,
-              onycMint: onycMint.publicKey,
+              baseMint: baseMint.publicKey,
+              assetMint: assetMint.publicKey,
               feeVault,
               depositFeeBps: 10_001,
               withdrawFeeBps: 0,
@@ -97,8 +97,8 @@ describe('relayer', () => {
       await client
         .initialize({
           authority: authority.publicKey,
-          usdcMint: usdcMint.publicKey,
-          onycMint: onycMint.publicKey,
+          baseMint: baseMint.publicKey,
+          assetMint: assetMint.publicKey,
           feeVault,
           depositFeeBps: 25,
           withdrawFeeBps: 75,
@@ -110,8 +110,8 @@ describe('relayer', () => {
         await client
           .initialize({
             authority: authority.publicKey,
-            usdcMint: usdcMint.publicKey,
-            onycMint: onycMint.publicKey,
+            baseMint: baseMint.publicKey,
+            assetMint: assetMint.publicKey,
             feeVault,
             depositFeeBps: 999,
             withdrawFeeBps: 888,
@@ -145,8 +145,8 @@ describe('relayer', () => {
       await client
         .initialize({
           authority: authority.publicKey,
-          usdcMint: usdcMint.publicKey,
-          onycMint: onycMint.publicKey,
+          baseMint: baseMint.publicKey,
+          assetMint: assetMint.publicKey,
           feeVault,
           depositFeeBps: 0,
           withdrawFeeBps: 1_000,
@@ -164,8 +164,8 @@ describe('relayer', () => {
       await client
         .initialize({
           authority: authority.publicKey,
-          usdcMint: usdcMint.publicKey,
-          onycMint: onycMint.publicKey,
+          baseMint: baseMint.publicKey,
+          assetMint: assetMint.publicKey,
           feeVault,
           depositFeeBps: 50,
           withdrawFeeBps: 100,
@@ -191,7 +191,7 @@ describe('relayer', () => {
 
     it('leaves fees unchanged when args are omitted (None)', async () => {
       // Empty configure — no fees, no vault. Authority defaults to provider
-      // wallet, onycMint is lazily fetched from config. This is a true no-op.
+      // wallet, assetMint is lazily fetched from config. This is a true no-op.
       await (await client.configure({})).rpc()
 
       const config = await client.fetchConfig()
@@ -201,7 +201,7 @@ describe('relayer', () => {
 
     it('rotates fee_vault to a new external account', async () => {
       const newOwner = Keypair.generate()
-      const newFeeVault = createAta(svm, authority, onycMint.publicKey, newOwner.publicKey)
+      const newFeeVault = createAta(svm, authority, assetMint.publicKey, newOwner.publicKey)
 
       await (await client.configure({ feeVault: newFeeVault })).rpc()
 
@@ -231,7 +231,7 @@ describe('relayer', () => {
     it('rejects fee_vault that aliases the relayer onyc ATA', async () => {
       const [authorityPda] = findAuthorityPda(client.program.programId)
       // Anchor's `init` made this ATA at initialize time.
-      const aliasedVault = getAssociatedTokenAddressSync(onycMint.publicKey, authorityPda, true)
+      const aliasedVault = getAssociatedTokenAddressSync(assetMint.publicKey, authorityPda, true)
 
       await expectError(
         async () => (await client.configure({ feeVault: aliasedVault })).rpc(),
@@ -399,8 +399,8 @@ describe('relayer', () => {
       await client
         .initialize({
           authority: authority.publicKey,
-          usdcMint: usdcMint.publicKey,
-          onycMint: onycMint.publicKey,
+          baseMint: baseMint.publicKey,
+          assetMint: assetMint.publicKey,
           feeVault,
           depositFeeBps: 50,
           withdrawFeeBps: 100,
@@ -412,7 +412,7 @@ describe('relayer', () => {
 
       // 2. Reconfigure: update fees + rotate fee vault
       const newOwner = Keypair.generate()
-      const newFeeVault = createAta(svm, authority, onycMint.publicKey, newOwner.publicKey)
+      const newFeeVault = createAta(svm, authority, assetMint.publicKey, newOwner.publicKey)
 
       await (await client.configure({
         feeVault: newFeeVault,
@@ -443,8 +443,8 @@ describe('relayer', () => {
       await client
         .initialize({
           authority: authority.publicKey,
-          usdcMint: usdcMint.publicKey,
-          onycMint: onycMint.publicKey,
+          baseMint: baseMint.publicKey,
+          assetMint: assetMint.publicKey,
           feeVault,
           depositFeeBps: 50,
           withdrawFeeBps: 100,
@@ -478,8 +478,8 @@ describe('relayer', () => {
       const nttInboxItem = Keypair.generate()
       const userWallet = Keypair.generate()
       const [userInboxAuthority] = findUserInboxAuthorityPda(userWallet.publicKey, client.program.programId)
-      createAta(svm, authority, usdcMint.publicKey, userInboxAuthority)
-      createAta(svm, authority, usdcMint.publicKey, client.authorityPda)
+      createAta(svm, authority, baseMint.publicKey, userInboxAuthority)
+      createAta(svm, authority, baseMint.publicKey, client.authorityPda)
 
       const messageId = new Uint8Array(32)
       crypto.getRandomValues(messageId)
@@ -499,7 +499,7 @@ describe('relayer', () => {
         .claimUsdc({
           payer: authority.publicKey,
           userWallet: userWallet.publicKey,
-          usdcMint: usdcMint.publicKey,
+          baseMint: baseMint.publicKey,
           nttInboxItem: nttInboxItem.publicKey,
           nttTransceiverMessage: validatedMsgPda,
           redeemAccountsLen: 1,
@@ -532,8 +532,8 @@ describe('relayer', () => {
       // prior claim_usdc having already created it.
       const [inflightPda, bump] = findInflightFlowPda(nttInboxItem.publicKey, client.program.programId)
       setFlowAccount(svm, inflightPda, {
-        fogoSender,
-        status: FlowStatus.Claimed,
+        recipient: fogoSender,
+        status: FlowStatus.Received,
         amount: 500_000n,
         payer: authority.publicKey,
         bump,
@@ -543,9 +543,9 @@ describe('relayer', () => {
       // deserialization passes; the `inflight_flow` init constraint must
       // be the first thing to fail.
       const [userInboxAuthority] = findUserInboxAuthorityPda(userWallet.publicKey, client.program.programId)
-      createAta(svm, authority, usdcMint.publicKey, userInboxAuthority)
+      createAta(svm, authority, baseMint.publicKey, userInboxAuthority)
       // Sweep destination must also exist for the same reason.
-      createAta(svm, authority, usdcMint.publicKey, client.authorityPda)
+      createAta(svm, authority, baseMint.publicKey, client.authorityPda)
 
       const messageId = new Uint8Array(32)
       crypto.getRandomValues(messageId)
@@ -570,7 +570,7 @@ describe('relayer', () => {
             .claimUsdc({
               payer: authority.publicKey,
               userWallet: userWallet.publicKey,
-              usdcMint: usdcMint.publicKey,
+              baseMint: baseMint.publicKey,
               nttInboxItem: nttInboxItem.publicKey,
               nttTransceiverMessage: validatedMsgPda,
               redeemAccountsLen: 1,
@@ -595,11 +595,11 @@ describe('relayer', () => {
         attackerWallet.publicKey,
         client.program.programId,
       )
-      const attackerInboxAta = createAta(svm, authority, usdcMint.publicKey, attackerInbox)
+      const attackerInboxAta = createAta(svm, authority, baseMint.publicKey, attackerInbox)
       // Self-funded "deposit" — without the owner guard, this would be
       // swept into relayer custody as phantom intent-bypass credit.
-      mintTo(svm, authority, usdcMint.publicKey, attackerInboxAta, 1_000_000)
-      createAta(svm, authority, usdcMint.publicKey, client.authorityPda)
+      mintTo(svm, authority, baseMint.publicKey, attackerInboxAta, 1_000_000)
+      createAta(svm, authority, baseMint.publicKey, client.authorityPda)
 
       // Hand-roll a 75-byte InboxItem-shaped payload owned by the
       // system program (the attacker's only writeable target). disc +
@@ -643,7 +643,7 @@ describe('relayer', () => {
             .claimUsdc({
               payer: authority.publicKey,
               userWallet: attackerWallet.publicKey,
-              usdcMint: usdcMint.publicKey,
+              baseMint: baseMint.publicKey,
               nttInboxItem: fakeInboxItem.publicKey,
               nttTransceiverMessage: validatedMsgPda,
               redeemAccountsLen: 1,
@@ -671,9 +671,9 @@ describe('relayer', () => {
         attackerWallet.publicKey,
         client.program.programId,
       )
-      const attackerInboxAta = createAta(svm, authority, usdcMint.publicKey, attackerInbox)
-      mintTo(svm, authority, usdcMint.publicKey, attackerInboxAta, 1_000_000)
-      createAta(svm, authority, usdcMint.publicKey, client.authorityPda)
+      const attackerInboxAta = createAta(svm, authority, baseMint.publicKey, attackerInbox)
+      mintTo(svm, authority, baseMint.publicKey, attackerInboxAta, 1_000_000)
+      createAta(svm, authority, baseMint.publicKey, client.authorityPda)
 
       // NTT-owned Released InboxItem (passes the skip-path owner guard),
       // recipient = attacker inbox. Same 75-byte layout as the prior test.
@@ -715,7 +715,7 @@ describe('relayer', () => {
             .claimUsdc({
               payer: authority.publicKey,
               userWallet: attackerWallet.publicKey,
-              usdcMint: usdcMint.publicKey,
+              baseMint: baseMint.publicKey,
               nttInboxItem: unrelatedInboxItem.publicKey,
               nttTransceiverMessage: validatedMsgPda,
               redeemAccountsLen: 1,
@@ -729,13 +729,13 @@ describe('relayer', () => {
       )
     })
 
-    it('swap_usdc_to_onyc rejects flow not in Claimed status', async () => {
+    it('swap_usdc_to_onyc rejects flow not in Received status', async () => {
       const nttInboxItem = Keypair.generate()
       const [inflightPda, bump] = findInflightFlowPda(nttInboxItem.publicKey, client.program.programId)
 
-      // Inject a Swapped flow — swap_usdc_to_onyc requires Claimed
+      // Inject a Swapped flow — swap_usdc_to_onyc requires Received
       setFlowAccount(svm, inflightPda, {
-        fogoSender,
+        recipient: fogoSender,
         status: FlowStatus.Swapped,
         amount: 500_000n,
         payer: authority.publicKey,
@@ -746,8 +746,8 @@ describe('relayer', () => {
         () =>
           client
             .swapUsdcToOnyc({
-              usdcMint: usdcMint.publicKey,
-              onycMint: onycMint.publicKey,
+              baseMint: baseMint.publicKey,
+              assetMint: assetMint.publicKey,
               feeVault,
               nttInboxItem: nttInboxItem.publicKey,
             })
@@ -764,10 +764,10 @@ describe('relayer', () => {
       const nttInboxItem = Keypair.generate()
       const [inflightPda, bump] = findInflightFlowPda(nttInboxItem.publicKey, client.program.programId)
 
-      // Inject a Claimed flow
+      // Inject a Received flow
       setFlowAccount(svm, inflightPda, {
-        fogoSender,
-        status: FlowStatus.Claimed,
+        recipient: fogoSender,
+        status: FlowStatus.Received,
         amount: 500_000n,
         payer: authority.publicKey,
         bump,
@@ -775,7 +775,7 @@ describe('relayer', () => {
 
       // Fund USDC ATA so the relayer has balance
       const [authorityPda] = findAuthorityPda(client.program.programId)
-      mintTo(svm, authority, usdcMint.publicKey, authorityPda, 500_000)
+      mintTo(svm, authority, baseMint.publicKey, authorityPda, 500_000)
 
       // OnRe is stubbed only by program ID — the derived deposit Offer PDA
       // doesn't exist, so its owner is the system program. The NAV-floor
@@ -784,8 +784,8 @@ describe('relayer', () => {
         () =>
           client
             .swapUsdcToOnyc({
-              usdcMint: usdcMint.publicKey,
-              onycMint: onycMint.publicKey,
+              baseMint: baseMint.publicKey,
+              assetMint: assetMint.publicKey,
               feeVault,
               nttInboxItem: nttInboxItem.publicKey,
             })
@@ -802,10 +802,10 @@ describe('relayer', () => {
       const nttInboxItem = Keypair.generate()
       const [inflightPda, bump] = findInflightFlowPda(nttInboxItem.publicKey, client.program.programId)
 
-      // Inject a Claimed flow — lock_onyc requires Swapped
+      // Inject a Received flow — lock_onyc requires Swapped
       setFlowAccount(svm, inflightPda, {
-        fogoSender,
-        status: FlowStatus.Claimed,
+        recipient: fogoSender,
+        status: FlowStatus.Received,
         amount: 500_000n,
         payer: authority.publicKey,
         bump,
@@ -816,7 +816,7 @@ describe('relayer', () => {
           client
             .lockOnyc({
               payer: authority.publicKey,
-              onycMint: onycMint.publicKey,
+              assetMint: assetMint.publicKey,
               nttInboxItem: nttInboxItem.publicKey,
               rentDestination: authority.publicKey,
             })
@@ -837,7 +837,7 @@ describe('relayer', () => {
 
       // Inject a Swapped flow with payer = authority
       setFlowAccount(svm, inflightPda, {
-        fogoSender,
+        recipient: fogoSender,
         status: FlowStatus.Swapped,
         amount: 500_000n,
         payer: authority.publicKey,
@@ -852,7 +852,7 @@ describe('relayer', () => {
           client
             .lockOnyc({
               payer: authority.publicKey,
-              onycMint: onycMint.publicKey,
+              assetMint: assetMint.publicKey,
               nttInboxItem: nttInboxItem.publicKey,
               rentDestination: rando.publicKey,
             })
@@ -871,7 +871,7 @@ describe('relayer', () => {
 
       // Inject a Swapped flow
       setFlowAccount(svm, inflightPda, {
-        fogoSender,
+        recipient: fogoSender,
         status: FlowStatus.Swapped,
         amount: 500_000n,
         payer: authority.publicKey,
@@ -880,7 +880,7 @@ describe('relayer', () => {
 
       // Fund ONyc ATA
       const [authorityPda] = findAuthorityPda(client.program.programId)
-      mintTo(svm, authority, onycMint.publicKey, authorityPda, 500_000)
+      mintTo(svm, authority, assetMint.publicKey, authorityPda, 500_000)
 
       // Test omits the NTT session-authority PDA from remaining_accounts.
       // The relayer's own preflight check (`MissingSessionAuthority`) should
@@ -890,7 +890,7 @@ describe('relayer', () => {
           client
             .lockOnyc({
               payer: authority.publicKey,
-              onycMint: onycMint.publicKey,
+              assetMint: assetMint.publicKey,
               nttInboxItem: nttInboxItem.publicKey,
               rentDestination: authority.publicKey,
             })
@@ -916,7 +916,7 @@ describe('relayer', () => {
     function setupUserInbox(): { userWallet: PublicKey, userInboxAta: PublicKey } {
       const userWallet = Keypair.generate().publicKey
       const [userInboxAuthority] = findUserInboxAuthorityPda(userWallet, client.program.programId)
-      const userInboxAta = createAta(svm, authority, onycMint.publicKey, userInboxAuthority)
+      const userInboxAta = createAta(svm, authority, assetMint.publicKey, userInboxAuthority)
       return { userWallet, userInboxAta }
     }
 
@@ -924,8 +924,8 @@ describe('relayer', () => {
       await client
         .initialize({
           authority: authority.publicKey,
-          usdcMint: usdcMint.publicKey,
-          onycMint: onycMint.publicKey,
+          baseMint: baseMint.publicKey,
+          assetMint: assetMint.publicKey,
           feeVault,
           depositFeeBps: 50,
           withdrawFeeBps: 100,
@@ -978,7 +978,7 @@ describe('relayer', () => {
             .unlockOnyc({
               payer: authority.publicKey,
               userWallet,
-              onycMint: onycMint.publicKey,
+              assetMint: assetMint.publicKey,
               nttInboxItem: nttInboxItem.publicKey,
               nttTransceiverMessage: validatedMsgPda,
               redeemAccountsLen: 1,
@@ -1018,7 +1018,7 @@ describe('relayer', () => {
             .unlockOnyc({
               payer: authority.publicKey,
               userWallet,
-              onycMint: onycMint.publicKey,
+              assetMint: assetMint.publicKey,
               nttInboxItem: nttInboxItem.publicKey,
               nttTransceiverMessage: validatedMsgPda,
               redeemAccountsLen: 0,
@@ -1039,8 +1039,8 @@ describe('relayer', () => {
 
       // Inject an existing outflight flow to simulate prior unlock
       setFlowAccount(svm, outflightPda, {
-        fogoSender,
-        status: FlowStatus.Claimed,
+        recipient: fogoSender,
+        status: FlowStatus.Received,
         amount: 500_000n,
         payer: authority.publicKey,
         bump,
@@ -1069,7 +1069,7 @@ describe('relayer', () => {
             .unlockOnyc({
               payer: authority.publicKey,
               userWallet,
-              onycMint: onycMint.publicKey,
+              assetMint: assetMint.publicKey,
               nttInboxItem: nttInboxItem.publicKey,
               nttTransceiverMessage: validatedMsgPda,
               redeemAccountsLen: 1,
@@ -1128,7 +1128,7 @@ describe('relayer', () => {
       )
 
       const [authorityPda] = findAuthorityPda(client.program.programId)
-      const onycAta = getAssociatedTokenAddressSync(onycMint.publicKey, authorityPda, true)
+      const onycAta = getAssociatedTokenAddressSync(assetMint.publicKey, authorityPda, true)
       const wrongMsg = Keypair.generate().publicKey
 
       await expectError(
@@ -1137,7 +1137,7 @@ describe('relayer', () => {
             .unlockOnyc({
               payer: authority.publicKey,
               userWallet,
-              onycMint: onycMint.publicKey,
+              assetMint: assetMint.publicKey,
               nttInboxItem: nttInboxItem.publicKey,
               nttTransceiverMessage: validatedMsgPda,
               redeemAccountsLen: 10,
@@ -1171,7 +1171,7 @@ describe('relayer', () => {
       )
 
       const [authorityPda] = findAuthorityPda(client.program.programId)
-      const onycAta = getAssociatedTokenAddressSync(onycMint.publicKey, authorityPda, true)
+      const onycAta = getAssociatedTokenAddressSync(assetMint.publicKey, authorityPda, true)
       const wrongInbox = Keypair.generate().publicKey
 
       await expectError(
@@ -1180,7 +1180,7 @@ describe('relayer', () => {
             .unlockOnyc({
               payer: authority.publicKey,
               userWallet,
-              onycMint: onycMint.publicKey,
+              assetMint: assetMint.publicKey,
               nttInboxItem: nttInboxItem.publicKey,
               nttTransceiverMessage: validatedMsgPda,
               redeemAccountsLen: 10,
@@ -1225,7 +1225,7 @@ describe('relayer', () => {
             .unlockOnyc({
               payer: authority.publicKey,
               userWallet,
-              onycMint: onycMint.publicKey,
+              assetMint: assetMint.publicKey,
               nttInboxItem: nttInboxItem.publicKey,
               nttTransceiverMessage: validatedMsgPda,
               redeemAccountsLen: 10,
@@ -1245,10 +1245,10 @@ describe('relayer', () => {
       const nttInboxItem = Keypair.generate()
       const [outflightPda, bump] = findOutflightFlowPda(nttInboxItem.publicKey, client.program.programId)
 
-      // Inject a Claimed flow — send_usdc_to_user requires Swapped
+      // Inject a Received flow — send_usdc_to_user requires Swapped
       setFlowAccount(svm, outflightPda, {
-        fogoSender,
-        status: FlowStatus.Claimed,
+        recipient: fogoSender,
+        status: FlowStatus.Received,
         amount: 500_000n,
         payer: authority.publicKey,
         bump,
@@ -1259,7 +1259,7 @@ describe('relayer', () => {
           client
             .sendUsdcToUser({
               payer: authority.publicKey,
-              usdcMint: usdcMint.publicKey,
+              baseMint: baseMint.publicKey,
               nttInboxItem: nttInboxItem.publicKey,
               rentDestination: authority.publicKey,
             })
@@ -1280,7 +1280,7 @@ describe('relayer', () => {
 
       // Inject a Swapped flow with payer = authority
       setFlowAccount(svm, outflightPda, {
-        fogoSender,
+        recipient: fogoSender,
         status: FlowStatus.Swapped,
         amount: 500_000n,
         payer: authority.publicKey,
@@ -1295,7 +1295,7 @@ describe('relayer', () => {
           client
             .sendUsdcToUser({
               payer: authority.publicKey,
-              usdcMint: usdcMint.publicKey,
+              baseMint: baseMint.publicKey,
               nttInboxItem: nttInboxItem.publicKey,
               rentDestination: rando.publicKey,
             })
@@ -1314,7 +1314,7 @@ describe('relayer', () => {
 
       // Inject a Swapped flow
       setFlowAccount(svm, outflightPda, {
-        fogoSender,
+        recipient: fogoSender,
         status: FlowStatus.Swapped,
         amount: 500_000n,
         payer: authority.publicKey,
@@ -1323,7 +1323,7 @@ describe('relayer', () => {
 
       // Fund USDC ATA
       const [authorityPda] = findAuthorityPda(client.program.programId)
-      mintTo(svm, authority, usdcMint.publicKey, authorityPda, 500_000)
+      mintTo(svm, authority, baseMint.publicKey, authorityPda, 500_000)
 
       // With minimal remaining_accounts the handler will fail at the
       // pre-CPI lookup for the Token Bridge `authority_signer` PDA (the
@@ -1335,7 +1335,7 @@ describe('relayer', () => {
           client
             .sendUsdcToUser({
               payer: authority.publicKey,
-              usdcMint: usdcMint.publicKey,
+              baseMint: baseMint.publicKey,
               nttInboxItem: nttInboxItem.publicKey,
               rentDestination: authority.publicKey,
             })

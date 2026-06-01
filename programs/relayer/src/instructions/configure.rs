@@ -26,13 +26,13 @@ pub fn handler(
         config.propose_withdraw_fee(proposed, now)?;
     }
     if let Some(bps) = slippage_bps {
-        config.slippage_bps = bps;
+        config.max_slippage_bps = bps;
     }
 
     if let Some(vault) = &ctx.accounts.fee_vault {
         require_keys_neq!(
             vault.key(),
-            ctx.accounts.onyc_ata.key(),
+            ctx.accounts.asset_ata.key(),
             RelayerError::FeeVaultAliasesUserAta
         );
         config.fee_vault = vault.key();
@@ -52,10 +52,10 @@ pub fn handler(
     config.validate()?;
 
     msg!(
-        "Relayer reconfigured. deposit_fee_bps: {}, withdraw_fee_bps: {}, slippage_bps: {}, pending_fee: {:?}, fee_vault: {}, authority: {}, pending_authority: {:?}.",
+        "Relayer reconfigured. deposit_fee_bps: {}, withdraw_fee_bps: {}, max_slippage_bps: {}, pending_fee: {:?}, fee_vault: {}, authority: {}, pending_authority: {:?}.",
         config.deposit_fee_bps,
         config.withdraw_fee_bps,
-        config.slippage_bps,
+        config.max_slippage_bps,
         config.pending_fee,
         config.fee_vault,
         config.authority,
@@ -74,7 +74,7 @@ pub struct Configure<'info> {
         seeds = [CONFIG_SEED],
         bump = relayer_config.bump,
         has_one = authority @ RelayerError::UnauthorizedAuthority,
-        has_one = onyc_mint,
+        has_one = asset_mint,
     )]
     pub relayer_config: Account<'info, RelayerConfig>,
 
@@ -85,18 +85,18 @@ pub struct Configure<'info> {
     )]
     pub relayer_authority: UncheckedAccount<'info>,
 
-    pub onyc_mint: InterfaceAccount<'info, Mint>,
+    pub asset_mint: InterfaceAccount<'info, Mint>,
 
     #[account(
-        associated_token::mint = onyc_mint,
+        associated_token::mint = asset_mint,
         associated_token::authority = relayer_authority,
         associated_token::token_program = token_program,
     )]
-    pub onyc_ata: InterfaceAccount<'info, TokenAccount>,
+    pub asset_ata: InterfaceAccount<'info, TokenAccount>,
 
     /// `None` leaves the stored vault unchanged.
     #[account(
-        token::mint = onyc_mint,
+        token::mint = asset_mint,
         token::token_program = token_program,
     )]
     pub fee_vault: Option<InterfaceAccount<'info, TokenAccount>>,

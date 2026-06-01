@@ -7,12 +7,12 @@ use crate::constants::{
 };
 use crate::cpi::{approve_ntt_session_authority, invoke_relayer_signed};
 use crate::error::RelayerError;
-use crate::events::UsdcSentToUser;
+use crate::events::Sent;
 use crate::ntt::{derive_session_authority, NttReleaseOutboundArgs, NttTransferArgs};
-use crate::state::{Flow, FlowStatus, RelayerConfig};
+use crate::state::{Direction, Flow, FlowStatus, RelayerConfig};
 
 /// Lock USDC via NTT and atomically publish the outbound VAA to
-/// `flow.fogo_sender`. Permissionless; PDA close returns rent and
+/// `flow.recipient`. Permissionless; PDA close returns rent and
 /// blocks replay.
 ///
 /// `transfer_lock_account_count` partitions `remaining_accounts`:
@@ -34,7 +34,7 @@ pub fn handler<'info>(
     let amount = flow.amount;
     require!(amount > 0, RelayerError::ZeroAmountFlow);
 
-    let recipient = flow.fogo_sender;
+    let recipient = flow.recipient;
 
     let transfer_args = NttTransferArgs {
         amount,
@@ -54,7 +54,7 @@ pub fn handler<'info>(
 
     approve_ntt_session_authority(
         &ctx.accounts.token_program.to_account_info(),
-        &ctx.accounts.usdc_ata.to_account_info(),
+        &ctx.accounts.base_ata.to_account_info(),
         &ctx.accounts.relayer_authority.to_account_info(),
         bump,
         session_authority,
@@ -97,10 +97,11 @@ pub fn handler<'info>(
         bump,
     )?;
 
-    emit!(UsdcSentToUser {
+    emit!(Sent {
         flow: ctx.accounts.outflight_flow.key(),
         ntt_inbox_item: ctx.accounts.ntt_inbox_item.key(),
-        fogo_sender: recipient,
+        recipient,
+        direction: Direction::Withdraw,
         amount,
     });
 
@@ -115,7 +116,7 @@ pub struct SendUsdcToUser<'info> {
     #[account(
         seeds = [CONFIG_SEED],
         bump = relayer_config.bump,
-        has_one = usdc_mint,
+        has_one = base_mint,
     )]
     pub relayer_config: Account<'info, RelayerConfig>,
 
@@ -123,15 +124,15 @@ pub struct SendUsdcToUser<'info> {
     #[account(seeds = [RELAYER_SEED], bump = relayer_config.relayer_authority_bump)]
     pub relayer_authority: UncheckedAccount<'info>,
 
-    pub usdc_mint: InterfaceAccount<'info, Mint>,
+    pub base_mint: InterfaceAccount<'info, Mint>,
 
     #[account(
         mut,
-        associated_token::mint = usdc_mint,
+        associated_token::mint = base_mint,
         associated_token::authority = relayer_authority,
         associated_token::token_program = token_program,
     )]
-    pub usdc_ata: InterfaceAccount<'info, TokenAccount>,
+    pub base_ata: InterfaceAccount<'info, TokenAccount>,
 
     /// CHECK: seed material only; validated transitively via the flow PDA.
     pub ntt_inbox_item: UncheckedAccount<'info>,

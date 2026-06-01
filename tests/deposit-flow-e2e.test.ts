@@ -64,8 +64,8 @@ describe('deposit flow e2e (claim_usdc → swap_usdc_to_onyc)', () => {
   let svm: LiteSVM
   let authority: Keypair
   let client: RelayerClient
-  let usdcMint: Keypair
-  let onycMint: Keypair
+  let baseMint: Keypair
+  let assetMint: Keypair
   let relayerAuthorityPda: PublicKey
   let nttTokenAuthorityPda: PublicKey
   let peerPda: PublicKey
@@ -104,18 +104,18 @@ describe('deposit flow e2e (claim_usdc → swap_usdc_to_onyc)', () => {
 
     // USDC.s is the NTT-managed mint, so `token_authority` PDA must hold mint
     // authority for `release_inbound_unlock` (Locking mode) to move it out.
-    usdcMint = createMintWithAuthority(svm, authority, nttTokenAuthorityPda, 6)
+    baseMint = createMintWithAuthority(svm, authority, nttTokenAuthorityPda, 6)
 
     // ONyc mint authority = OnRe mint_authority PDA (the swap mints ONyc to
     // the relayer ATA from the OnRe vault).
-    onycMint = createMintWithAuthority(svm, authority, onreMintAuthorityPda, 6)
-    feeVault = createAta(svm, authority, onycMint.publicKey, authority.publicKey)
+    assetMint = createMintWithAuthority(svm, authority, onreMintAuthorityPda, 6)
+    feeVault = createAta(svm, authority, assetMint.publicKey, authority.publicKey)
 
     await client
       .initialize({
         authority: authority.publicKey,
-        usdcMint: usdcMint.publicKey,
-        onycMint: onycMint.publicKey,
+        baseMint: baseMint.publicKey,
+        assetMint: assetMint.publicKey,
         feeVault,
         depositFeeBps: 50,
         withdrawFeeBps: 100,
@@ -129,38 +129,38 @@ describe('deposit flow e2e (claim_usdc → swap_usdc_to_onyc)', () => {
     loadFixture(svm, ONRE_VAULT_AUTHORITY_FIXTURE)
     loadFixture(svm, ONRE_PERM_AUTHORITY_FIXTURE)
     loadFixture(svm, ONRE_MINT_AUTHORITY_FIXTURE)
-    loadAndPatchOnreOffer(svm, usdcMint.publicKey, onycMint.publicKey)
+    loadAndPatchOnreOffer(svm, baseMint.publicKey, assetMint.publicKey)
 
-    const vaultUsdcAta = getAssociatedTokenAddressSync(usdcMint.publicKey, onreVaultAuthorityPda, true)
-    const vaultOnycAta = getAssociatedTokenAddressSync(onycMint.publicKey, onreVaultAuthorityPda, true)
-    createTokenAccount(svm, vaultUsdcAta, usdcMint.publicKey, onreVaultAuthorityPda, 0n)
-    createTokenAccount(svm, vaultOnycAta, onycMint.publicKey, onreVaultAuthorityPda, VAULT_ONYC_BALANCE)
+    const vaultUsdcAta = getAssociatedTokenAddressSync(baseMint.publicKey, onreVaultAuthorityPda, true)
+    const vaultOnycAta = getAssociatedTokenAddressSync(assetMint.publicKey, onreVaultAuthorityPda, true)
+    createTokenAccount(svm, vaultUsdcAta, baseMint.publicKey, onreVaultAuthorityPda, 0n)
+    createTokenAccount(svm, vaultOnycAta, assetMint.publicKey, onreVaultAuthorityPda, VAULT_ONYC_BALANCE)
 
     // Patch ONyc supply to cover vault balance.
     {
-      const acct = svm.getAccount(onycMint.publicKey)!
+      const acct = svm.getAccount(assetMint.publicKey)!
       const data = new Uint8Array(acct.data)
       new DataView(data.buffer, data.byteOffset).setBigUint64(36, VAULT_ONYC_BALANCE, true)
-      svm.setAccount(onycMint.publicKey, { ...acct, data })
+      svm.setAccount(assetMint.publicKey, { ...acct, data })
     }
 
-    const permUsdcAta = getAssociatedTokenAddressSync(usdcMint.publicKey, onrePermAuthorityPda, true)
-    const permOnycAta = getAssociatedTokenAddressSync(onycMint.publicKey, onrePermAuthorityPda, true)
-    createTokenAccount(svm, permUsdcAta, usdcMint.publicKey, onrePermAuthorityPda, 0n)
-    createTokenAccount(svm, permOnycAta, onycMint.publicKey, onrePermAuthorityPda, 0n)
+    const permUsdcAta = getAssociatedTokenAddressSync(baseMint.publicKey, onrePermAuthorityPda, true)
+    const permOnycAta = getAssociatedTokenAddressSync(assetMint.publicKey, onrePermAuthorityPda, true)
+    createTokenAccount(svm, permUsdcAta, baseMint.publicKey, onrePermAuthorityPda, 0n)
+    createTokenAccount(svm, permOnycAta, assetMint.publicKey, onrePermAuthorityPda, 0n)
 
-    const bossUsdcAta = getAssociatedTokenAddressSync(usdcMint.publicKey, ONRE_BOSS_PUBKEY, true)
-    createTokenAccount(svm, bossUsdcAta, usdcMint.publicKey, ONRE_BOSS_PUBKEY, 0n)
+    const bossUsdcAta = getAssociatedTokenAddressSync(baseMint.publicKey, ONRE_BOSS_PUBKEY, true)
+    createTokenAccount(svm, bossUsdcAta, baseMint.publicKey, ONRE_BOSS_PUBKEY, 0n)
     svm.airdrop(ONRE_BOSS_PUBKEY, BigInt(1e9))
 
     // ----- NTT fixtures (USDC.s as NTT-managed mint) -----
 
     // NTT custody ATA — pre-fund with the inbound USDC so
     // `release_inbound_unlock` can move it into the relayer ATA.
-    const custodyAta = getAssociatedTokenAddressSync(usdcMint.publicKey, nttTokenAuthorityPda, true)
+    const custodyAta = getAssociatedTokenAddressSync(baseMint.publicKey, nttTokenAuthorityPda, true)
     {
       const data = new Uint8Array(165)
-      data.set(usdcMint.publicKey.toBytes(), 0)
+      data.set(baseMint.publicKey.toBytes(), 0)
       data.set(nttTokenAuthorityPda.toBytes(), 32)
       new DataView(data.buffer).setBigUint64(64, depositAmount, true)
       data[108] = 1
@@ -174,13 +174,13 @@ describe('deposit flow e2e (claim_usdc → swap_usdc_to_onyc)', () => {
     }
     // Patch USDC.s mint supply to match custody.
     {
-      const acct = svm.getAccount(usdcMint.publicKey)!
+      const acct = svm.getAccount(baseMint.publicKey)!
       const data = new Uint8Array(acct.data)
       new DataView(data.buffer).setBigUint64(36, depositAmount, true)
-      svm.setAccount(usdcMint.publicKey, { ...acct, data })
+      svm.setAccount(baseMint.publicKey, { ...acct, data })
     }
 
-    loadAndPatchNttConfig(svm, usdcMint.publicKey, custodyAta, NTT_USDC_PROGRAM_ID)
+    loadAndPatchNttConfig(svm, baseMint.publicKey, custodyAta, NTT_USDC_PROGRAM_ID)
     peerPda = loadAndPatchNttPeer(svm, NTT_USDC_PROGRAM_ID)
     loadAndPatchNttInboxRateLimit(svm, NTT_USDC_PROGRAM_ID)
     loadAndPatchNttOutboxRateLimit(svm, NTT_USDC_PROGRAM_ID)
@@ -190,15 +190,15 @@ describe('deposit flow e2e (claim_usdc → swap_usdc_to_onyc)', () => {
   })
 
   it('claim_usdc (NTT inbound) → swap_usdc_to_onyc succeeds', async () => {
-    const usdcAta = getAssociatedTokenAddressSync(usdcMint.publicKey, relayerAuthorityPda, true)
+    const usdcAta = getAssociatedTokenAddressSync(baseMint.publicKey, relayerAuthorityPda, true)
 
     // The FOGO intent's `recipient_address` is the per-user inbox PDA; NTT
     // releases USDC there and claim_usdc PDA-signs a sweep into custody.
     const userWallet = Keypair.generate()
     const [userInboxAuthority] = findUserInboxAuthorityPda(userWallet.publicKey, client.program.programId)
-    createAta(svm, authority, usdcMint.publicKey, userInboxAuthority)
+    createAta(svm, authority, baseMint.publicKey, userInboxAuthority)
     // Sweep destination must exist so claim_usdc can deserialize it.
-    createAta(svm, authority, usdcMint.publicKey, relayerAuthorityPda)
+    createAta(svm, authority, baseMint.publicKey, relayerAuthorityPda)
 
     // recipient = userInboxAuthority so released USDC lands in the per-user
     // inbox ATA; the relayer sweeps the per-VAA delta into `usdcAta`.
@@ -235,7 +235,7 @@ describe('deposit flow e2e (claim_usdc → swap_usdc_to_onyc)', () => {
         .claimUsdc({
           payer: authority.publicKey,
           userWallet: userWallet.publicKey,
-          usdcMint: usdcMint.publicKey,
+          baseMint: baseMint.publicKey,
           nttInboxItem: inboxItemPda,
           nttTransceiverMessage: validatedMsgPda,
           ntt: {
@@ -251,9 +251,9 @@ describe('deposit flow e2e (claim_usdc → swap_usdc_to_onyc)', () => {
       throw e
     }
 
-    // Leg 1 post-conditions: Flow at Claimed with gross amount; USDC in relayer ATA.
+    // Leg 1 post-conditions: Flow at Received with gross amount; USDC in relayer ATA.
     const flowAfterClaim = await client.fetchInflightFlow(inboxItemPda)
-    expect(flowAfterClaim.status).toEqual({ claimed: {} })
+    expect(flowAfterClaim.status).toEqual({ received: {} })
     expect(BigInt(flowAfterClaim.amount.toString())).toEqual(depositAmount)
 
     {
@@ -266,8 +266,8 @@ describe('deposit flow e2e (claim_usdc → swap_usdc_to_onyc)', () => {
     try {
       await client
         .swapUsdcToOnyc({
-          usdcMint: usdcMint.publicKey,
-          onycMint: onycMint.publicKey,
+          baseMint: baseMint.publicKey,
+          assetMint: assetMint.publicKey,
           feeVault,
           nttInboxItem: inboxItemPda,
           onre: {},
@@ -293,8 +293,8 @@ describe('deposit flow e2e (claim_usdc → swap_usdc_to_onyc)', () => {
   it('claim_usdc accepts the OnRe fork setter (allowlist member 2)', async () => {
     const userWallet = Keypair.generate()
     const [userInboxAuthority] = findUserInboxAuthorityPda(userWallet.publicKey, client.program.programId)
-    createAta(svm, authority, usdcMint.publicKey, userInboxAuthority)
-    createAta(svm, authority, usdcMint.publicKey, relayerAuthorityPda)
+    createAta(svm, authority, baseMint.publicKey, userInboxAuthority)
+    createAta(svm, authority, baseMint.publicKey, relayerAuthorityPda)
 
     const peerAddress = readPeerAddress(svm, peerPda)
     const messageId = new Uint8Array(32)
@@ -326,7 +326,7 @@ describe('deposit flow e2e (claim_usdc → swap_usdc_to_onyc)', () => {
       .claimUsdc({
         payer: authority.publicKey,
         userWallet: userWallet.publicKey,
-        usdcMint: usdcMint.publicKey,
+        baseMint: baseMint.publicKey,
         nttInboxItem: inboxItemPda,
         nttTransceiverMessage: validatedMsgPda,
         ntt: { transceiverAddress: NTT_USDC_PROGRAM_ID },
@@ -334,7 +334,7 @@ describe('deposit flow e2e (claim_usdc → swap_usdc_to_onyc)', () => {
       .rpc()
 
     const flow = await client.fetchInflightFlow(inboxItemPda)
-    expect(flow.status).toEqual({ claimed: {} })
+    expect(flow.status).toEqual({ received: {} })
     expect(BigInt(flow.amount.toString())).toEqual(depositAmount)
   })
 })

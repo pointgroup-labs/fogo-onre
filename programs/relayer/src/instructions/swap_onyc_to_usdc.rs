@@ -28,9 +28,9 @@ use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};
 use crate::constants::{CONFIG_SEED, FLOW_OUTBOUND_SEED, RELAYER_SEED};
 use crate::cpi::{approve_swap_delegate, relayer_signed_transfer_checked};
 use crate::error::RelayerError;
-use crate::events::OnycSwappedToUsdc;
+use crate::events::Swapped;
 use crate::onre::{apply_slippage_floor, read_offer_nav_price, redemption_expected_out};
-use crate::state::{Flow, FlowStatus, RelayerConfig};
+use crate::state::{Direction, Flow, FlowStatus, RelayerConfig};
 
 pub fn handler<'info>(
     ctx: Context<'info, SwapOnycToUsdc<'info>>,
@@ -44,7 +44,7 @@ pub fn handler<'info>(
     let gross_onyc = ctx.accounts.outflight_flow.amount;
 
     require!(
-        ctx.accounts.outflight_flow.status == FlowStatus::Claimed,
+        ctx.accounts.outflight_flow.status == FlowStatus::Received,
         RelayerError::FlowStatusMismatch
     );
     require!(gross_onyc > 0, RelayerError::ZeroAmountFlow);
@@ -56,13 +56,13 @@ pub fn handler<'info>(
     if fee_onyc > 0 {
         relayer_signed_transfer_checked(
             &ctx.accounts.token_program.to_account_info(),
-            &ctx.accounts.onyc_ata.to_account_info(),
-            &ctx.accounts.onyc_mint.to_account_info(),
+            &ctx.accounts.asset_ata.to_account_info(),
+            &ctx.accounts.asset_mint.to_account_info(),
             &ctx.accounts.fee_vault.to_account_info(),
             &ctx.accounts.relayer_authority,
             authority_bump,
             fee_onyc,
-            ctx.accounts.onyc_mint.decimals,
+            ctx.accounts.asset_mint.decimals,
         )?;
     }
 
@@ -73,32 +73,32 @@ pub fn handler<'info>(
     let nav_floor: u64 = {
         let price = read_offer_nav_price(
             &ctx.accounts.onre_offer.to_account_info(),
-            &ctx.accounts.relayer_config.usdc_mint,
-            &ctx.accounts.relayer_config.onyc_mint,
+            &ctx.accounts.relayer_config.base_mint,
+            &ctx.accounts.relayer_config.asset_mint,
             now_unix,
         )?;
         let gross_expected = redemption_expected_out(
             net_onyc,
             price,
-            ctx.accounts.onyc_mint.decimals,
-            ctx.accounts.usdc_mint.decimals,
+            ctx.accounts.asset_mint.decimals,
+            ctx.accounts.base_mint.decimals,
         )?;
-        apply_slippage_floor(gross_expected, ctx.accounts.relayer_config.slippage_bps)?
+        apply_slippage_floor(gross_expected, ctx.accounts.relayer_config.max_slippage_bps)?
     };
 
     // Reload after fee transfer; assert sufficient post-fee balance.
-    ctx.accounts.onyc_ata.reload()?;
+    ctx.accounts.asset_ata.reload()?;
     require!(
-        ctx.accounts.onyc_ata.amount >= net_onyc,
+        ctx.accounts.asset_ata.amount >= net_onyc,
         RelayerError::ZeroAmountFlow
     );
-    let onyc_before = ctx.accounts.onyc_ata.amount;
-    let usdc_before = ctx.accounts.usdc_ata.amount;
+    let onyc_before = ctx.accounts.asset_ata.amount;
+    let usdc_before = ctx.accounts.base_ata.amount;
 
     // Bounded SPL Approve to swap_delegate for exactly net_onyc.
     approve_swap_delegate(
         &ctx.accounts.token_program.to_account_info(),
-        &ctx.accounts.onyc_ata.to_account_info(),
+        &ctx.accounts.asset_ata.to_account_info(),
         &ctx.accounts.relayer_authority,
         authority_bump,
         &ctx.accounts.swap_delegate,
@@ -128,14 +128,14 @@ pub fn handler<'info>(
     )?;
 
     // Exact-consume on ONyc, floor-check on USDC.
-    ctx.accounts.onyc_ata.reload()?;
-    ctx.accounts.usdc_ata.reload()?;
+    ctx.accounts.asset_ata.reload()?;
+    ctx.accounts.base_ata.reload()?;
     let onyc_consumed = onyc_before
-        .checked_sub(ctx.accounts.onyc_ata.amount)
+        .checked_sub(ctx.accounts.asset_ata.amount)
         .ok_or(RelayerError::BalanceUnderflow)?;
     let usdc_received = ctx
         .accounts
-        .usdc_ata
+        .base_ata
         .amount
         .checked_sub(usdc_before)
         .ok_or(RelayerError::BalanceUnderflow)?;
@@ -150,22 +150,21 @@ pub fn handler<'info>(
 
     // Exact-consume forces the bounded delegate to zero; a leftover
     // delegation here means the router spent via the PDA signer — revert.
-    assert_ata_untampered(&ctx.accounts.onyc_ata, &auth_key)?;
-    assert_ata_untampered(&ctx.accounts.usdc_ata, &auth_key)?;
+    assert_ata_untampered(&ctx.accounts.asset_ata, &auth_key)?;
+    assert_ata_untampered(&ctx.accounts.base_ata, &auth_key)?;
 
     // Flip status; overwrite flow.amount with usdc_received for `send_usdc_to_user` to consume.
     let flow = &mut ctx.accounts.outflight_flow;
     flow.amount = usdc_received;
     flow.status = FlowStatus::Swapped;
 
-    emit!(OnycSwappedToUsdc {
+    emit!(Swapped {
         flow: flow_key,
-        gross_onyc,
-        fee_onyc,
-        net_onyc,
-        onyc_consumed,
-        usdc_received,
-        nav_floor,
+        direction: Direction::Withdraw,
+        gross_in: gross_onyc,
+        fee: fee_onyc,
+        net_out: usdc_received,
+        floor: nav_floor,
         swap_program: *ctx.accounts.swap_program.key,
     });
 
@@ -204,8 +203,8 @@ pub struct SwapOnycToUsdc<'info> {
     #[account(
         seeds = [CONFIG_SEED],
         bump = relayer_config.bump,
-        has_one = onyc_mint,
-        has_one = usdc_mint,
+        has_one = asset_mint,
+        has_one = base_mint,
         has_one = fee_vault,
     )]
     pub relayer_config: Box<Account<'info, RelayerConfig>>,
@@ -216,31 +215,31 @@ pub struct SwapOnycToUsdc<'info> {
     #[account(seeds = [RELAYER_SEED], bump = relayer_config.relayer_authority_bump)]
     pub relayer_authority: UncheckedAccount<'info>,
 
-    pub onyc_mint: Box<InterfaceAccount<'info, Mint>>,
-    pub usdc_mint: Box<InterfaceAccount<'info, Mint>>,
+    pub asset_mint: Box<InterfaceAccount<'info, Mint>>,
+    pub base_mint: Box<InterfaceAccount<'info, Mint>>,
 
     #[account(
         mut,
-        associated_token::mint = onyc_mint,
+        associated_token::mint = asset_mint,
         associated_token::authority = relayer_authority,
         associated_token::token_program = token_program,
     )]
-    pub onyc_ata: Box<InterfaceAccount<'info, TokenAccount>>,
+    pub asset_ata: Box<InterfaceAccount<'info, TokenAccount>>,
 
     #[account(
         mut,
-        associated_token::mint = usdc_mint,
+        associated_token::mint = base_mint,
         associated_token::authority = relayer_authority,
         associated_token::token_program = token_program,
     )]
-    pub usdc_ata: Box<InterfaceAccount<'info, TokenAccount>>,
+    pub base_ata: Box<InterfaceAccount<'info, TokenAccount>>,
 
     /// Fee destination — the ONyc token account configured at
     /// `initialize` / `configure` time (pinned via `has_one`). Receives
     /// the withdraw-fee transfer directly; no derived child ATA.
     #[account(
         mut,
-        token::mint = onyc_mint,
+        token::mint = asset_mint,
         token::token_program = token_program,
     )]
     pub fee_vault: Box<InterfaceAccount<'info, TokenAccount>>,

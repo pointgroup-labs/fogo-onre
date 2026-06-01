@@ -64,8 +64,8 @@ describe('unlock_onyc e2e (NTT redeem + release_inbound_unlock, Locking mode)', 
   let svm: LiteSVM
   let authority: Keypair
   let client: RelayerClient
-  let usdcMint: Keypair
-  let onycMint: Keypair
+  let baseMint: Keypair
+  let assetMint: Keypair
   let relayerAuthorityPda: PublicKey
   let nttTokenAuthorityPda: PublicKey
   let custodyAta: PublicKey
@@ -84,16 +84,16 @@ describe('unlock_onyc e2e (NTT redeem + release_inbound_unlock, Locking mode)', 
     ;[relayerAuthorityPda] = findAuthorityPda(client.program.programId)
     ;[nttTokenAuthorityPda] = findTokenAuthorityPda(NTT_ONYC_PROGRAM_ID)
 
-    usdcMint = createMint(svm, authority, 6)
-    onycMint = createMintWithAuthority(svm, authority, nttTokenAuthorityPda, 6)
+    baseMint = createMint(svm, authority, 6)
+    assetMint = createMintWithAuthority(svm, authority, nttTokenAuthorityPda, 6)
 
-    const feeVault = createAta(svm, authority, onycMint.publicKey, authority.publicKey)
+    const feeVault = createAta(svm, authority, assetMint.publicKey, authority.publicKey)
 
     await client
       .initialize({
         authority: authority.publicKey,
-        usdcMint: usdcMint.publicKey,
-        onycMint: onycMint.publicKey,
+        baseMint: baseMint.publicKey,
+        assetMint: assetMint.publicKey,
         feeVault,
         depositFeeBps: 50,
         withdrawFeeBps: 100,
@@ -101,13 +101,13 @@ describe('unlock_onyc e2e (NTT redeem + release_inbound_unlock, Locking mode)', 
       .rpc()
 
     // Sweep destination — relayer's ONyc ATA (created by `initialize`).
-    onycAta = getAssociatedTokenAddressSync(onycMint.publicKey, relayerAuthorityPda, true)
+    onycAta = getAssociatedTokenAddressSync(assetMint.publicKey, relayerAuthorityPda, true)
 
     // Custody ATA owned by NTT token_authority — pre-fund it with ONyc so
     // `release_inbound_unlock` can transfer OUT of it.
-    custodyAta = getAssociatedTokenAddressSync(onycMint.publicKey, nttTokenAuthorityPda, true)
+    custodyAta = getAssociatedTokenAddressSync(assetMint.publicKey, nttTokenAuthorityPda, true)
     const custodyData = new Uint8Array(165)
-    custodyData.set(onycMint.publicKey.toBytes(), 0)
+    custodyData.set(assetMint.publicKey.toBytes(), 0)
     custodyData.set(nttTokenAuthorityPda.toBytes(), 32)
     new DataView(custodyData.buffer).setBigUint64(64, CUSTODY_BALANCE, true) // amount
     custodyData[108] = 1 // state = Initialized
@@ -120,14 +120,14 @@ describe('unlock_onyc e2e (NTT redeem + release_inbound_unlock, Locking mode)', 
     })
 
     // Patch mint supply to reflect tokens existing in custody
-    const mintAcct = svm.getAccount(onycMint.publicKey)!
+    const mintAcct = svm.getAccount(assetMint.publicKey)!
     const mintData = new Uint8Array(mintAcct.data)
     new DataView(mintData.buffer).setBigUint64(36, CUSTODY_BALANCE, true)
-    svm.setAccount(onycMint.publicKey, { ...mintAcct, data: mintData })
+    svm.setAccount(assetMint.publicKey, { ...mintAcct, data: mintData })
 
     // Load real mainnet NTT account fixtures, relocated to PDAs derived
     // under the ONyc NTT manager program (with bump bytes patched).
-    loadAndPatchNttConfig(svm, onycMint.publicKey, custodyAta, NTT_ONYC_PROGRAM_ID)
+    loadAndPatchNttConfig(svm, assetMint.publicKey, custodyAta, NTT_ONYC_PROGRAM_ID)
     peerPda = loadAndPatchNttPeer(svm, NTT_ONYC_PROGRAM_ID)
     loadAndPatchNttInboxRateLimit(svm, NTT_ONYC_PROGRAM_ID)
     loadAndPatchNttOutboxRateLimit(svm, NTT_ONYC_PROGRAM_ID)
@@ -186,7 +186,7 @@ describe('unlock_onyc e2e (NTT redeem + release_inbound_unlock, Locking mode)', 
     const userWallet = Keypair.generate()
     const [userInboxAuthority] = findUserInboxAuthorityPda(userWallet.publicKey, client.program.programId)
     // Release lands in the per-user inbox ATA; the sweep moves it to custody.
-    createAta(svm, authority, onycMint.publicKey, userInboxAuthority)
+    createAta(svm, authority, assetMint.publicKey, userInboxAuthority)
 
     const { inboxItemPda, validatedMsgPda } = stageRedeemMessage(
       onreSetter,
@@ -199,7 +199,7 @@ describe('unlock_onyc e2e (NTT redeem + release_inbound_unlock, Locking mode)', 
         .unlockOnyc({
           payer: authority.publicKey,
           userWallet: userWallet.publicKey,
-          onycMint: onycMint.publicKey,
+          assetMint: assetMint.publicKey,
           nttInboxItem: inboxItemPda,
           nttTransceiverMessage: validatedMsgPda,
           ntt: {
@@ -225,7 +225,7 @@ describe('unlock_onyc e2e (NTT redeem + release_inbound_unlock, Locking mode)', 
     const recordedFogoSender = flowData.slice(8, 40)
     expect(Buffer.from(recordedFogoSender).equals(userWallet.publicKey.toBuffer())).toBe(true)
     const status = flowData[40]
-    expect(status).toBe(0) // FlowStatus.Claimed (variant 0 in declaration order)
+    expect(status).toBe(0) // FlowStatus.Received (variant 0 in declaration order)
     const recordedAmount = new DataView(flowData.buffer, flowData.byteOffset).getBigUint64(41, true)
     expect(recordedAmount).toBe(amount)
 
@@ -240,7 +240,7 @@ describe('unlock_onyc e2e (NTT redeem + release_inbound_unlock, Locking mode)', 
     const amount = 1_000_000n
     const userWallet = Keypair.generate()
     const [userInboxAuthority] = findUserInboxAuthorityPda(userWallet.publicKey, client.program.programId)
-    createAta(svm, authority, onycMint.publicKey, userInboxAuthority)
+    createAta(svm, authority, assetMint.publicKey, userInboxAuthority)
 
     const { inboxItemPda, validatedMsgPda } = stageRedeemMessage(
       intentSetterBytes(FOGO_INTENT_PROGRAM_ID),
@@ -252,7 +252,7 @@ describe('unlock_onyc e2e (NTT redeem + release_inbound_unlock, Locking mode)', 
       .unlockOnyc({
         payer: authority.publicKey,
         userWallet: userWallet.publicKey,
-        onycMint: onycMint.publicKey,
+        assetMint: assetMint.publicKey,
         nttInboxItem: inboxItemPda,
         nttTransceiverMessage: validatedMsgPda,
         ntt: { transceiverAddress: NTT_ONYC_PROGRAM_ID },
@@ -260,7 +260,7 @@ describe('unlock_onyc e2e (NTT redeem + release_inbound_unlock, Locking mode)', 
       .rpc()
 
     const flow = await client.fetchOutflightFlow(inboxItemPda)
-    expect(flow.status).toEqual({ claimed: {} })
+    expect(flow.status).toEqual({ received: {} })
     expect(BigInt(flow.amount.toString())).toBe(amount)
   })
 
@@ -268,7 +268,7 @@ describe('unlock_onyc e2e (NTT redeem + release_inbound_unlock, Locking mode)', 
     const amount = 1_000_000n
     const userWallet = Keypair.generate()
     const [userInboxAuthority] = findUserInboxAuthorityPda(userWallet.publicKey, client.program.programId)
-    createAta(svm, authority, onycMint.publicKey, userInboxAuthority)
+    createAta(svm, authority, assetMint.publicKey, userInboxAuthority)
 
     // Stranger sender (a direct, non-intent NTT bridge to the same inbox).
     const { inboxItemPda, validatedMsgPda } = stageRedeemMessage(
@@ -282,7 +282,7 @@ describe('unlock_onyc e2e (NTT redeem + release_inbound_unlock, Locking mode)', 
         (await client.unlockOnyc({
           payer: authority.publicKey,
           userWallet: userWallet.publicKey,
-          onycMint: onycMint.publicKey,
+          assetMint: assetMint.publicKey,
           nttInboxItem: inboxItemPda,
           nttTransceiverMessage: validatedMsgPda,
           ntt: { transceiverAddress: NTT_ONYC_PROGRAM_ID },

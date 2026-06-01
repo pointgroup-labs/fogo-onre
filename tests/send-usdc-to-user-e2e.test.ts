@@ -43,8 +43,8 @@ describe('send_usdc_to_user e2e (NTT transfer_lock outbound on USDC.s, Locking m
   let svm: LiteSVM
   let authority: Keypair
   let client: RelayerClient
-  let usdcMint: Keypair
-  let onycMint: Keypair
+  let baseMint: Keypair
+  let assetMint: Keypair
   let relayerAuthorityPda: PublicKey
   let nttTokenAuthorityPda: PublicKey
   let custodyAta: PublicKey
@@ -67,28 +67,28 @@ describe('send_usdc_to_user e2e (NTT transfer_lock outbound on USDC.s, Locking m
 
     // USDC.s is the NTT-managed mint here — `token_authority` PDA must hold
     // mint authority so `transfer_lock` can move USDC.s into custody.
-    usdcMint = createMintWithAuthority(svm, authority, nttTokenAuthorityPda, 6)
-    onycMint = createMint(svm, authority, 6)
-    const feeVault = createAta(svm, authority, onycMint.publicKey, authority.publicKey)
+    baseMint = createMintWithAuthority(svm, authority, nttTokenAuthorityPda, 6)
+    assetMint = createMint(svm, authority, 6)
+    const feeVault = createAta(svm, authority, assetMint.publicKey, authority.publicKey)
 
     await client
       .initialize({
         authority: authority.publicKey,
-        usdcMint: usdcMint.publicKey,
-        onycMint: onycMint.publicKey,
+        baseMint: baseMint.publicKey,
+        assetMint: assetMint.publicKey,
         feeVault,
         depositFeeBps: 50,
         withdrawFeeBps: 100,
       })
       .rpc()
 
-    usdcAta = getAssociatedTokenAddressSync(usdcMint.publicKey, relayerAuthorityPda, true)
+    usdcAta = getAssociatedTokenAddressSync(baseMint.publicKey, relayerAuthorityPda, true)
 
     // Custody ATA owned by NTT token_authority — receives the locked USDC.
-    custodyAta = getAssociatedTokenAddressSync(usdcMint.publicKey, nttTokenAuthorityPda, true)
+    custodyAta = getAssociatedTokenAddressSync(baseMint.publicKey, nttTokenAuthorityPda, true)
     {
       const data = new Uint8Array(165)
-      data.set(usdcMint.publicKey.toBytes(), 0)
+      data.set(baseMint.publicKey.toBytes(), 0)
       data.set(nttTokenAuthorityPda.toBytes(), 32)
       // amount stays 0 — the lock will deposit into it
       data[108] = 1 // state = Initialized
@@ -108,14 +108,14 @@ describe('send_usdc_to_user e2e (NTT transfer_lock outbound on USDC.s, Locking m
       new DataView(ataData.buffer, ataData.byteOffset).setBigUint64(64, ATA_PRE_BALANCE, true)
       svm.setAccount(usdcAta, { ...ataAcct, data: ataData })
 
-      const mintAcct = svm.getAccount(usdcMint.publicKey)!
+      const mintAcct = svm.getAccount(baseMint.publicKey)!
       const mintData = new Uint8Array(mintAcct.data)
       new DataView(mintData.buffer, mintData.byteOffset).setBigUint64(36, ATA_PRE_BALANCE, true)
-      svm.setAccount(usdcMint.publicKey, { ...mintAcct, data: mintData })
+      svm.setAccount(baseMint.publicKey, { ...mintAcct, data: mintData })
     }
 
     // Load + patch NTT state fixtures (singleton Config bound to USDC.s).
-    loadAndPatchNttConfig(svm, usdcMint.publicKey, custodyAta, NTT_USDC_PROGRAM_ID)
+    loadAndPatchNttConfig(svm, baseMint.publicKey, custodyAta, NTT_USDC_PROGRAM_ID)
     loadAndPatchNttPeer(svm, NTT_USDC_PROGRAM_ID)
     loadAndPatchNttInboxRateLimit(svm, NTT_USDC_PROGRAM_ID)
     loadAndPatchNttOutboxRateLimit(svm, NTT_USDC_PROGRAM_ID)
@@ -132,7 +132,7 @@ describe('send_usdc_to_user e2e (NTT transfer_lock outbound on USDC.s, Locking m
       svm,
       outflightFlow,
       {
-        fogoSender,
+        recipient: fogoSender,
         status: FlowStatus.Swapped,
         amount: sendAmount,
         payer: authority.publicKey,
@@ -169,11 +169,11 @@ describe('send_usdc_to_user e2e (NTT transfer_lock outbound on USDC.s, Locking m
       await client
         .sendUsdcToUser({
           payer: authority.publicKey,
-          usdcMint: usdcMint.publicKey,
+          baseMint: baseMint.publicKey,
           nttInboxItem,
           rentDestination: authority.publicKey,
           flowAmount: sendAmount,
-          flowFogoSender: fogoSender,
+          flowRecipient: fogoSender,
           outboxItem: outboxItem.publicKey,
         })
         .signers([outboxItem])

@@ -58,7 +58,7 @@ pub mod fogo_onre_relayer {
     }
 
     /// Lock USDC via NTT and atomically emit the outbound VAA back to
-    /// `flow.fogo_sender`. `transfer_lock_account_count` splits
+    /// `flow.recipient`. `transfer_lock_account_count` splits
     /// `remaining_accounts` between `transfer_lock` and
     /// `release_wormhole_outbound` (mirrors `lock_onyc`).
     pub fn send_usdc_to_user<'info>(

@@ -138,11 +138,11 @@ describe('relayerClient.lockOnyc encodes transferLockAccountCount=14', () => {
   const provider = new AnchorProvider(connection, wallet, { commitment: 'confirmed' })
   const client = new RelayerClient(provider as any)
 
-  const onycMint = Keypair.generate().publicKey
+  const assetMint = Keypair.generate().publicKey
   const nttInboxItem = Keypair.generate().publicKey
   const payer = Keypair.generate().publicKey
   const outboxItem = Keypair.generate().publicKey
-  const flowFogoSender = new Uint8Array(32).fill(0xAB)
+  const flowRecipient = new Uint8Array(32).fill(0xAB)
 
   const release = {
     wormholeProgram: Keypair.generate().publicKey,
@@ -156,11 +156,11 @@ describe('relayerClient.lockOnyc encodes transferLockAccountCount=14', () => {
     const ix = await client
       .lockOnyc({
         payer,
-        onycMint,
+        assetMint,
         nttInboxItem,
         rentDestination: payer,
         flowAmount: 500_000n,
-        flowFogoSender,
+        flowRecipient,
         outboxItem,
         release,
       })
@@ -176,11 +176,11 @@ describe('relayerClient.lockOnyc encodes transferLockAccountCount=14', () => {
     const ix = await client
       .lockOnyc({
         payer,
-        onycMint,
+        assetMint,
         nttInboxItem,
         rentDestination: payer,
         flowAmount: 500_000n,
-        flowFogoSender,
+        flowRecipient,
         outboxItem,
         release,
       })
@@ -195,11 +195,11 @@ describe('relayerClient.lockOnyc encodes transferLockAccountCount=14', () => {
     expect(() =>
       client.lockOnyc({
         payer,
-        onycMint,
+        assetMint,
         nttInboxItem,
         rentDestination: payer,
         flowAmount: 500_000n,
-        flowFogoSender,
+        flowRecipient,
         outboxItem,
       }),
     ).toThrow(/release.*required/i)

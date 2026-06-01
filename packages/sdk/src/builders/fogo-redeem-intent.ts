@@ -20,7 +20,7 @@ import {
  * PDA (`[USER_INBOX_SEED, userWallet]` under the relayer). On Solana the
  * relayer's `unlock_onyc` pins the VTM sender to the {OnRe, Fogo} setter
  * allowlist, re-derives the inbox PDA from `userWallet`, sweeps the
- * released ONyc into custody, and records `flow.fogo_sender = userWallet`
+ * released ONyc into custody, and records `flow.recipient = userWallet`
  * for the return leg. See Task 11 determination
  * (`docs/tmp/redeem-recipient-shape.md`).
  *

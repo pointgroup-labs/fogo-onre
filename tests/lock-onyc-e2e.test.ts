@@ -48,8 +48,8 @@ describe('lock_onyc e2e (NTT transfer_lock)', () => {
   let svm: LiteSVM
   let authority: Keypair
   let client: RelayerClient
-  let usdcMint: Keypair
-  let onycMint: Keypair
+  let baseMint: Keypair
+  let assetMint: Keypair
   let relayerAuthorityPda: PublicKey
   let nttTokenAuthorityPda: PublicKey
 
@@ -65,21 +65,21 @@ describe('lock_onyc e2e (NTT transfer_lock)', () => {
     ;[nttTokenAuthorityPda] = findTokenAuthorityPda(NTT_ONYC_PROGRAM_ID)
 
     // Create USDC mint (normal)
-    usdcMint = createMint(svm, authority, 6)
+    baseMint = createMint(svm, authority, 6)
 
     // Create ONyc mint with mint authority = NTT token_authority PDA
-    onycMint = createMintWithAuthority(svm, authority, nttTokenAuthorityPda, 6)
+    assetMint = createMintWithAuthority(svm, authority, nttTokenAuthorityPda, 6)
 
     // External ONyc fee vault — authority-owned ATA, distinct from the
     // relayer's operating ONyc ATA created by `initialize`.
-    const feeVault = createAta(svm, authority, onycMint.publicKey, authority.publicKey)
+    const feeVault = createAta(svm, authority, assetMint.publicKey, authority.publicKey)
 
     // Initialize relayer
     await client
       .initialize({
         authority: authority.publicKey,
-        usdcMint: usdcMint.publicKey,
-        onycMint: onycMint.publicKey,
+        baseMint: baseMint.publicKey,
+        assetMint: assetMint.publicKey,
         feeVault,
         depositFeeBps: 50,
         withdrawFeeBps: 100,
@@ -87,7 +87,7 @@ describe('lock_onyc e2e (NTT transfer_lock)', () => {
       .rpc()
 
     // Fund relayer's ONyc ATA with balance (mint authority is PDA, so patch directly)
-    const onycAta = getAssociatedTokenAddressSync(onycMint.publicKey, relayerAuthorityPda, true)
+    const onycAta = getAssociatedTokenAddressSync(assetMint.publicKey, relayerAuthorityPda, true)
     const ataAcct = svm.getAccount(onycAta)
     if (!ataAcct) {
       throw new Error('ONyc ATA not found after initialize')
@@ -99,19 +99,19 @@ describe('lock_onyc e2e (NTT transfer_lock)', () => {
 
     // Patch ONyc mint supply to match the funded ATA balance
     // SPL Mint layout: mint_authority_option(4) + mint_authority(32) + supply(8@36)
-    const mintAcct = svm.getAccount(onycMint.publicKey)
+    const mintAcct = svm.getAccount(assetMint.publicKey)
     if (!mintAcct) {
       throw new Error('ONyc mint not found')
     }
     const mintData = new Uint8Array(mintAcct.data)
     const mintView = new DataView(mintData.buffer, mintData.byteOffset)
     mintView.setBigUint64(36, 1_000_000n, true)
-    svm.setAccount(onycMint.publicKey, { ...mintAcct, data: mintData })
+    svm.setAccount(assetMint.publicKey, { ...mintAcct, data: mintData })
 
     // Create custody ATA for NTT token_authority
-    const custodyAta = getAssociatedTokenAddressSync(onycMint.publicKey, nttTokenAuthorityPda, true)
+    const custodyAta = getAssociatedTokenAddressSync(assetMint.publicKey, nttTokenAuthorityPda, true)
     const custodyData = new Uint8Array(165)
-    custodyData.set(onycMint.publicKey.toBytes(), 0) // mint
+    custodyData.set(assetMint.publicKey.toBytes(), 0) // mint
     custodyData.set(nttTokenAuthorityPda.toBytes(), 32) // owner
     custodyData[108] = 1 // state = Initialized
     svm.setAccount(custodyAta, {
@@ -127,7 +127,7 @@ describe('lock_onyc e2e (NTT transfer_lock)', () => {
 
     // Load real mainnet NTT account fixtures, relocated to PDAs derived
     // under the ONyc NTT manager program (with bump bytes patched).
-    loadAndPatchNttConfig(svm, onycMint.publicKey, custodyAta, NTT_ONYC_PROGRAM_ID)
+    loadAndPatchNttConfig(svm, assetMint.publicKey, custodyAta, NTT_ONYC_PROGRAM_ID)
     loadAndPatchNttPeer(svm, NTT_ONYC_PROGRAM_ID)
     loadAndPatchNttInboxRateLimit(svm, NTT_ONYC_PROGRAM_ID)
     loadAndPatchNttOutboxRateLimit(svm, NTT_ONYC_PROGRAM_ID)
@@ -144,7 +144,7 @@ describe('lock_onyc e2e (NTT transfer_lock)', () => {
 
     // Inject a Swapped flow
     setFlowAccount(svm, inflightPda, {
-      fogoSender,
+      recipient: fogoSender,
       status: FlowStatus.Swapped,
       amount,
       payer: authority.publicKey,
@@ -171,11 +171,11 @@ describe('lock_onyc e2e (NTT transfer_lock)', () => {
       await client
         .lockOnyc({
           payer: authority.publicKey,
-          onycMint: onycMint.publicKey,
+          assetMint: assetMint.publicKey,
           nttInboxItem: nttInboxItem.publicKey,
           rentDestination: authority.publicKey,
           flowAmount: amount,
-          flowFogoSender: fogoSender,
+          flowRecipient: fogoSender,
           outboxItem: outboxItem.publicKey,
         })
         .signers([outboxItem])

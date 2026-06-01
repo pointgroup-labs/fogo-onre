@@ -9,13 +9,13 @@ use crate::constants::{
 };
 use crate::cpi::invoke_relayer_signed;
 use crate::error::RelayerError;
-use crate::events::OnycUnlocked;
+use crate::events::Received;
 use crate::ntt::{
     derive_inbox_item_pda_from_vtm, parse_fogo_sender_from_vtm,
     validate_ntt_redeem_release_accounts, InboxItem, NttRedeemArgs, NttReleaseInboundArgs,
     ReleaseStatus, TRANSCEIVER_MESSAGE_FROM_CHAIN_OFFSET,
 };
-use crate::state::{Flow, FlowStatus, RelayerConfig};
+use crate::state::{Direction, Flow, FlowStatus, RelayerConfig};
 
 /// Skip-path validation when the inbox item is already `Released` (NTT v1
 /// `release_inbound` is permissionless — the Wormhole executor may redeem
@@ -170,30 +170,31 @@ pub fn handler<'info>(
             *ctx.accounts.token_program.key,
             TransferChecked {
                 from: ctx.accounts.user_inbox_ata.to_account_info(),
-                mint: ctx.accounts.onyc_mint.to_account_info(),
-                to: ctx.accounts.onyc_ata.to_account_info(),
+                mint: ctx.accounts.asset_mint.to_account_info(),
+                to: ctx.accounts.asset_ata.to_account_info(),
                 authority: ctx.accounts.user_inbox_authority.to_account_info(),
             },
             &[inbox_seeds],
         ),
         amount,
-        ctx.accounts.onyc_mint.decimals,
+        ctx.accounts.asset_mint.decimals,
     )?;
 
     let flow_key = ctx.accounts.outflight_flow.key();
     let user_wallet_bytes = user_wallet_key.to_bytes();
 
     let flow = &mut ctx.accounts.outflight_flow;
-    flow.fogo_sender = user_wallet_bytes;
-    flow.status = FlowStatus::Claimed;
+    flow.recipient = user_wallet_bytes;
+    flow.status = FlowStatus::Received;
     flow.amount = amount;
     flow.payer = ctx.accounts.payer.key();
     flow.bump = ctx.bumps.outflight_flow;
 
-    emit!(OnycUnlocked {
+    emit!(Received {
         flow: flow_key,
         ntt_inbox_item: ctx.accounts.ntt_inbox_item.key(),
-        fogo_sender: user_wallet_bytes,
+        recipient: user_wallet_bytes,
+        direction: Direction::Withdraw,
         amount,
     });
 
@@ -208,7 +209,7 @@ pub struct UnlockOnyc<'info> {
     #[account(
         seeds = [CONFIG_SEED],
         bump = relayer_config.bump,
-        has_one = onyc_mint,
+        has_one = asset_mint,
     )]
     pub relayer_config: Account<'info, RelayerConfig>,
 
@@ -216,16 +217,16 @@ pub struct UnlockOnyc<'info> {
     #[account(seeds = [RELAYER_SEED], bump = relayer_config.relayer_authority_bump)]
     pub relayer_authority: UncheckedAccount<'info>,
 
-    pub onyc_mint: InterfaceAccount<'info, Mint>,
+    pub asset_mint: InterfaceAccount<'info, Mint>,
 
     /// Sweep destination — long-lived relayer-authority ONyc ATA.
     #[account(
         mut,
-        associated_token::mint = onyc_mint,
+        associated_token::mint = asset_mint,
         associated_token::authority = relayer_authority,
         associated_token::token_program = token_program,
     )]
-    pub onyc_ata: InterfaceAccount<'info, TokenAccount>,
+    pub asset_ata: InterfaceAccount<'info, TokenAccount>,
 
     /// Originating FOGO wallet (Solana keys are chain-agnostic).
     /// Pinned via `user_inbox_authority` PDA derivation + NTT release
@@ -246,7 +247,7 @@ pub struct UnlockOnyc<'info> {
     /// the executor create the ATA on first delivery.
     #[account(
         mut,
-        associated_token::mint = onyc_mint,
+        associated_token::mint = asset_mint,
         associated_token::authority = user_inbox_authority,
         associated_token::token_program = token_program,
     )]

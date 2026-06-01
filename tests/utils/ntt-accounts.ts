@@ -421,7 +421,7 @@ function setNttAccount(
 export function setupNttState(
   svm: LiteSVM,
   params: {
-    onycMint: PublicKey
+    assetMint: PublicKey
     tokenProgram: PublicKey
     custodyAccount: PublicKey
     fogoChainId: number // 51
@@ -448,7 +448,7 @@ export function setupNttState(
     bump: configBump,
     owner: PublicKey.default, // doesn't matter for tests
     pendingOwner: null,
-    mint: params.onycMint,
+    mint: params.assetMint,
     tokenProgram: params.tokenProgram,
     mode: NttMode.Locking,
     chainId: 1, // Solana
