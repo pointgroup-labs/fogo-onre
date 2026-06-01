@@ -71,6 +71,15 @@ pub fn handler<'info>(
     // NAV floor — read OnRe's deposit Offer step price for the bound mints,
     // derive the slippage floor.
     let nav_floor: u64 = {
+        require_keys_eq!(
+            ctx.accounts.onre_offer.key(),
+            ctx.accounts.relayer_config.price_oracle,
+            RelayerError::BadPriceOracle
+        );
+        require!(
+            ctx.accounts.relayer_config.price_oracle != Pubkey::default(),
+            RelayerError::BadPriceOracle
+        );
         let price = read_offer_nav_price(
             &ctx.accounts.onre_offer.to_account_info(),
             &ctx.accounts.relayer_config.base_mint,

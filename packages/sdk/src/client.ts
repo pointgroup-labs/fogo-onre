@@ -90,6 +90,7 @@ export class RelayerClient {
     withdrawFeeBps?: number | null
     newAuthority?: PublicKey | null
     maxSlippageBps?: number | null
+    priceOracle?: PublicKey | null
   } = {}) {
     const authority = params.authority ?? this.providerPublicKey()
     if (!authority) {
@@ -104,6 +105,7 @@ export class RelayerClient {
         params.withdrawFeeBps ?? null,
         params.newAuthority ?? null,
         params.maxSlippageBps ?? null,
+        params.priceOracle ?? null,
       )
       .accountsPartial({
         authority,
@@ -547,6 +549,11 @@ export class RelayerClient {
 
   async fetchConfig() {
     return this.program.account.relayerConfig.fetch(this.configPda)
+  }
+
+  /** Decode a `Flow` account at any PDA (inflight or outflight). */
+  async fetchFlow(pda: PublicKey) {
+    return this.program.account.flow.fetch(pda)
   }
 
   async fetchInflightFlow(nttInboxItem: PublicKey) {

@@ -13,6 +13,7 @@ use crate::constants::{
     ONRE_SECONDS_IN_YEAR,
 };
 use crate::error::RelayerError;
+use crate::state::Direction;
 
 #[derive(AnchorSerialize)]
 pub struct OnreTakeOfferArgs {
@@ -248,6 +249,23 @@ pub fn deposit_expected_out(
     u64::try_from(num / den).map_err(|_| error!(RelayerError::OnreNavOverflow))
 }
 
+/// Direction-aware NAV expected-out. Deposit converts base→asset (÷ price);
+/// withdraw converts asset→base (× price). `base_decimals`/`asset_decimals`
+/// are the mint decimals; the caller supplies `swap_in` in the input mint's
+/// atomic units. Reuses the existing, tested per-direction math.
+pub fn oracle_expected_out(
+    price: u64,
+    swap_in: u64,
+    direction: Direction,
+    base_decimals: u8,
+    asset_decimals: u8,
+) -> Result<u64> {
+    match direction {
+        Direction::Deposit => deposit_expected_out(swap_in, price, base_decimals, asset_decimals),
+        Direction::Withdraw => redemption_expected_out(swap_in, price, asset_decimals, base_decimals),
+    }
+}
+
 /// Apply a basis-point slippage haircut to a gross expected output.
 ///
 /// Fail-closed on `slippage_bps > 10_000`: a deploy-time typo must produce
@@ -261,4 +279,20 @@ pub fn apply_slippage_floor(gross_expected: u64, slippage_bps: u16) -> Result<u6
         .checked_mul(factor)
         .ok_or(RelayerError::OnreNavOverflow)?;
     u64::try_from(prod / 10_000).map_err(|_| error!(RelayerError::OnreNavOverflow))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn oracle_expected_out_branches_on_direction() {
+        let price = 1_000_000_000u64; // 1.0 in 1e9 fp
+        // deposit: base(6dp) -> asset(9dp), divide by price
+        let dep = oracle_expected_out(price, 1_000_000, Direction::Deposit, 6, 9).unwrap();
+        // withdraw: asset(9dp) -> base(6dp), multiply by price
+        let wd = oracle_expected_out(price, 1_000_000_000, Direction::Withdraw, 6, 9).unwrap();
+        assert_eq!(dep, deposit_expected_out(1_000_000, price, 6, 9).unwrap());
+        assert_eq!(wd, redemption_expected_out(1_000_000_000, price, 9, 6).unwrap());
+    }
 }

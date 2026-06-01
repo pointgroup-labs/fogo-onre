@@ -29,15 +29,17 @@ export interface FlowData {
   amount: bigint
   payer: PublicKey
   bump: number
+  /** 0=Deposit, 1=Withdraw; defaults to Deposit for legacy callers. */
+  direction?: number
 }
 
 /**
  * Serialize a Flow account in Anchor format:
- *   discriminator(8) + recipient(32) + status(1) + amount(8) + payer(32) + bump(1)
- * Total: 82 bytes
+ *   discriminator(8) + recipient(32) + status(1) + amount(8) + payer(32) + bump(1) + direction(1)
+ * Total: 83 bytes
  */
 export function serializeFlow(flow: FlowData): Uint8Array {
-  const data = new Uint8Array(8 + 32 + 1 + 8 + 32 + 1) // 82 bytes
+  const data = new Uint8Array(8 + 32 + 1 + 8 + 32 + 1 + 1) // 83 bytes
   const view = new DataView(data.buffer)
 
   let offset = 0
@@ -55,9 +57,36 @@ export function serializeFlow(flow: FlowData): Uint8Array {
   data.set(flow.payer.toBuffer(), offset)
   offset += 32
 
-  data[offset] = flow.bump
+  data[offset++] = flow.bump
+
+  data[offset] = flow.direction ?? 0
 
   return data
+}
+
+/**
+ * Byte offset of `RelayerConfig.price_oracle` (after the 8-byte disc and
+ * the four 32-byte pubkeys + three u16 + two u8 fixed fields preceding it).
+ */
+const CONFIG_PRICE_ORACLE_OFFSET = 144
+
+/**
+ * Patch `price_oracle` on an already-initialized RelayerConfig account.
+ * `configure` does not yet set this field, so tests that need the swap
+ * NAV-oracle pin satisfied splice it in directly.
+ */
+export function setConfigPriceOracle(
+  svm: LiteSVM,
+  configPda: PublicKey,
+  priceOracle: PublicKey,
+): void {
+  const acct = svm.getAccount(configPda)
+  if (!acct) {
+    throw new Error('setConfigPriceOracle: config account not found — initialize first')
+  }
+  const data = new Uint8Array(acct.data)
+  data.set(priceOracle.toBytes(), CONFIG_PRICE_ORACLE_OFFSET)
+  svm.setAccount(configPda, { ...acct, data })
 }
 
 /**

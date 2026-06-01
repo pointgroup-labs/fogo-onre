@@ -98,6 +98,7 @@ pub mod fogo_onre_relayer {
         withdraw_fee_bps: Option<u16>,
         new_authority: Option<Pubkey>,
         slippage_bps: Option<u16>,
+        price_oracle: Option<Pubkey>,
     ) -> Result<()> {
         configure::handler(
             ctx,
@@ -105,6 +106,7 @@ pub mod fogo_onre_relayer {
             withdraw_fee_bps,
             new_authority,
             slippage_bps,
+            price_oracle,
         )
     }
 

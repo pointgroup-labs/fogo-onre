@@ -526,6 +526,12 @@ export type FogoOnreRelayer = {
           "type": {
             "option": "u16"
           }
+        },
+        {
+          "name": "priceOracle",
+          "type": {
+            "option": "pubkey"
+          }
         }
       ]
     },
@@ -2204,6 +2210,14 @@ export type FogoOnreRelayer = {
           {
             "name": "bump",
             "type": "u8"
+          },
+          {
+            "name": "direction",
+            "type": {
+              "defined": {
+                "name": "direction"
+              }
+            }
           }
         ]
       }
@@ -2341,6 +2355,15 @@ export type FogoOnreRelayer = {
             "type": "u8"
           },
           {
+            "name": "priceOracle",
+            "docs": [
+              "Config-pinned OnRe `Offer` PDA — the swap value-floor oracle.",
+              "Zeroed in legacy accounts ⇒ `Pubkey::default()` ⇒ fail-closed",
+              "(`BadPriceOracle`) until `configure` sets it."
+            ],
+            "type": "pubkey"
+          },
+          {
             "name": "reserved",
             "docs": [
               "Headroom for future fixed-size fields without another migration."
@@ -2348,7 +2371,7 @@ export type FogoOnreRelayer = {
             "type": {
               "array": [
                 "u8",
-                128
+                96
               ]
             }
           },

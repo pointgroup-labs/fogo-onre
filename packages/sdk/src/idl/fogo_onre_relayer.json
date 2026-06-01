@@ -520,6 +520,12 @@
           "type": {
             "option": "u16"
           }
+        },
+        {
+          "name": "price_oracle",
+          "type": {
+            "option": "pubkey"
+          }
         }
       ]
     },
@@ -2198,6 +2204,14 @@
           {
             "name": "bump",
             "type": "u8"
+          },
+          {
+            "name": "direction",
+            "type": {
+              "defined": {
+                "name": "Direction"
+              }
+            }
           }
         ]
       }
@@ -2335,6 +2349,15 @@
             "type": "u8"
           },
           {
+            "name": "price_oracle",
+            "docs": [
+              "Config-pinned OnRe `Offer` PDA — the swap value-floor oracle.",
+              "Zeroed in legacy accounts ⇒ `Pubkey::default()` ⇒ fail-closed",
+              "(`BadPriceOracle`) until `configure` sets it."
+            ],
+            "type": "pubkey"
+          },
+          {
             "name": "reserved",
             "docs": [
               "Headroom for future fixed-size fields without another migration."
@@ -2342,7 +2365,7 @@
             "type": {
               "array": [
                 "u8",
-                128
+                96
               ]
             }
           },

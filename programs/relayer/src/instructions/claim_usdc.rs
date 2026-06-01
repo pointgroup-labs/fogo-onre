@@ -197,6 +197,7 @@ pub fn handler<'info>(
     flow.amount = amount;
     flow.payer = ctx.accounts.payer.key();
     flow.bump = ctx.bumps.inflight_flow;
+    flow.direction = Direction::Deposit;
 
     emit!(Received {
         flow: flow_key,

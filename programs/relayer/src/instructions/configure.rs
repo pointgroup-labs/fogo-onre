@@ -11,6 +11,7 @@ pub fn handler(
     withdraw_fee_bps: Option<u16>,
     new_authority: Option<Pubkey>,
     slippage_bps: Option<u16>,
+    price_oracle: Option<Pubkey>,
 ) -> Result<()> {
     let config = &mut ctx.accounts.relayer_config;
     let now = Clock::get()?.slot;
@@ -27,6 +28,9 @@ pub fn handler(
     }
     if let Some(bps) = slippage_bps {
         config.max_slippage_bps = bps;
+    }
+    if let Some(oracle) = price_oracle {
+        config.price_oracle = oracle;
     }
 
     if let Some(vault) = &ctx.accounts.fee_vault {

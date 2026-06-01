@@ -29,8 +29,13 @@ pub struct RelayerConfig {
     pub relayer_authority_bump: u8,
     pub bump: u8,
 
+    /// Config-pinned OnRe `Offer` PDA — the swap value-floor oracle.
+    /// Zeroed in legacy accounts ⇒ `Pubkey::default()` ⇒ fail-closed
+    /// (`BadPriceOracle`) until `configure` sets it.
+    pub price_oracle: Pubkey,
+
     /// Headroom for future fixed-size fields without another migration.
-    pub reserved: [u8; 128],
+    pub reserved: [u8; 96],
 
     /// Promoted to `authority` by `accept_authority` (two-step handoff).
     pub pending_authority: Option<Pubkey>,
@@ -208,4 +213,8 @@ pub struct Flow {
     pub payer: Pubkey,
 
     pub bump: u8,
+
+    /// `Direction::Deposit` or `Direction::Withdraw`. Persisted at receive,
+    /// read by `swap`/`send` to select fee side and NTT manager.
+    pub direction: Direction,
 }

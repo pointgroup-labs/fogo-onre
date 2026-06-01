@@ -115,4 +115,7 @@ pub enum RelayerError {
 
     #[msg("Relayer ATA authority/delegate/close_authority was mutated by the swap CPI")]
     AtaAuthorityTampered,
+
+    #[msg("price_oracle account does not match relayer_config.price_oracle (or it is unset)")]
+    BadPriceOracle,
 }

@@ -1,7 +1,7 @@
 export { expectError, expectFailure, extractErrorCode, failedInProgram, logMatches } from './errors'
 export { loadAllFixtures, loadFixture, loadFixtures, readFixtureBytes } from './fixture-loader'
 export { createAta, createMint, createMintWithAuthority, createTokenAccount, mintTo } from './mint'
-export { FlowStatus, serializeFlow, setFlowAccount } from './mock-accounts'
+export { FlowStatus, serializeFlow, setConfigPriceOracle, setFlowAccount } from './mock-accounts'
 export * from './ntt-accounts'
 export * from './onre-accounts'
 export { loadAndPatchOnreOffer } from './onre-fixtures'

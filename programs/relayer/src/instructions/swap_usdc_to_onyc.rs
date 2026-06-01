@@ -28,6 +28,15 @@ pub fn handler<'info>(ctx: Context<'info, SwapUsdcToOnyc<'info>>) -> Result<()> 
 
     // NAV floor — pin onre_offer to OnRe's deposit Offer PDA for the bound
     // mints, read its step price, derive the slippage-adjusted min-out.
+    require_keys_eq!(
+        ctx.accounts.onre_offer.key(),
+        ctx.accounts.relayer_config.price_oracle,
+        RelayerError::BadPriceOracle
+    );
+    require!(
+        ctx.accounts.relayer_config.price_oracle != Pubkey::default(),
+        RelayerError::BadPriceOracle
+    );
     let price = read_offer_nav_price(
         &ctx.accounts.onre_offer.to_account_info(),
         &ctx.accounts.relayer_config.base_mint,

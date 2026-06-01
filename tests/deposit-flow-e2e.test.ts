@@ -56,6 +56,7 @@ import {
   ONRE_STATE_FIXTURE,
   ONRE_VAULT_AUTHORITY_FIXTURE,
   readPeerAddress,
+  setConfigPriceOracle,
   setRegisteredTransceiver,
   setValidatedTransceiverMessage,
 } from './utils'
@@ -129,7 +130,9 @@ describe('deposit flow e2e (claim_usdc → swap_usdc_to_onyc)', () => {
     loadFixture(svm, ONRE_VAULT_AUTHORITY_FIXTURE)
     loadFixture(svm, ONRE_PERM_AUTHORITY_FIXTURE)
     loadFixture(svm, ONRE_MINT_AUTHORITY_FIXTURE)
-    loadAndPatchOnreOffer(svm, baseMint.publicKey, assetMint.publicKey)
+    const offerPda = loadAndPatchOnreOffer(svm, baseMint.publicKey, assetMint.publicKey)
+    // Swap NAV-oracle pin requires config.price_oracle == the Offer PDA.
+    setConfigPriceOracle(svm, client.configPda, offerPda)
 
     const vaultUsdcAta = getAssociatedTokenAddressSync(baseMint.publicKey, onreVaultAuthorityPda, true)
     const vaultOnycAta = getAssociatedTokenAddressSync(assetMint.publicKey, onreVaultAuthorityPda, true)

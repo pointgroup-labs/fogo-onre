@@ -6,6 +6,7 @@ import {
   findInflightFlowPda,
   findIntentTransferSetterPda,
   findNttPeerPda,
+  findOnreOfferPda,
   findOutflightFlowPda,
   findUserInboxAuthorityPda,
   FOGO_WORMHOLE_CHAIN_ID,
@@ -27,6 +28,7 @@ import {
   FlowStatus,
   logMatches,
   mintTo,
+  setConfigPriceOracle,
   setFlowAccount,
   setValidatedTransceiverMessage,
 } from './utils'
@@ -157,6 +159,24 @@ describe('relayer', () => {
       expect(config.depositFeeBps).toBe(0)
       expect(config.withdrawFeeBps).toBe(1_000)
     })
+
+    it('deserializes a pre-price_oracle config with oracle reading as default', async () => {
+      // A freshly-initialized config leaves price_oracle (carved from the
+      // all-zero reserved block) unset, so it reads as the default pubkey.
+      await client
+        .initialize({
+          authority: authority.publicKey,
+          baseMint: baseMint.publicKey,
+          assetMint: assetMint.publicKey,
+          feeVault,
+          depositFeeBps: 50,
+          withdrawFeeBps: 100,
+        })
+        .rpc()
+
+      const cfg = await client.fetchConfig()
+      expect(cfg.priceOracle.toBase58()).toBe(PublicKey.default.toBase58())
+    })
   })
 
   describe('configure', () => {
@@ -207,6 +227,14 @@ describe('relayer', () => {
 
       const config = await client.fetchConfig()
       expect(config.feeVault.toBase58()).toBe(newFeeVault.toBase58())
+    })
+
+    it('configure price_oracle sets the stored oracle pubkey', async () => {
+      const oracle = Keypair.generate().publicKey
+      await (await client.configure({ priceOracle: oracle })).rpc()
+
+      const cfg = await client.fetchConfig()
+      expect(cfg.priceOracle.toBase58()).toBe(oracle.toBase58())
     })
 
     it('stages fee raises with feeVault omitted (Optional account = null)', async () => {
@@ -585,6 +613,21 @@ describe('relayer', () => {
       )
     })
 
+    it('round-trips Flow.direction', async () => {
+      const nttInboxItem = Keypair.generate()
+      const [flowPda, bump] = findInflightFlowPda(nttInboxItem.publicKey, client.program.programId)
+      setFlowAccount(svm, flowPda, {
+        recipient: fogoSender,
+        status: FlowStatus.Received,
+        amount: 1_000n,
+        payer: authority.publicKey,
+        bump,
+        direction: 1,
+      }, client.program.programId)
+      const flow = await client.fetchFlow(flowPda)
+      expect('withdraw' in flow.direction).toBe(true)
+    })
+
     it('claim_usdc rejects forged system-owned inbox_item on the released-skip path', async () => {
       // Attack: a cranker self-funds its own inbox ATA and forges a
       // system-owned Released InboxItem to bypass the intent_transfer fee
@@ -773,6 +816,11 @@ describe('relayer', () => {
         bump,
       }, client.program.programId)
 
+      // Pin price_oracle to the derived offer PDA so the NAV-oracle pin
+      // passes and the owner check is what fires.
+      const [offerPda] = findOnreOfferPda(baseMint.publicKey, assetMint.publicKey, ONRE_PROGRAM_ID)
+      setConfigPriceOracle(svm, client.configPda, offerPda)
+
       // Fund USDC ATA so the relayer has balance
       const [authorityPda] = findAuthorityPda(client.program.programId)
       mintTo(svm, authority, baseMint.publicKey, authorityPda, 500_000)
@@ -795,6 +843,43 @@ describe('relayer', () => {
             ])
             .rpc(),
         'OnreOfferOwnerMismatch',
+      )
+    })
+
+    it('swap_usdc_to_onyc rejects when price_oracle is unset (BadPriceOracle)', async () => {
+      const nttInboxItem = Keypair.generate()
+      const [inflightPda, bump] = findInflightFlowPda(nttInboxItem.publicKey, client.program.programId)
+
+      // Received flow ready to swap; config left with price_oracle UNSET
+      // (default) — `initialize` zeros it and we never configure it here.
+      setFlowAccount(svm, inflightPda, {
+        recipient: fogoSender,
+        status: FlowStatus.Received,
+        amount: 500_000n,
+        payer: authority.publicKey,
+        bump,
+      }, client.program.programId)
+
+      const [authorityPda] = findAuthorityPda(client.program.programId)
+      mintTo(svm, authority, baseMint.publicKey, authorityPda, 500_000)
+
+      // SDK derives the CORRECT offer PDA, but the fail-closed pin rejects
+      // it because relayer_config.price_oracle is still the default pubkey.
+      await expectError(
+        () =>
+          client
+            .swapUsdcToOnyc({
+              baseMint: baseMint.publicKey,
+              assetMint: assetMint.publicKey,
+              feeVault,
+              nttInboxItem: nttInboxItem.publicKey,
+            })
+            .remainingAccounts([
+              { pubkey: ONRE_PROGRAM_ID, isSigner: false, isWritable: false },
+              { pubkey: client.authorityPda, isSigner: false, isWritable: false },
+            ])
+            .rpc(),
+        'BadPriceOracle',
       )
     })
 
