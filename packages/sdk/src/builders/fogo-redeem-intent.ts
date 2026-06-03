@@ -21,13 +21,11 @@ import {
  * relayer's `receive` pins the VTM sender to the {OnRe, Fogo} setter
  * allowlist, re-derives the inbox PDA from `userWallet`, sweeps the
  * released ONyc into custody, and records `flow.recipient = userWallet`
- * for the return leg. See Task 11 determination
- * (`docs/tmp/redeem-recipient-shape.md`).
+ * for the return leg.
  *
  * Composes the deposit primitives (`buildBridgeOutIntentMessage` +
  * `buildIntentVerifierIx` + `buildBridgeNttTokensIx`) parameterized for
- * the ONyc mint and the redeem recipient. The legacy plain-NTT
- * `transfer_burn` redeem path has been removed.
+ * the ONyc mint and the redeem recipient.
  */
 export interface BuildFogoRedeemIntentParams {
   /** Originating FOGO wallet that signs the intent. */

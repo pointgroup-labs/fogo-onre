@@ -76,10 +76,7 @@ export class RelayerClient {
       })
   }
 
-  /**
-   * Update admin-mutable config. All fields are optional (see prior
-   * docstring). Authority-only.
-   */
+  /** Update admin-mutable config. All fields optional. Authority-only. */
   async configure(params: {
     authority?: PublicKey
     assetMint?: PublicKey
@@ -132,16 +129,13 @@ export class RelayerClient {
   }
 
   /**
-   * Route-agnostic outbound send. Routes on `direction`:
-   * deposit pushes ONyc; withdraw pushes USDC. Specifically:
-   * deposit locks the asset mint via the ONyc NTT manager + inflight flow;
-   * withdraw locks the base mint via the USDC NTT manager + outflight flow.
-   * Each leg CPIs `transfer_lock` + `release_wormhole_outbound` atomically.
+   * Route-agnostic outbound send (deposit pushes ONyc, withdraw pushes
+   * USDC); each leg CPIs `transfer_lock` + `release_wormhole_outbound`
+   * atomically.
    *
-   * Failure-path callers (deliberately broken `remainingAccounts` for
-   * negative tests) MUST omit `flowAmount` / `flowRecipient` / `outboxItem`
-   * — the SDK returns the bare builder so they can attach their own
-   * `remainingAccounts` to exercise pre-CPI guards.
+   * Negative-test callers (deliberately broken `remainingAccounts`) MUST
+   * omit `flowAmount` / `flowRecipient` / `outboxItem` to get the bare
+   * builder back.
    */
   send(params: {
     payer: PublicKey
@@ -228,11 +222,9 @@ export class RelayerClient {
   }
 
   /**
-   * Permissionless, route-agnostic swap for an in-flight flow. Routes on the
-   * persisted `Flow.direction` — no direction arg. Deposit flows swap
-   * base→asset (fee from the asset output); withdraw flows swap asset→base
-   * (fee from the asset input). The caller passes the `flowPda` directly;
-   * the handler re-derives the seed namespace from `flow.direction`.
+   * Permissionless swap for an in-flight flow. Routes on persisted
+   * `Flow.direction` (no direction arg): deposit swaps base→asset, withdraw
+   * swaps asset→base.
    */
   swap(params: {
     flowPda: PublicKey
@@ -267,11 +259,10 @@ export class RelayerClient {
   }
 
   /**
-   * Permissionless, route-agnostic inbound NTT receive. Routes on the
-   * `direction` arg (deposit: base/USDC manager + inflight flow PDA;
-   * withdraw: asset/ONyc manager + outflight flow PDA). The handler sweeps
-   * the recorded amount from the per-user inbox ATA into relayer custody
-   * and creates the Flow receipt.
+   * Permissionless inbound NTT receive. Routes on `direction` (deposit:
+   * USDC manager + inflight flow; withdraw: ONyc manager + outflight flow).
+   * Sweeps the recorded amount from the per-user inbox ATA into custody and
+   * creates the Flow receipt.
    */
   receive(params: {
     payer: PublicKey
@@ -351,13 +342,7 @@ export class RelayerClient {
     return getAssociatedTokenAddressSync(mint, this.authorityPda, true)
   }
 
-  /**
-   * Shape the 14-account NTT `transfer_lock` argument list. Both
-   * outbound `send` legs (withdraw on USDC.s, deposit on ONyc)
-   * pass an identical clump differing only in `mint` and the
-   * NTT manager program id, so the relayer authority/from-token
-   * derivation is centralised here.
-   */
+  /** Shape the 14-account NTT `transfer_lock` list; both send legs differ only in `mint` + NTT program id. */
   private transferLockAccounts(args: {
     mint: PublicKey
     nttProgramId: PublicKey
@@ -387,13 +372,7 @@ export class RelayerClient {
     return { inflightFlow, outflightFlow }
   }
 
-  /**
-   * Per-user inbox-authority PDA + the ATA owned by it for `mint`.
-   *
-   * `receive` is the only consumer today; extracted so that any future
-   * inbox-aware instruction (e.g. send-back-to-sender) inherits the
-   * canonical derivation without copy-paste drift.
-   */
+  /** Per-user inbox-authority PDA + the ATA it owns for `mint`. */
   private userInboxBindings(userWallet: PublicKey, mint: PublicKey): {
     userInboxAuthority: PublicKey
     userInboxAta: PublicKey

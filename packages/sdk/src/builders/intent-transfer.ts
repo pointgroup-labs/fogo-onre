@@ -13,20 +13,14 @@ import { readonly, signerWritable, writable } from '../utils/accountMeta'
 
 /**
  * Wire-format primitives for FOGO `intent_transfer.bridge_ntt_tokens`.
- *
- * `@fogo/sessions-sdk`'s `bridgeOut` hardcodes `recipient_address` to the
- * wallet pubkey and can't override it. OnRe deposits need it to be the
- * per-user inbox PDA (`findUserInboxAuthorityPda(wallet)`) so the relayer
- * can sweep + record the originator, hence this re-implementation.
+ * Re-implemented (not `@fogo/sessions-sdk`'s `bridgeOut`) because OnRe
+ * deposits need `recipient_address` = the per-user inbox PDA, which
+ * `bridgeOut` can't override.
  *
  * Format invariant: the on-chain parser
  * `programs/intent-transfer/src/bridge/message.rs` accepts version `0.2`
  * only and matches the exact prefix + key/value lines below. Any drift
  * (whitespace, key order, version bump) breaks deposit silently.
- *
- * Caller-supplied (not built here): the Wormhole executor quote
- * (`signedQuoteBytes`), NTT sub-context PDAs (`NttBridgeSubAccounts`),
- * and the `nonce` (PDA `["bridge_ntt_nonce", source_ata.owner]`).
  */
 
 /** Non-Anchor 1-byte tag (IDL `discriminator: [1]`), not a sha256 sighash. */
@@ -60,8 +54,7 @@ export interface BuildBridgeOutIntentMessageParams {
 
 /**
  * Encode the bridge-out intent message exactly as the on-chain parser
- * `BridgeMessage::TryFrom<Vec<u8>>` expects. Output is the bytes the
- * user signs with their wallet.
+ * `BridgeMessage::TryFrom<Vec<u8>>` expects — the bytes the user signs.
  */
 export function buildBridgeOutIntentMessage(
   params: BuildBridgeOutIntentMessageParams,
@@ -82,11 +75,9 @@ export function buildBridgeOutIntentMessage(
 }
 
 /**
- * Wrap a signed intent in the SVM `Ed25519Program` native verifier
- * instruction. The wallet signature must precede `bridge_ntt_tokens`
- * in the same transaction; the on-chain handler reads
- * `Sysvar1nstructions` to pull this signature back out and verify it
- * against the intent message.
+ * Wrap a signed intent in the SVM `Ed25519Program` verifier ix. It must
+ * precede `bridge_ntt_tokens` in the same tx; the handler reads
+ * `Sysvar1nstructions` to recover and verify the signature.
  */
 export function buildIntentVerifierIx(
   walletPublicKey: PublicKey,
@@ -101,15 +92,10 @@ export function buildIntentVerifierIx(
 }
 
 /**
- * NTT sub-account context. All entries are caller-derived:
- * - PDAs: via Wormhole NTT SDK (`NTT.pdas`, `NTT.transceiverPdas`,
- *   `NTT.custodyAccountAddress`).
- * - `payeeNttWithExecutor`: from the signed-quote payee address.
- * - `nttOutboxItem`: fresh ephemeral keypair pubkey (caller adds the
- *   `Keypair` to the tx's `extraSigners`).
- * - `nttSessionAuthority`: derived against `intent_transfer_setter`
- *   (NOT the user wallet) since intent_transfer's intermediate ATA owner
- *   is the setter PDA.
+ * NTT sub-account context — all caller-derived (Wormhole NTT SDK for PDAs,
+ * signed-quote for `payeeNttWithExecutor`, fresh keypair for `nttOutboxItem`).
+ * `nttSessionAuthority` derives against `intent_transfer_setter`, not the
+ * user wallet — the intermediate ATA owner is the setter PDA.
  */
 export interface NttBridgeSubAccounts {
   nttManager: PublicKey
@@ -135,9 +121,8 @@ export interface NttBridgeSubAccounts {
 
 export interface BuildBridgeNttIxParams {
   /**
-   * Which `intent_transfer` program to target. Required and explicit —
-   * there is no default, so a caller can never silently route to the
-   * dormant Fogo program. Deposit/redeem pass `ONRE_INTENT_PROGRAM_ID`.
+   * Target `intent_transfer` program. Required and explicit — no default,
+   * so a caller can never silently route to the dormant Fogo program.
    */
   intentTransferProgramId: PublicKey
 

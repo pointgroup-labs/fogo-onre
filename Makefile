@@ -71,10 +71,10 @@ lint-fix: ## quality: ESLint --fix
 	pnpm lint:fix
 
 fmt: ## quality: cargo fmt --all
-	cargo fmt --all
+	cargo +nightly fmt --all
 
 fmt-check: ## quality: cargo fmt --check (CI gate)
-	cargo fmt --all -- --check
+	cargo +nightly fmt --all -- --check
 
 check: fmt-check lint test ## quality: Pre-push gate (fmt + lint + test)
 

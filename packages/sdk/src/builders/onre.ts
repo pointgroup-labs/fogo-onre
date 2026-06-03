@@ -76,11 +76,10 @@ export const OFFER_TOKEN_IN_MINT_OFFSET = 8
 export const OFFER_TOKEN_OUT_MINT_OFFSET = 40
 
 /**
- * Coupled OnRe deployment identifiers. `state` is a PDA of `programId`, and
- * `boss` is the pubkey stored INSIDE that State account — they only make
- * sense as a set. Mixing a custom `programId` with mainnet `boss` (or vice
- * versa) silently produces an invalid account list, so the API forces them
- * to travel together.
+ * Coupled OnRe deployment identifiers — `state` is a PDA of `programId`
+ * and `boss` is stored inside that State account, so they only make sense
+ * as a set. The API forces them to travel together; mixing a custom
+ * `programId` with a foreign `boss` silently yields an invalid account list.
  */
 export interface OnreDeployment {
   programId: PublicKey
@@ -113,13 +112,10 @@ export const ONRE_MAINNET_DEPLOYMENT: OnreDeployment = makeOnreDeployment(
 )
 
 /**
- * Optional overrides for `buildOnreSwapRemainingAccounts`. Defaults are wired
- * for OnRe mainnet (the same fixtures cloned into LiteSVM in the E2E tests).
- *
- * `deployment` is a single coupled object so partial overrides can't mix
- * mainnet defaults with a custom program. `tokenInProgram` and
- * `tokenOutProgram` are independent so Token-2022 mints can sit on either
- * side of the swap without forcing the other side to match.
+ * Optional overrides for `buildOnreSwapRemainingAccounts`; defaults wired
+ * for OnRe mainnet. `deployment` is one coupled object so partial overrides
+ * can't mix mainnet defaults with a custom program. The two token-program
+ * fields are independent so a Token-2022 mint can sit on either side.
  */
 export interface OnreSwapContext {
   /** OnRe deployment (programId, state PDA, boss). Defaults to mainnet. */

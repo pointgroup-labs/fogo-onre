@@ -1,25 +1,12 @@
 /**
- * TS mirror of OnRe NAV math + Offer-account byte layout.
+ * TS mirror of OnRe NAV math + Offer-account byte layout, paired
+ * byte-for-byte with `programs/relayer/src/onre.rs` (the Rust side has the
+ * `offer_layout_matches_fixture` tripwire; this module's tests pin the
+ * same constants). Consumers compute the same NAV floor `swap` enforces
+ * on-chain — drift means a "clears floor" quote gets rejected by the chain.
  *
- * Paired byte-for-byte with `programs/relayer/src/onre.rs`:
- *   - `apply_slippage_floor` ↔ `applySlippageFloor`
- *   - `redemption_expected_out` ↔ `redemptionExpectedOut`
- *   - `parse_active_offer_vector` ↔ `parseActiveOfferVector`
- *   - `calculate_step_price` ↔ `calculateStepPrice`
- *
- * **Drift contract.** Consumers use these to compute the same NAV floor
- * the on-chain `swap` will enforce. If they diverge, a
- * "quote clears floor" verdict gets rejected by the chain. The Rust
- * side has the `offer_layout_matches_fixture` tripwire; this module's
- * tests pin the same constants and replicate the same fixed-point math
- * at `bigint` precision (Rust uses `u128`).
- *
- * **Why bigint, not Number.** Intermediate products exceed 2^53. A
- * `u64::MAX` redemption multiplied by APR-scale factor overflows
- * silently in IEEE-754 double; bigint is exact.
- *
- * **Throws, not Result.** TS-side mirror; callers wrap in try/catch and
- * downgrade to a `quote_failed` decision rather than crashing.
+ * `bigint` (not Number): intermediate products exceed 2^53 and would lose
+ * precision in IEEE-754. Throws (not Result): callers wrap in try/catch.
  */
 
 // Pinned constants — mirror `programs/relayer/src/constants.rs:135-147`.

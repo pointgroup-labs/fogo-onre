@@ -1,15 +1,3 @@
-# OnRe paymaster config — the spec handed to the Fogo Labs paymaster
-# operator to register our domain + sponsorship lanes. Not read at
-# runtime by this repo; the webapp only targets the domain/variation by
-# name (FOGO_BRIDGE_PAYMASTER_DOMAIN / FOGO_BRIDGE_VARIATION in
-# packages/webapp/src/constants.ts). Schema mirrors upstream
-# fogo-foundation/fogo-sessions tilt/configs/paymaster.toml.
-#
-# Domain MUST equal the deployed NEXT_PUBLIC_APP_DOMAIN — the value the
-# webapp sends as paymasterDomain and whose autoassigned sponsor
-# (3AcB3szJnHeSiyLVLRS1a75vsYnYPMZCy5h1dzQV2n1G) is funded and owns the
-# fee_destination ATA, so the bridge fee accrues to us.
-
 [[domains]]
 domain = "https://app.ignitionfi.xyz"
 enable_session_management = true
@@ -66,4 +54,4 @@ constraint = { EqualTo = [{ U8 = 1 }] }
 # rotates keys.
 [[domains.tx_variations.instructions.data]]
 start_byte = 1
-constraint = { EqualTo = [{ NttSignedQuoter = "0xa54008017941ece968623a0dd8ee907e2b133596" }, ] }
+constraint = { EqualTo = [{ NttSignedQuoter = "0xa54008017941ece968623a0dd8ee907e2b133596" }] }

@@ -4,22 +4,14 @@ import { PublicKey } from '@solana/web3.js'
 import { findInboxItemPda } from '../builders/ntt'
 
 /**
- * VAA + Wormhole-NTT-transceiver + NttManagerMessage wire decoders, plus
- * the PDA derivations any cranker / observer needs to invoke `receive`:
+ * VAA + Wormhole-NTT-transceiver + NttManagerMessage wire decoders plus the
+ * PDA derivations `receive` needs:
+ *   - `nttInboxItem`          = ["inbox_item", keccak256(from_chain_BE || ntt_manager_message_wire)]
+ *   - `nttTransceiverMessage` = ["transceiver_message", from_chain_BE, message_id]
  *
- *   - `nttInboxItem`           = ["inbox_item", keccak256(from_chain_BE || ntt_manager_message_wire)]
- *   - `nttTransceiverMessage`  = ["transceiver_message", from_chain_BE, message_id]
- *
- * The serialization rules below mirror the test-rig decoders in
- * `tests/utils/ntt-accounts.ts` but only need to *read* (not write), so
- * they're considerably smaller. See that file for the long-form
- * commentary on wire vs Borsh divergence.
- *
- * NOT a full VAA validator — guardian signatures aren't checked. The
- * Solana NTT manager re-verifies them downstream during redeem. We only
- * need enough parsing to (a) recover the on-chain account addresses the
- * relayer's `receive` ix references, and (b) report
- * status to operators.
+ * Read-only mirror of `tests/utils/ntt-accounts.ts` (see there for wire-vs-Borsh
+ * notes). NOT a VAA validator — the Solana NTT manager re-verifies guardian
+ * signatures during redeem; we only parse enough to address accounts + report status.
  */
 
 const TRANSCEIVER_MESSAGE_SEED = Buffer.from('transceiver_message')

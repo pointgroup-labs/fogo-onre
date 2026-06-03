@@ -3,8 +3,6 @@ use anchor_lang::prelude::*;
 use crate::{constants::CONFIG_SEED, error::RelayerError, state::RelayerConfig};
 
 /// Step two of two-step authority rotation: pending authority self-promotes.
-/// Current authority does not sign — lets independent multisigs rotate
-/// without atomic cross-multisig coordination.
 pub fn handler(ctx: Context<AcceptAuthority>) -> Result<()> {
     let config = &mut ctx.accounts.relayer_config;
 

@@ -41,17 +41,16 @@ pub mod fogo_onre_relayer {
 
     /// Route-agnostic outbound send. Routes on `flow.direction`: deposit
     /// pushes asset (ONyc) out, withdraw pushes base (USDC) out, each via NTT
-    /// `transfer_lock` + atomic `release_wormhole_outbound`. Replaces
-    /// `lock_onyc` and `send_usdc_to_user`. `transfer_lock_account_count`
-    /// splits `remaining_accounts` between the two NTT CPIs.
+    /// `transfer_lock` + atomic `release_wormhole_outbound`.
+    /// `transfer_lock_account_count` splits `remaining_accounts` between the
+    /// two NTT CPIs.
     pub fn send<'info>(ctx: Context<'info, Send<'info>>, transfer_lock_account_count: u8) -> Result<()> {
         instructions::send::handler(ctx, transfer_lock_account_count)
     }
 
     /// Permissionless, route-agnostic swap. Routes on `flow.direction`:
     /// deposit swaps base→asset (fee from the asset output), withdraw swaps
-    /// asset→base (fee from the asset input). Replaces `swap_usdc_to_onyc`
-    /// and `swap_onyc_to_usdc`.
+    /// asset→base (fee from the asset input).
     pub fn swap<'info>(ctx: Context<'info, Swap<'info>>, swap_ix_data: Vec<u8>) -> Result<()> {
         instructions::swap::handler(ctx, swap_ix_data)
     }

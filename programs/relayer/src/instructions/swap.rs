@@ -127,11 +127,8 @@ pub fn handler<'info>(ctx: Context<'info, Swap<'info>>, swap_ix_data: Vec<u8>) -
         )?;
     }
 
-    // relayer_authority must sign (Jupiter's userTransferAuthority, OnRe's
-    // offer-taker). OnRe declares it `mut`, so we pass writability through
-    // rather than force readonly — and instead bound the writable+signer reach
-    // dynamically: snapshot lamports/owner/data here, re-check post-CPI so any
-    // router draining/reassigning/reallocating the PDA reverts the whole tx.
+    // relayer_authority signs the swap CPI; snapshot its lamports/owner/data
+    // to assert (post-CPI) the router didn't drain or reassign the PDA.
     let auth_info = ctx.accounts.relayer_authority.to_account_info();
     let auth_lamports_pre = auth_info.lamports();
     let auth_owner_pre = *auth_info.owner;

@@ -1,17 +1,11 @@
 import { FEE_DENOMINATOR_BPS, MAX_FEE_BPS, ONYC_DECIMALS, SECONDS_PER_YEAR, USDC_DECIMALS } from '../constants'
 
 /**
- * Fee + price math for the relayer.
- *
- * All math here mirrors on-chain behaviour exactly so quotes a UI shows
- * cannot diverge from what the program will execute. Mirrors:
- *   - `apply_fee_bps`            (programs/relayer/src/state.rs)
- *   - the OnRe price-vector formula in docs/architecture.md
- *
- * Inputs and outputs are bigints denominated in the smallest unit of the
- * relevant token. USDC uses 6 decimals, ONyc uses 9 decimals — see
- * USDC_DECIMALS / ONYC_DECIMALS. Floats and Number arithmetic are
- * intentionally avoided so quotes round identically to the program.
+ * Fee + price math, mirroring on-chain `apply_fee_bps`
+ * (`programs/relayer/src/state.rs`) and the OnRe price-vector formula so UI
+ * quotes can't diverge from execution. All amounts are bigints in the
+ * token's smallest unit (USDC 6dp, ONyc 9dp); floats are avoided so
+ * rounding matches the program exactly.
  */
 
 export interface FeeBreakdown {
@@ -22,15 +16,9 @@ export interface FeeBreakdown {
 }
 
 /**
- * Mirrors `apply_fee_bps` in `programs/relayer/src/state.rs`:
- *
- *   fee = floor(gross * bps / 10_000)
- *   net = gross - fee, must be > 0
- *
- * Throws on the same conditions the program would error on (rather than
- * surfacing them as Anchor errors deep inside a CPI):
- *   - `bps` outside `[0, MAX_FEE_BPS]` (program: `FeeBpsTooHigh`)
- *   - `gross <= 0` or resulting `net <= 0` (program: `ZeroAmountFlow`)
+ * Mirrors `apply_fee_bps`: `fee = floor(gross * bps / 10_000)`,
+ * `net = gross - fee` (must be > 0). Throws on the same conditions the
+ * program errors on: `bps` outside `[0, MAX_FEE_BPS]`, `gross <= 0`, `net <= 0`.
  */
 export function applyFeeBps(gross: bigint, bps: number): FeeBreakdown {
   if (!Number.isInteger(bps) || bps < 0 || bps > MAX_FEE_BPS) {
@@ -48,27 +36,13 @@ export function applyFeeBps(gross: bigint, bps: number): FeeBreakdown {
 }
 
 /**
- * Snapshot of the OnRe price-vector at a known point in time. Matches the
- * cached parameters maintained by OnRe and refreshed via Wormhole Queries
- * or governance.
+ * Snapshot of the OnRe price-vector at a point in time.
  *
- * **Convention.** `basePrice` and `priceScale` together represent the
- * **base-unit ratio** of USDC to ONyc, scaled as fixed-point:
- *
- *   real_ratio = basePrice / priceScale     (USDC base units per ONyc base unit)
- *
- * USDC is 6 decimals and ONyc is 9 decimals, so the human price 1.00 USDC
- * per 1 ONyc corresponds to a base-unit ratio of `1e6 / 1e9 = 0.001`.
- * Concretely, with `priceScale = 1_000_000_000n`, that human price is
- * stored as `basePrice = 1_000_000n`.
- *
- * Use `humanPriceToBaseRatio` at the boundary (UI inputs, config files,
- * test fixtures) to convert between human prices and this representation.
- * The quote functions below stay decimal-agnostic and operate purely on
- * base-unit amounts and base-unit ratios.
- *
- * Picking `priceScale = 1_000_000_000n` gives 9 digits of resolution which
- * is comfortably more than enough for ONyc's APR over realistic intervals.
+ * `basePrice / priceScale` is the base-unit ratio (USDC base units per ONyc
+ * base unit). With USDC 6dp / ONyc 9dp, human 1.00 USDC/ONyc = ratio 0.001,
+ * stored as `basePrice = 1_000_000n` at `priceScale = 1_000_000_000n`. Use
+ * `humanPriceToBaseRatio` at the boundary; the quote functions stay
+ * decimal-agnostic on base-unit amounts.
  */
 export interface OnycPriceSnapshot {
   basePrice: bigint
@@ -80,13 +54,10 @@ export interface OnycPriceSnapshot {
 }
 
 /**
- * Convert a human-readable USDC-per-ONyc price (e.g. "1.10 USDC per ONyc")
- * into the base-unit ratio expected by `OnycPriceSnapshot.basePrice`.
- *
+ * Convert a human USDC-per-ONyc price into the base-unit ratio for
+ * `OnycPriceSnapshot.basePrice`:
  *   baseRatio = humanPriceScaled * 10^USDC_DECIMALS / 10^ONYC_DECIMALS
- *
- * Pass `humanPriceScaled` already multiplied by `priceScale` to avoid float
- * intermediates. For "1.10" with priceScale=1e9, pass `1_100_000_000n`.
+ * Pass `humanPriceScaled` pre-multiplied by `priceScale` (e.g. `1_100_000_000n` for "1.10").
  */
 export function humanPriceToBaseRatio(humanPriceScaled: bigint): bigint {
   const usdcUnits = 10n ** BigInt(USDC_DECIMALS)
@@ -96,12 +67,8 @@ export function humanPriceToBaseRatio(humanPriceScaled: bigint): bigint {
 
 /**
  * Spot ONyc price at `nowSeconds`, accruing linearly from `startTimestamp`:
- *
  *   onyc_price = basePrice * (1 + aprBps/10_000 * elapsed / SECONDS_PER_YEAR)
- *
- * Returned as a fixed-point bigint with the same `priceScale` as the input.
- * For times before `startTimestamp`, returns `basePrice` unchanged (no
- * extrapolation backwards — the cached params don't apply yet).
+ * Returns `basePrice` unchanged for times before `startTimestamp`.
  */
 export function computeOnycPrice(snapshot: OnycPriceSnapshot, nowSeconds: bigint): bigint {
   const elapsed = nowSeconds > snapshot.startTimestamp
@@ -127,14 +94,10 @@ export interface DepositQuote {
 }
 
 /**
- * Quote a deposit (USDC.s on FOGO → ONyc on FOGO).
- *
- * Steps mirror the on-chain deposit chain:
- *   1. relayer swaps `inputUsdc` to ONyc at OnRe at the current price
- *      → `grossOnyc = inputUsdc * priceScale / onycPrice`
- *   2. `apply_deposit_fee` skims `feeOnyc` to `fee_vault`
- *      → `(outputFogoOnyc, feeOnyc) = applyFeeBps(grossOnyc, depositFeeBps)`
- *   3. NTT locks `outputFogoOnyc` ONyc and mints ONyc 1:1 to the user.
+ * Quote a deposit (USDC → ONyc on FOGO), mirroring the on-chain chain:
+ *   1. swap `inputUsdc` to ONyc at OnRe → `grossOnyc = inputUsdc * priceScale / onycPrice`
+ *   2. `apply_deposit_fee` skims `feeOnyc` → `applyFeeBps(grossOnyc, depositFeeBps)`
+ *   3. NTT locks the net and mints ONyc 1:1 to the user.
  */
 export function quoteDeposit(params: {
   inputUsdc: bigint
@@ -163,18 +126,13 @@ export interface WithdrawQuote {
 }
 
 /**
- * Quote a withdraw (ONyc on FOGO → USDC.s on FOGO).
+ * Quote a withdraw (ONyc → USDC on FOGO), mirroring the on-chain chain:
+ *   1. NTT burns `inputFogoOnyc` and releases ONyc to the relayer.
+ *   2. `apply_withdraw_fee` skims `feeOnyc`.
+ *   3. relayer redeems `netOnyc` at OnRe → `outputUsdc = netOnyc * onycPrice / priceScale`.
  *
- * Steps mirror the on-chain withdraw chain:
- *   1. NTT burns `inputFogoOnyc` ONyc on FOGO; releases `inputFogoOnyc` ONyc to the relayer.
- *   2. `apply_withdraw_fee` skims `feeOnyc` to `fee_vault`.
- *   3. relayer requests redemption of `netOnyc` from OnRe.
- *      → `outputUsdc = netOnyc * onycPrice / priceScale`
- *   4. (async) OnRe's `redemption_admin` fulfils, then the relayer NTT-sends
- *      USDC.s back to the user.
- *
- * The actual USDC delivered is set by OnRe at fulfilment time; this quote uses
- * the snapshot price the caller passes in. Display it as approximate.
+ * Actual USDC is set by OnRe at fulfilment; this uses the snapshot price, so
+ * display `outputUsdc` as approximate.
  */
 export function quoteWithdraw(params: {
   inputFogoOnyc: bigint

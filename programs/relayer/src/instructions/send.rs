@@ -14,8 +14,6 @@ use crate::{
     state::{Direction, Flow, FlowStatus, RelayerConfig},
 };
 
-/// `transfer_lock_account_count` splits `remaining_accounts` into the NTT
-/// `transfer_lock` prefix and the `release_wormhole_outbound` suffix.
 pub fn handler<'info>(ctx: Context<'info, Send<'info>>, transfer_lock_account_count: u8) -> Result<()> {
     let direction = ctx.accounts.flow.direction;
     require!(ctx.accounts.flow.status == FlowStatus::Swapped, RelayerError::FlowStatusMismatch);

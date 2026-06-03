@@ -50,11 +50,9 @@ export function findOutflightFlowPda(
 }
 
 /**
- * Per-user inbox authority PDA — `[USER_INBOX_SEED, wallet]` under the
- * relayer program. Used as `recipient_address` in the user-signed FOGO
- * intent so NTT `release_inbound` deposits USDC into the ATA owned by
- * this PDA. `receive` re-derives + PDA-signs a sweep into the
- * relayer custody ATA.
+ * Per-user inbox authority PDA `[USER_INBOX_SEED, wallet]`. Used as the
+ * intent `recipient_address` so NTT release deposits into this PDA's ATA;
+ * `receive` re-derives it and PDA-signs a sweep into relayer custody.
  */
 export function findUserInboxAuthorityPda(
   wallet: PublicKey,
@@ -69,9 +67,7 @@ export function findUserInboxAuthorityPda(
 /**
  * `intent_transfer`'s singleton setter PDA — the `NttManagerMessage.sender`
  * the relayer pins for inbound flows. Defaults to Fogo's program; pass
- * `ONRE_INTENT_PROGRAM_ID` for the fork's (distinct) setter. The relayer
- * allowlists both, so callers comparing an observed sender must derive
- * each program's setter separately.
+ * `ONRE_INTENT_PROGRAM_ID` for the fork. The relayer allowlists both.
  */
 export function findIntentTransferSetterPda(
   programId: PublicKey = INTENT_TRANSFER_PROGRAM_ID,
@@ -84,8 +80,7 @@ export function findIntentTransferSetterPda(
 
 /**
  * `intent_transfer`'s per-program signer PDA. The FOGO patched token
- * program requires this account, present-as-signer among a session
- * transfer's extra accounts, to prove the program is session-authorized.
+ * program requires it present-as-signer to prove session authorization.
  * Pass the same `intent_transfer` program targeted by the bridge ix.
  */
 export function findProgramSignerPda(

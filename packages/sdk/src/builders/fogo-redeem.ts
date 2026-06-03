@@ -15,25 +15,11 @@ import {
 } from './ntt'
 
 /**
- * Standalone (non-CPI) builders for the FOGO-side ONyc redemption pair:
- * `redeem` (writes the inbox item) + `release_inbound_{mint,unlock}`
- * (mints or unlocks ONyc to the user's FOGO ATA).
- *
- * Symmetric to the Solana-side relayer flow: the relayer's `receive`
- * CPIs into `redeem` + `release_inbound_unlock` for incoming USDC. Here
- * we do the same shape directly (no relayer in the loop) for incoming
- * ONyc on FOGO.
- *
- * Both `_mint` and `_unlock` carry the manager's `custody` ATA (NTT v3
- * IDL field; same shape regardless of mode — burn mode burns from
- * custody as part of release, lock mode unlocks from custody). The
- * caller picks the variant based on `Config.mode` (decoded via
- * `decodeNttConfig`) at startup; mode is a deploy-time invariant on the
- * NTT manager and cannot be flipped at runtime.
- *
- * Source chain is fixed to Solana — the FOGO-side peer/inbox-rate-limit
- * PDAs are seeded by `SOLANA_WORMHOLE_CHAIN_ID`. Anything else yields
- * PDAs the manager can't validate.
+ * Standalone (non-CPI) FOGO-side ONyc redemption pair: `redeem` (writes
+ * the inbox item) + `release_inbound_{mint,unlock}` (mints or unlocks ONyc
+ * to the user's FOGO ATA). Caller picks the `_mint`/`_unlock` variant from
+ * `Config.mode` (a deploy-time invariant). Source chain is pinned to Solana
+ * — anything else yields PDAs the manager can't validate.
  */
 
 const REDEEM_DISCRIMINATOR = ixDiscriminator('redeem')
@@ -56,12 +42,9 @@ export interface BuildFogoNttRedeemIxParams {
 }
 
 /**
- * Build the NTT v3 `redeem` instruction.
- *
- * IDL pin (`example_native_token_transfers.json` v3.0.0, instruction
- * `redeem`): 10 accounts in order — payer(mut,signer), config, peer,
- * transceiverMessage, transceiver, mint, inboxItem(mut),
- * inboxRateLimit(mut), outboxRateLimit(mut), systemProgram.
+ * Build the NTT v3 `redeem` instruction. IDL pin (v3.0.0): 10 accounts in
+ * order — payer(mut,signer), config, peer, transceiverMessage, transceiver,
+ * mint, inboxItem(mut), inboxRateLimit(mut), outboxRateLimit(mut), systemProgram.
  */
 export function buildFogoNttRedeemIx(
   params: BuildFogoNttRedeemIxParams,
@@ -122,13 +105,9 @@ export interface BuildFogoNttReleaseInboundIxParams {
 }
 
 /**
- * Build the NTT v3 `release_inbound_mint` instruction (Burning mode).
- *
- * IDL pin (instruction `releaseInboundMint`, accounts.common): 8
- * required accounts in order — payer(mut,signer), config, inboxItem(mut),
- * recipient(mut), tokenAuthority, mint(mut), tokenProgram, custody(mut).
- * The optional `multisigTokenAuthority` is omitted (not used by the
- * standard single-signer manager deploy).
+ * Build the NTT v3 `release_inbound_mint` instruction (Burning mode). IDL
+ * pin: 8 accounts — payer(mut,signer), config, inboxItem(mut), recipient(mut),
+ * tokenAuthority, mint(mut), tokenProgram, custody(mut).
  */
 export function buildFogoNttReleaseInboundMintIx(
   params: BuildFogoNttReleaseInboundIxParams,
@@ -136,12 +115,7 @@ export function buildFogoNttReleaseInboundMintIx(
   return buildReleaseInboundIx(params, RELEASE_INBOUND_MINT_DISCRIMINATOR)
 }
 
-/**
- * Build the NTT v3 `release_inbound_unlock` instruction (Locking mode).
- *
- * IDL pin (instruction `releaseInboundUnlock`, accounts.common): same
- * 8-account layout as `release_inbound_mint`.
- */
+/** Build the NTT v3 `release_inbound_unlock` instruction (Locking mode); same 8-account layout as `release_inbound_mint`. */
 export function buildFogoNttReleaseInboundUnlockIx(
   params: BuildFogoNttReleaseInboundIxParams,
 ): TransactionInstruction {
@@ -173,6 +147,3 @@ function buildReleaseInboundIx(
 
   return new TransactionInstruction({ programId: params.nttManagerProgramId, keys, data })
 }
-
-// Back-compat alias for the previous, narrower param interface name.
-export type BuildFogoNttReleaseInboundMintIxParams = BuildFogoNttReleaseInboundIxParams

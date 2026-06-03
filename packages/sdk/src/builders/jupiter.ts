@@ -2,11 +2,8 @@ import type { AccountMeta } from '@solana/web3.js'
 import { Buffer } from 'node:buffer'
 import { PublicKey } from '@solana/web3.js'
 
-// Jupiter deprecated `quote-api.jup.ag/v6` in favor of host-prefixed
-// `swap/v1` endpoints: `lite-api.jup.ag` (free, rate-limited) and
-// `api.jup.ag` (keyed). Override via `JUPITER_API_BASE` for self-hosted
-// or paid deployments. Response shapes are wire-compatible with v6 for
-// the fields this builder reads (`swapInstruction`, ALT list).
+// Jupiter's host-prefixed `swap/v1` endpoints (v6 wire-compatible for the
+// fields this builder reads). Override host via `JUPITER_API_BASE`.
 const JUP_API_BASE = (typeof process !== 'undefined' && process.env?.JUPITER_API_BASE)
   || 'https://lite-api.jup.ag'
 const JUP_QUOTE = `${JUP_API_BASE}/swap/v1/quote`
@@ -17,12 +14,9 @@ export const JUPITER_V6_PROGRAM_ID = new PublicKey(
 )
 
 /**
- * Anchor discriminator for Jupiter v6 `shared_accounts_route` —
- * `sha256("global:shared_accounts_route")[..8]`. Mirrors the on-chain
- * `SHARED_ACCOUNTS_ROUTE_IX` constant in `programs/relayer/src/jupiter.rs`.
- * Used here so the SDK rejects non-`shared_accounts_route` variants
- * before the recovery script broadcasts a tx that would only fail
- * on-chain with `JupiterIxDiscriminatorMismatch`.
+ * Anchor discriminator for Jupiter v6 `shared_accounts_route`. Mirrors
+ * `SHARED_ACCOUNTS_ROUTE_IX` in `programs/relayer/src/jupiter.rs`; checked
+ * here so the SDK rejects other variants before broadcasting.
  */
 const SHARED_ACCOUNTS_ROUTE_DISCRIMINATOR = Uint8Array.from([
   193, 32, 155, 51, 65, 214, 156, 129,
@@ -129,6 +123,8 @@ export async function fetchJupiterRoute(p: JupiterRouteParams): Promise<JupiterR
 
   const routeAccounts = swap.swapInstruction.accounts.map((a) => {
     const pubkey = new PublicKey(a.pubkey)
+    // Clear the signer bit on `user_transfer_authority` (= our PDA): it
+    // can't sign at tx level, and the on-chain handler uses plain `invoke`.
     return {
       pubkey,
       isSigner: a.isSigner && !pubkey.equals(p.userPublicKey),
@@ -138,20 +134,12 @@ export async function fetchJupiterRoute(p: JupiterRouteParams): Promise<JupiterR
 
   return {
     ixData,
-    // Sanitize signer bits before handing to the outer relayer ix:
-    // Jupiter marks `user_transfer_authority` (= our `relayerAuthorityPda`)
-    // as `isSigner: true`, but that PDA cannot sign at the transaction
-    // level. The outer handler uses plain `invoke` (not `invoke_signed`)
-    // anyway, so leaving the bit on would just make tx build fail. Clear
-    // the bit on the meta whose pubkey == userPublicKey.
     routeAccounts,
     quotedOutAmount: BigInt((quote as { outAmount: string }).outAmount),
     addressLookupTables: (swap.addressLookupTableAddresses ?? []).map(s => new PublicKey(s)),
     programId: JUPITER_V6_PROGRAM_ID,
-    // Account index 1 in Jupiter v6 `shared_accounts_route` is the
-    // `programAuthority` PDA — the SPL delegate that pulls ONyc out of
-    // the relayer's ATA. `swap` bounds its Approve to
-    // exactly this key for exactly `net_onyc`.
+    // Account index 1 of `shared_accounts_route` is the `programAuthority`
+    // PDA — the SPL delegate `swap` bounds its Approve to.
     swapDelegate: routeAccounts[1].pubkey,
   }
 }

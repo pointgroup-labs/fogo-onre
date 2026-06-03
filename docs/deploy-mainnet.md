@@ -626,6 +626,12 @@ legs are still being validated.
 | Fork deploy sig               | `5JyDPu7RD51AfHXkoWVJRWnXB8LS1i5rYhmtpK9vKGTwTvXZ6qAWBTZ9Qc1tXr1Uj8gkjx3s2Ak89mC4vmaJn3aJ`                                                                                                    |
 | Fork session-rail upgrade sig | `5FgStbQbrpYPqrEQW99hHpCpmeN2G5v2bdm9aBT61XvAoBihb67iJP3Ukq1gRg84qYTCfkBhh78RjoZHTCjraFg9` (verified hash `16557be43dfed0bd40b6986bf14ec5fc0e8524c4f1782767120df168290ce299`, slot 527819920) |
 | Fork prefix-trim upgrade sig  | `4JdRi3EFUzLkTffP7a6q52cXWLgxG6NHCV46d2VFLKm3ssRTegPacEdxgJmP1FMFci4Vyz5Doiyc1HvPkNKo2duo` (verified hash `9f4f15e5c2fbf21b4276b5d6549647fb03477ee76dfcd7c2aba11f1b288cbb14`, slot 527976757; `BRIDGE_MESSAGE_PREFIX` → `Fogo Bridge\n` for deposit-tx size fit) |
+| Fork fee_recipient upgrade sig | `4occELfCDsuN9TTz83vp8iyUd9xtbD4krKXbgKzoSHZokFyHdVoo9rATWmnJj6vxKNtDwoDTpcownQm1vcq3krEN` (verified hash `fc1bad40c8a4c3f3234bf99a2be35eb88e14cd855259e63b52038459a5dd66a6`, slot 528094419; configurable `FeeConfig.fee_recipient`, `update_fee_config` ix [5]) |
+| FeeConfig migration USDC.s     | `4MfW5e1bUPUwhukvQsuLfjatZrWGW6Mx93hn7yeRJUYNFkdXYxgLSyVPtHM3pBa9ebsadAMqm4temLgMhp62zyi8` (PDA `7i5UFAHZTKb8St5q4LkZAYmocYSajyd6cqd26CoMvXo6` → len 56, fees preserved, fee_recipient `tiaModT7…GzKLA`) |
+| FeeConfig migration ONyc       | `5WnhokUC88Q8866pTzXXeXeBwmnteRZBf4EJcCj3YeQySRRGe8h5ntW1JcrBnjDLGtMkwGTgn8GC77t3pXxeWDr7` (PDA `AwzcPdcBCttk5kczF2KUzPMPwMoNzmM5utkAKVRKQoBW` → len 56, fees preserved, fee_recipient `tiaModT7…GzKLA`) |
+| Deposit LUT += fee ATA         | `3R8UtMjo1vpf2Kac5bQ28Qk9ztU6uasmQyZuRsMNiapksxqhfHUsjN2WigTxwUeyVK4ZaDSdqwhtPrbn5PWwDkK6` (LUT `DDu9vk67…` += `A8jKKrMVwhdts75R8NvnjVt6FKxLvcuz3i5jsGV61iAp` = ATA(USDC.s, tiaModT7)) |
+| Redeem LUT += fee ATA          | `42uLj8JNPaWbw13FesDCkeDziCzGLgD6vHxfdT3tNHP5RWUsVEdyYFkehhM33WiEFsgwP8VzVxoVZ9Zkb7G5pfFK` (LUT `236GGhU4…` += `9XHZa5pR3NVacHCLZoRrHNpDTuxf8PjvRPrv8Usrbu7m` = ATA(ONyc, tiaModT7)) |
+| Redeem LUT += 6 static keys    | `3XGfjP1VtGAtbFtj6hQmPXhwKbDBHoJPwusxJor5Pzfcs577pzVth694xzrXzc4JoHUJVqS8NZz3BbrvjtrhPUkv` (LUT `236GGhU4…` += `5S4JfYAi…`, `Hm3Edu5h…`, `HUF7LHXm…`, `WCp5zSuQ…`, `433jJQoq…`, `F1Msm7Jz…`; compresses redeem tx 1232 B → 1046 B so paymaster re-sign fits — fixes redeem `sponsor_and_send` 502) |
 | Setter PDA init sig           | n/a — signer-only PDA, no init instruction                                                                                                                                                    |
 | Fork upgrade-authority freeze | deferred — kept upgradeable until §8 passes                                                                                                                                                   |
 | `register_ntt_config` USDC.s  | `Rwh2e14SAAp7BL9u8wHUxYgbPCcMvAwBeLvyaHTtZwphpkTmUaMXD5UgngYsyGyHy5nUit9he8DKX17mNj6HGME`                                                                                                     |
@@ -758,12 +764,23 @@ Verify pre-prod by paging an ATA back >7 days; if the cursor terminates earlier 
 | Propose new authority        | `configure(_, _, Some(new_pk))`                          | authority                   | Stages `pending_authority`                               |
 | Accept authority             | `accept_authority`                                       | new authority (NOT current) | Atomic swap                                              |
 | Cancel pending rotation      | `configure(_, _, Some(Pubkey::default()))`               | authority                   | Instant                                                  |
+| Set / repoint price oracle   | `configure(_, _, _, _, Some(offer_pda))`                 | authority                   | Instant (required: swap fail-closes `BadPriceOracle` until set) |
 | Cancel stuck OnRe redemption | `cancel_redemption_onyc`                                 | authority                   | Returns ONyc to user, closes tracker                     |
 
-The permissionless instructions (`claim_usdc`, `swap_usdc_to_onyc`,
-`lock_onyc`, `unlock_onyc`, `request_redemption_onyc`,
-`claim_redemption_usdc`, `send_usdc_to_user`) need **no admin key**.
-Anyone with SOL for tx fees can crank them.
+The permissionless flow-cranking instructions (`receive`, `swap`,
+`send`) need **no admin key**. Anyone with SOL for tx fees can crank
+them. (These merged the legacy split handlers `claim_usdc` /
+`unlock_onyc` → `receive`, `swap_usdc_to_onyc` / `swap_onyc_to_usdc` →
+`swap`, `send_usdc_to_user` → `send`.)
+
+### Live mainnet deployment record
+
+| Date       | Action                          | Program / PDA                                  | Signer    | Signature / slot |
+| ---------- | ------------------------------- | ---------------------------------------------- | --------- | ---------------- |
+| 2026-06-02 | Relayer upgrade → v0.2.0 (merged `receive`/`swap`/`send`) | `onrenRKgX54qtWeK3cuaTBE71xx7dWMXn82ubH61vAp` | tiaModT7  | `35QYSJuPBxVfWutopuiA5TTPr6n5mypxmJrZdm4vCUFMkoTQWJinKFrZGBN1QVqNjTuNhiY8QxvZNkWsTzH3pWvw` (slot 423801710) |
+| 2026-06-02 | `configure` set `price_oracle` → OnRe offer PDA `E88zkA9Pxb1i8EfSHrEW5ZUe6hiQbo8DHWQ3WhDFw7p6` | RelayerConfig `6SNyNCF2DhqhNvi9Fy6vM3hVCX5RpuoFU9fCQvn6wTQi` | tiaModT7  | `5zdLScdSp6C65xb9EKWUVDNCsLAGwFQPoKi6TFXSHBVeaX6sp9gNrCZusSyFjkk1uePifegvLUf8KDoD4XFysLQJ` |
+| 2026-06-02 | Relayer upgrade → swap-guard fix (pre-CPI revoke of stale delegate; clears the `9nnLbot` ONyc-ATA residue DoSing all swaps) | `onrenRKgX54qtWeK3cuaTBE71xx7dWMXn82ubH61vAp` | tiaModT7  | `5CupGUkMccJojnvmzyJzEnHYZ9DPiqXGy8MTcZLJBPFA7c4EKfURCK91kWSkncJCdY2zXHm9qi3EMzqDeLVBSYG1` (slot 423807505) |
+| 2026-06-02 | Send-leg LUT created + extended (33 stable NTT/Wormhole accounts) — compresses `transfer_lock` + `release_wormhole_outbound` + Flow-close v0 tx under 1232 B. Set cranker `SEND_LOOKUP_TABLE` to this. | LUT `9aF7QN6HTtfQ6Wvo2UMFeTuHyaBxidMHhbTbN16Bwuyk` | tiaModT7  | create `3d1vFrCVQMYzxo3Lzp2HR9WyCazcBivRgh47k23p6r5zGdA7uuAxRDVFZs3VXpQcoddi1dZeASUewYYDTAcDM52z`; extend `23WdS3gTX272cfX1JBLJs6WpqaaJ9M8iJW3fgR52fguPfm4h1aVyhefNmH5Bzm2dzrHnGGC9wgz9WTQevfsJurjk`, `5GLLQAEYedX34MuEMfhao8iyJAa7oCnizy4n53xKqZxk6UQ1tg11r4sNg76enAmcj7qWeT4wMgVqCRkmrVrCuLnz` |
 
 ---
 
