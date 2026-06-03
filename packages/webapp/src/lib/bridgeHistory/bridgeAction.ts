@@ -104,6 +104,24 @@ export interface DisplayAction extends BridgeAction {
   phase: string | null
   /** User has explicitly marked this delivered via the dismiss affordance. */
   manuallyDismissed: boolean
+  /**
+   * Device-local journal reached `terminal-success` — i.e. this device's
+   * own `LiveJournalTracker` saw the destination-ATA balance bump (the
+   * `useFlowStatus` `balance > baseline` oracle, false-positives
+   * impossible). Authoritative delivery proof that is independent of
+   * Wormholescan, which never indexes OnRe's custom relayer-CPI redeem
+   * and so leaves `status` stuck on `pending` forever.
+   */
+  journalDelivered: boolean
+  /**
+   * Destination-ATA balance scan confirmed delivery for this row,
+   * independent of both Wormholescan and any local journal. Overlaid in
+   * `useBridgeHistory` (the pure decorator has no RPC access, so it
+   * defaults this `false`). This is the only delivery oracle available
+   * for cross-device / cold-link rows that have no `terminal-success`
+   * journal on this device.
+   */
+  chainDelivered: boolean
 }
 
 /**
@@ -296,6 +314,11 @@ export function actionFromJournal(j: PersistedFlowStatus): BridgeAction {
  * Phase precedence: journal phase only when neither the oracle nor
  * a manual dismissal has independently confirmed delivery — matching
  * the `StatusBadge` rule so every consumer sees the same precedence.
+ *
+ * `journalDelivered` carries the device-local `terminal-success` signal
+ * separately so the renderer can treat it as a positive delivery oracle
+ * (Wormholescan can't see the custom-relayer redeem, so its `status`
+ * never flips and must not be the only "delivered" source).
  */
 export function decorateAction(
   action: BridgeAction,
@@ -303,7 +326,8 @@ export function decorateAction(
   dismissed: ReadonlySet<string>,
 ): DisplayAction {
   const isDismissed = dismissed.has(action.anchorSig)
-  const oracleDelivered = action.status === 'delivered' || isDismissed
+  const journalDelivered = journal?.status === 'terminal-success'
+  const oracleDelivered = action.status === 'delivered' || isDismissed || journalDelivered
 
   let displayAmountRaw = action.sourceAmountRaw
   let displayMintB58 = action.sourceMintB58
@@ -330,6 +354,8 @@ export function decorateAction(
     displayMintB58,
     phase,
     manuallyDismissed: isDismissed,
+    journalDelivered,
+    chainDelivered: false,
   }
 }
 

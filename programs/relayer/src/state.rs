@@ -1,10 +1,12 @@
 use anchor_lang::prelude::*;
 
-use crate::constants::{
-    CONFIG_SEED, FEE_TIMELOCK_SLOTS, FLOW_INBOUND_SEED, FLOW_OUTBOUND_SEED, MAX_FEE_BPS,
-    MAX_SLIPPAGE_BPS, NTT_ASSET_PROGRAM, NTT_BASE_PROGRAM,
+use crate::{
+    constants::{
+        CONFIG_SEED, FEE_TIMELOCK_SLOTS, FLOW_INBOUND_SEED, FLOW_OUTBOUND_SEED, MAX_FEE_BPS, MAX_SLIPPAGE_BPS,
+        NTT_ASSET_PROGRAM, NTT_BASE_PROGRAM,
+    },
+    error::RelayerError,
 };
-use crate::error::RelayerError;
 
 /// `authority` gates governance only; flow instructions are permissionless.
 ///
@@ -68,18 +70,9 @@ impl RelayerConfig {
     pub const SEEDS: &'static [u8] = CONFIG_SEED;
 
     pub fn validate(&self) -> Result<()> {
-        require!(
-            self.deposit_fee_bps <= MAX_FEE_BPS,
-            RelayerError::FeeBpsTooHigh
-        );
-        require!(
-            self.withdraw_fee_bps <= MAX_FEE_BPS,
-            RelayerError::FeeBpsTooHigh
-        );
-        require!(
-            self.max_slippage_bps <= MAX_SLIPPAGE_BPS,
-            RelayerError::SlippageBpsTooHigh
-        );
+        require!(self.deposit_fee_bps <= MAX_FEE_BPS, RelayerError::FeeBpsTooHigh);
+        require!(self.withdraw_fee_bps <= MAX_FEE_BPS, RelayerError::FeeBpsTooHigh);
+        require!(self.max_slippage_bps <= MAX_SLIPPAGE_BPS, RelayerError::SlippageBpsTooHigh);
         if let Some(p) = &self.pending_fee {
             require!(!p.is_empty(), RelayerError::EmptyPendingFee);
             if let Some(bps) = p.deposit_fee_bps {
@@ -117,13 +110,7 @@ impl RelayerConfig {
     }
 
     pub fn propose_deposit_fee(&mut self, proposed: u16, now: u64) -> Result<()> {
-        propose_fee_change(
-            proposed,
-            &mut self.deposit_fee_bps,
-            &mut self.pending_fee,
-            |p| &mut p.deposit_fee_bps,
-            now,
-        )
+        propose_fee_change(proposed, &mut self.deposit_fee_bps, &mut self.pending_fee, |p| &mut p.deposit_fee_bps, now)
     }
 
     pub fn propose_withdraw_fee(&mut self, proposed: u16, now: u64) -> Result<()> {
@@ -159,15 +146,9 @@ fn propose_fee_change(
         return Ok(());
     }
 
-    let new_ready = now
-        .checked_add(FEE_TIMELOCK_SLOTS)
-        .ok_or(RelayerError::FeeOverflow)?;
+    let new_ready = now.checked_add(FEE_TIMELOCK_SLOTS).ok_or(RelayerError::FeeOverflow)?;
 
-    let p = bundle.get_or_insert(PendingFee {
-        deposit_fee_bps: None,
-        withdraw_fee_bps: None,
-        ready_slot: new_ready,
-    });
+    let p = bundle.get_or_insert(PendingFee { deposit_fee_bps: None, withdraw_fee_bps: None, ready_slot: new_ready });
     p.ready_slot = p.ready_slot.max(new_ready);
     *leg(p) = Some(proposed);
     Ok(())
@@ -177,10 +158,7 @@ fn propose_fee_change(
 /// `try_from` defense-in-depth: surfaces a future invariant break as
 /// `FeeOverflow` instead of silent truncation.
 pub(crate) fn apply_fee_bps(gross: u64, bps: u16) -> Result<(u64, u64)> {
-    let fee_u128 = (gross as u128)
-        .checked_mul(bps as u128)
-        .ok_or(RelayerError::FeeOverflow)?
-        / 10_000;
+    let fee_u128 = (gross as u128).checked_mul(bps as u128).ok_or(RelayerError::FeeOverflow)? / 10_000;
     let fee = u64::try_from(fee_u128).map_err(|_| RelayerError::FeeOverflow)?;
     let net = gross.checked_sub(fee).ok_or(RelayerError::FeeOverflow)?;
     require!(net > 0, RelayerError::ZeroAmountFlow);

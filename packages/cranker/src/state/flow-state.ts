@@ -33,6 +33,8 @@
  * dropped Promise (shouldn't happen given AdvanceResult contract, but
  * defensive) doesn't permanently block a flow.
  */
+import { BoundedMap } from '../utils/bounded-map'
+
 export type FlowProcState
   = | { kind: 'inFlight', startedAt: number, attempts: number }
     | { kind: 'cooldown', until: number, attempts: number }
@@ -53,7 +55,7 @@ export interface FlowStateTrackerOptions {
 }
 
 export class FlowStateTracker {
-  private readonly states = new Map<string, FlowProcState>()
+  private readonly states: BoundedMap<string, FlowProcState>
   private readonly opts: Required<FlowStateTrackerOptions>
 
   constructor(opts: FlowStateTrackerOptions = {}) {
@@ -64,6 +66,7 @@ export class FlowStateTracker {
       inFlightTimeoutMs: opts.inFlightTimeoutMs ?? IN_FLIGHT_TIMEOUT_MS,
       maxEntries: opts.maxEntries ?? 10_000,
     }
+    this.states = new BoundedMap(this.opts.maxEntries)
   }
 
   /**
@@ -94,7 +97,7 @@ export class FlowStateTracker {
         return { allowed: false, reason: 'poisoned' }
       }
     }
-    this.set(flow, { kind: 'inFlight', startedAt: now, attempts: priorAttempts })
+    this.states.set(flow, { kind: 'inFlight', startedAt: now, attempts: priorAttempts })
     return { allowed: true }
   }
 
@@ -117,7 +120,7 @@ export class FlowStateTracker {
         attempts,
         lastErrorClass: errorClass,
       }
-      this.set(flow, next)
+      this.states.set(flow, next)
       return next
     }
 
@@ -127,7 +130,7 @@ export class FlowStateTracker {
       this.opts.cooldownMaxMs,
     )
     const next: FlowProcState = { kind: 'cooldown', until: now + backoff, attempts }
-    this.set(flow, next)
+    this.states.set(flow, next)
     return next
   }
 
@@ -158,15 +161,5 @@ export class FlowStateTracker {
   /** Test/observability hook. */
   size(): number {
     return this.states.size
-  }
-
-  private set(flow: string, state: FlowProcState): void {
-    if (this.states.size >= this.opts.maxEntries && !this.states.has(flow)) {
-      const oldest = this.states.keys().next().value
-      if (oldest !== undefined) {
-        this.states.delete(oldest)
-      }
-    }
-    this.states.set(flow, state)
   }
 }

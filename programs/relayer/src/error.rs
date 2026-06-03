@@ -62,7 +62,10 @@ pub enum RelayerError {
     #[msg("user_inbox_ata's authority does not match the [user_inbox, user_wallet] PDA")]
     UserInboxAuthorityMismatch,
 
-    #[msg("NTT VAA's NttManagerMessage.sender is not the intent_transfer setter PDA — deposit must originate via intent_transfer")]
+    #[msg(
+        "NTT VAA's NttManagerMessage.sender is not the intent_transfer setter PDA — deposit must originate via \
+         intent_transfer"
+    )]
     UnexpectedFogoSender,
 
     #[msg("ntt_inbox_item account is missing, too short, or has the wrong discriminator")]
@@ -89,7 +92,10 @@ pub enum RelayerError {
     #[msg("OnRe Offer token_out_mint does not match relayer_config.asset_mint")]
     OnreOfferTokenOutMintMismatch,
 
-    #[msg("onre_offer account owner is not the OnRe program — handler refuses to read a foreign account as a pricing oracle")]
+    #[msg(
+        "onre_offer account owner is not the OnRe program — handler refuses to read a foreign account as a pricing \
+         oracle"
+    )]
     OnreOfferOwnerMismatch,
 
     #[msg("onre_offer address does not match the deposit Offer PDA derived from (usdc_mint, onyc_mint)")]

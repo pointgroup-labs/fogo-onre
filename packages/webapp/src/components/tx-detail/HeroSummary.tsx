@@ -1,7 +1,7 @@
 'use client'
 
 import type { TxDetail } from './use-tx-data'
-import { ArrowDownLeft, ArrowRight, ArrowUpRight, CheckCircle2, HelpCircle, Loader2, XCircle } from 'lucide-react'
+import { ArrowDownLeft, ArrowRight, ArrowUpRight, CheckCircle2, HelpCircle, Loader2 } from 'lucide-react'
 import { TokenIcon } from '@/components/SymbolPill'
 import { Card, CardContent } from '@/components/ui/card'
 import { FOGO_ONYC_DECIMALS, USDC_DECIMALS, USDC_S_MINT } from '@/constants'
@@ -23,8 +23,10 @@ interface HeroSummaryProps {
  * their money is OK), and the amount is the supporting context below.
  *
  * Color semantics — green only on `delivered`, amber for slow-but-OK,
- * red ONLY when we have a positive `expired` signal. Never use red to
- * mean "I don't know yet"; that's the most common bridge-UX mistake.
+ * neutral/Unconfirmed when we can't confirm from here. We NEVER render
+ * red: there is no on-chain failure oracle, and a timeout (`expired`) is
+ * "I don't know yet", not "it failed" — painting that red is the most
+ * common bridge-UX mistake.
  *
  * **No destination amount estimate.** We deliberately render only the
  * source amount + destination *symbol* (no number). Estimating the
@@ -52,8 +54,11 @@ export function HeroSummary({ detail, nowMs }: HeroSummaryProps) {
       || action?.manuallyDismissed === true
       || flow?.phase === 'delivered'
       || fogoDelivery?.kind === 'delivered'
-  const failed = flow?.phase === 'expired'
-  const inFlight = !delivered && !failed
+  // `expired` is a *timeout* heuristic (SLA elapsed with no balance bump
+  // yet), never on-chain proof of failure — we have no failure oracle. So we
+  // never paint red; a timed-out flow is surfaced honestly as "Unconfirmed".
+  const timedOut = flow?.phase === 'expired'
+  const inFlight = !delivered
 
   const sourceSymbol = isDeposit ? 'USDC' : 'ONyc'
   const destSymbol = isDeposit ? 'ONyc' : 'USDC'
@@ -93,32 +98,37 @@ export function HeroSummary({ detail, nowMs }: HeroSummaryProps) {
   const elapsedMs = startedAt !== null ? Math.max(0, nowMs - startedAt) : 0
   const slowThresholdMs = (isDeposit ? 8 : 30) * 60_000
   const hasLiveStatus = flow?.phase != null || action?.phase != null
-  const isSlow = inFlight && hasLiveStatus && elapsedMs > slowThresholdMs
 
-  // No live phase + past the SLA window = the indexer never surfaced a
-  // delivery and we have no progress signal. Don't claim "Just started";
-  // say so honestly. Mirrors the history list's "Unconfirmed" badge.
-  const unconfirmed = inFlight && !hasLiveStatus && elapsedMs > UNCONFIRMED_AFTER_MS
+  // Honest "we couldn't confirm delivery from here." Either the watcher
+  // timed out (`timedOut`) or there was never a live signal and we're past
+  // the SLA window. Takes precedence over `isSlow` so a timed-out flow reads
+  // as Unconfirmed (neutral) rather than a perpetual amber "taking longer".
+  const unconfirmed = inFlight
+    && (timedOut || (!hasLiveStatus && elapsedMs > UNCONFIRMED_AFTER_MS))
+
+  // Amber "slow but progressing": positive in-flight evidence, past the SLA,
+  // but not yet timed-out/unconfirmed. The `hasLiveStatus` guard stops a
+  // stale-journal cold load from flashing amber before the live watcher
+  // resolves (the original "yellow-flash" bug).
+  const isSlow = inFlight && !unconfirmed && hasLiveStatus && elapsedMs > slowThresholdMs
 
   const headline = delivered
     ? 'Delivered'
-    : failed
-      ? 'Stalled'
-      : unconfirmed
-        ? 'Unconfirmed'
-        : isSlow
-          ? 'Taking longer than usual'
-          : statusVerb(flow?.phase ?? action?.phase ?? null)
+    : unconfirmed
+      ? 'Unconfirmed'
+      : isSlow
+        ? 'Taking longer than usual'
+        : statusVerb(flow?.phase ?? action?.phase ?? null)
 
   return (
     <Card>
       <CardContent className="flex flex-col items-center gap-3 px-6 py-7 text-center">
-        <DirectionGlyph isDeposit={isDeposit} delivered={delivered} failed={failed} unconfirmed={unconfirmed} />
+        <DirectionGlyph isDeposit={isDeposit} delivered={delivered} unconfirmed={unconfirmed} />
         <div className="flex flex-col gap-1">
           <div className="text-xs uppercase tracking-wide text-muted-foreground">
             {isDeposit ? 'Deposit' : 'Redeem'}
           </div>
-          <h1 className={`text-2xl font-semibold tracking-tight ${headlineTone(delivered, failed, isSlow)}`}>
+          <h1 className={`text-2xl font-semibold tracking-tight ${headlineTone(delivered, isSlow)}`}>
             {headline}
           </h1>
           <div className="mt-1 inline-flex items-center justify-center gap-2 text-sm tabular-nums">
@@ -142,9 +152,7 @@ export function HeroSummary({ detail, nowMs }: HeroSummaryProps) {
           <div className="text-xs text-muted-foreground">
             {delivered
               ? `Completed · started ${elapsedLabel}`
-              : failed
-                ? `Stalled · started ${elapsedLabel}`
-                : `Started ${elapsedLabel}`}
+              : `Started ${elapsedLabel}`}
           </div>
         )}
         {inFlight && !unconfirmed && <EtaHint isSlow={isSlow} kind={kind} />}
@@ -174,18 +182,15 @@ function statusVerb(phase: string | null): string {
     case 'submitted': return 'Confirming on FOGO'
     case 'bridging': return 'Bridging'
     case 'delivered': return 'Delivered'
-    case 'expired': return 'Stalled'
+    case 'expired': return 'Taking longer than usual'
     case null: return 'Just started'
     default: return phase.charAt(0).toUpperCase() + phase.slice(1)
   }
 }
 
-function headlineTone(delivered: boolean, failed: boolean, isSlow: boolean): string {
+function headlineTone(delivered: boolean, isSlow: boolean): string {
   if (delivered) {
     return 'text-emerald-600 dark:text-emerald-400'
-  }
-  if (failed) {
-    return 'text-red-600 dark:text-red-400'
   }
   if (isSlow) {
     return 'text-amber-600 dark:text-amber-400'
@@ -196,12 +201,10 @@ function headlineTone(delivered: boolean, failed: boolean, isSlow: boolean): str
 function DirectionGlyph({
   isDeposit,
   delivered,
-  failed,
   unconfirmed,
 }: {
   isDeposit: boolean
   delivered: boolean
-  failed: boolean
   unconfirmed: boolean
 }) {
   let Icon = isDeposit ? ArrowUpRight : ArrowDownLeft
@@ -209,16 +212,13 @@ function DirectionGlyph({
   if (delivered) {
     Icon = CheckCircle2
     tone = 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
-  } else if (failed) {
-    Icon = XCircle
-    tone = 'bg-red-500/10 text-red-600 dark:text-red-400'
   } else if (unconfirmed) {
     Icon = HelpCircle
     tone = 'bg-muted text-muted-foreground'
   }
   return (
     <div aria-hidden className={`flex size-12 items-center justify-center rounded-full ${tone}`}>
-      {delivered || failed || unconfirmed
+      {delivered || unconfirmed
         ? <Icon className="size-6" strokeWidth={2} />
         : <Loader2 className="size-6 animate-spin" />}
     </div>

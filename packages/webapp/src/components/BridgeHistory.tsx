@@ -262,17 +262,16 @@ function StatusBadge({ action, nowMs }: { action: DisplayAction, nowMs: number }
   // pending (spinner + "Pending" + dismiss affordance).
   //
   // Precedence rationale:
-  //   1. **Delivered first.** Wormholescan (`action.status`) and the
-  //      per-device manual dismissal flag are the only *positive*
-  //      delivery oracles we have. If either confirms delivery, we
-  //      surface "Delivered" even when the local journal still says
-  //      "In progress" — the journal is a soft local progress label
-  //      driven by `LiveJournalTracker`'s FOGO-balance watch, which can
-  //      lag, miss the balance bump (non-monotonic ATA writes), or
-  //      simply never get patched to terminal if its observer race
-  //      doesn't resolve. Checking the oracle first prevents the row
-  //      from getting stuck on "In progress" forever after the tx
-  //      detail page already confirmed delivery.
+  //   1. **Delivered first.** Four positive delivery oracles, any of
+  //      which wins: Wormholescan (`action.status`), the per-device
+  //      manual dismissal flag, the device-local journal reaching
+  //      `terminal-success` (`action.journalDelivered`), and the
+  //      destination-ATA balance scan (`action.chainDelivered`, overlaid
+  //      in `useBridgeHistory`). Wormholescan NEVER flips to delivered
+  //      for OnRe's custom relayer-CPI redeem, so the latter two are what
+  //      stop a row getting stuck on "Pending"/"Unconfirmed": the journal
+  //      covers same-device rows, the ATA scan covers cross-device /
+  //      cold-link rows with no journal.
   //   2. **In-flight phase second.** Once we've ruled out a delivery
   //      oracle, the journal phase is the next best signal: it's the
   //      local "we're bridging" label and shows up before any oracle
@@ -290,7 +289,7 @@ function StatusBadge({ action, nowMs }: { action: DisplayAction, nowMs: number }
   // intentionally invisible in the UI to avoid two near-identical
   // "Delivered" states confusing the user. Per-device, cosmetic,
   // reversible (clear `fogo-onre.dismissed-bridges.v1`).
-  if (action.status === 'delivered' || action.manuallyDismissed) {
+  if (action.status === 'delivered' || action.manuallyDismissed || action.journalDelivered || action.chainDelivered) {
     return (
       <Badge
         variant="outline"

@@ -6,6 +6,8 @@ import type { PersistedFlowStatus } from '@/lib/flow-status/types'
 import { useInfiniteQuery, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useMemo } from 'react'
 import { USDC_S_MINT } from '@/constants'
+import { useDocumentVisible } from '@/hooks/useDocumentVisible'
+import { fetchFogoDeliveryReceipt } from '@/lib/bridgeDelivery/fogoReceipt'
 import { actionFromJournal, classifyOpsIntoActions, decorateAction } from '@/lib/bridgeHistory/bridgeAction'
 import { useDismissedBridges } from '@/lib/bridgeHistory/dismissed'
 import { findJournalEntryBySignature } from '@/lib/bridgeHistory/merge'
@@ -15,6 +17,8 @@ import {
   ORPHAN_MATCH_WINDOW_MS,
 } from '@/lib/bridgeHistory/orphanJournalMatch'
 import { fetchAddressOpsPage, WORMHOLESCAN_PAGE_SIZE } from '@/lib/bridgeHistory/wormholescan-list'
+import { useSettings } from '@/store/settings'
+import { getFogoConnection } from '@/utils/connections'
 
 /**
  * History source: Wormholescan `/operations?address=<user>`. Replaces
@@ -129,7 +133,7 @@ export function useBridgeHistory(owner: PublicKey | null): UseBridgeHistoryResul
     })),
   })
 
-  const actions: DisplayAction[] = useMemo(() => {
+  const baseActions: DisplayAction[] = useMemo(() => {
     const journals: PersistedFlowStatus[] = []
     for (const fq of flowQueries) {
       const j = fq.data
@@ -198,6 +202,53 @@ export function useBridgeHistory(owner: PublicKey | null): UseBridgeHistoryResul
 
     return [...synthetic, ...decorated].sort((a, b) => b.startedAt - a.startedAt)
   }, [indexerActions, qc, flowQueries, ownerB58, dismissed])
+
+  // Wormholescan-independent delivery overlay. Wormholescan never indexes
+  // OnRe's custom relayer-CPI redeem, and a cross-device / cold-link row
+  // has no `terminal-success` journal — so without this a delivered row
+  // sits on "Pending"/"Unconfirmed" forever. We scan the destination ATA
+  // (per row, keyed on its own `startedAt`) with the same false-positive-
+  // impossible oracle the detail page uses. Only rows not already
+  // confirmed are scanned, bounding RPC cost to the genuinely-open set.
+  const { fogoRpcUrl } = useSettings()
+  const visible = useDocumentVisible()
+  const candidates = useMemo(
+    () => baseActions.filter(
+      a => !(a.status === 'delivered' || a.manuallyDismissed || a.journalDelivered),
+    ),
+    [baseActions],
+  )
+  const deliveryQueries = useQueries({
+    queries: candidates.map(a => ({
+      queryKey: ['fogo-delivery-row', a.anchorSig, a.kind, ownerB58, fogoRpcUrl] as const,
+      enabled: owner !== null,
+      refetchOnWindowFocus: false,
+      refetchInterval: (q: { state: { data?: { kind: string } } }) =>
+        (q.state.data?.kind === 'delivered' ? false : visible ? 30_000 : false),
+      staleTime: (q: { state: { data?: { kind: string } } }) =>
+        (q.state.data?.kind === 'delivered' ? Infinity : 30_000),
+      queryFn: () => fetchFogoDeliveryReceipt(getFogoConnection(fogoRpcUrl), {
+        owner: owner as PublicKey,
+        kind: a.kind,
+        sourceBlockTime: a.startedAt,
+      }),
+    })),
+  })
+
+  // Stable string key so `actions` only recomputes when the *set* of
+  // chain-confirmed rows changes, not on every `useQueries` array identity.
+  const chainDeliveredKey = candidates
+    .map((a, i) => (deliveryQueries[i]?.data?.kind === 'delivered' ? a.anchorSig : ''))
+    .filter(Boolean)
+    .join(',')
+
+  const actions = useMemo(() => {
+    const delivered = new Set(chainDeliveredKey === '' ? [] : chainDeliveredKey.split(','))
+    if (delivered.size === 0) {
+      return baseActions
+    }
+    return baseActions.map(a => (delivered.has(a.anchorSig) ? { ...a, chainDelivered: true } : a))
+  }, [baseActions, chainDeliveredKey])
 
   return {
     actions,

@@ -22,6 +22,13 @@ interface Step {
   state: StepState
   /** Optional timestamp once the step is reached (ms). */
   atMs?: number
+  /**
+   * Copy shown beside the spinner while the step is `active`. Lets a step
+   * whose on-chain work is multi-stage and unobservable from the browser
+   * (e.g. the Solana relayer leg) explain *what* is pending instead of the
+   * generic "waiting for confirmation" default.
+   */
+  activeHint?: string
   /** On-chain signature proving this step happened, if known. */
   receipt?: {
     signature: string
@@ -238,7 +245,7 @@ function ReceiptArea({ step }: { step: Step }) {
       <div className="mt-2 flex items-center gap-2">
         <span className="inline-flex items-center gap-1.5 rounded bg-muted/60 px-2 py-1 text-xs text-muted-foreground">
           <Loader2 aria-hidden className="size-3 animate-spin" />
-          Waiting for on-chain confirmation…
+          {step.activeHint ?? 'Waiting for on-chain confirmation…'}
         </span>
       </div>
     )
@@ -447,7 +454,7 @@ function ChainIcon({ chain }: { chain: 'FOGO' | 'Solana' }) {
 }
 
 function buildSteps(detail: TxDetail): Step[] {
-  const { action, journal, fogoDelivery, signature } = detail
+  const { action, journal, fogoDelivery, flow, relayerStatus, signature } = detail
   const kind = action?.kind ?? journal?.kind ?? 'deposit'
   // Orphan deposit-delivery actions are anchored on the Solana source
   // tx (the user-side FOGO burn is paymaster-wrapped). For them,
@@ -485,26 +492,54 @@ function buildSteps(detail: TxDetail): Step[] {
   // Don't fall back to the URL `signature` here: deposit rows now link
   // via the FOGO burn or FOGO receipt, neither of which is the Solana
   // lock.
+  // Final FOGO-side delivery sig, when we have one to link. Prefer the
+  // action's `finalSig` (Wormholescan); fall back to the journal-free
+  // FOGO delivery oracle (destination-ATA scan).
+  const fogoFromRow = action?.finalSig ?? null
+  const fogoOracleSig = fogoDelivery?.kind === 'delivered' ? fogoDelivery.signature : null
+  const fogoReceiptSig = fogoFromRow ?? fogoOracleSig
+
+  // Delivery truth, independent of Wormholescan. OnRe redeems via a custom
+  // relayer CPI that Wormholescan's standard-NTT tracker doesn't index, so
+  // `targetChain.txHash` (destinationSig/finalSig) lags or never fills. The
+  // live `flow` watcher (destination-ATA balance bump — false positives
+  // impossible) and the `fogoDelivery` ATA scan are authoritative on-chain
+  // signals; trust any of them.
+  const fogoDelivered = fogoReceiptSig !== null
+    || flow?.phase === 'delivered'
+    || action?.status === 'delivered'
+    || action?.manuallyDismissed === true
+
+  // Solana-side delivery sig (when Wormholescan surfaced it). Monotonic
+  // completion: the destination token can't reach FOGO without the Solana
+  // legs executing, so a proven final delivery implies this step is done
+  // even when no Solana receipt was ever indexed.
   const solanaSig = sourceIsSolana ? (action?.anchorSig ?? null) : (action?.destinationSig ?? null)
+  // `Swapped` means the relayer has converted the asset and is on the final
+  // transfer_lock back to FOGO — the Solana leg is effectively done, so flip
+  // this step to `done` and hand the spotlight to the FOGO delivery step even
+  // before any Solana receipt is indexed.
+  const relayerSwapped = relayerStatus === 'Swapped'
+  const solanaDone = solanaSig !== null || fogoDelivered || relayerSwapped
   const solanaStep: Step = {
     chain: 'Solana',
     title: 'Bridge delivery on Solana',
     detail: kind === 'deposit'
       ? 'Where bridged USDC arrived on Solana — the relayer then swaps it to ONyc and bridges back.'
       : 'Where bridged ONyc arrived on Solana — the relayer then redeems it to USDC and bridges back.',
-    state: solanaSig !== null ? 'done' : 'active',
+    state: solanaDone ? 'done' : 'active',
     atMs: sourceIsSolana ? rowBlockMs : undefined,
+    // Active here means the relayer is still on Solana (received, converting).
+    // Once it swaps (`relayerSwapped`) this step is `done` and the hint is
+    // never shown — so the copy can safely describe the pre-swap stage.
+    activeHint: kind === 'deposit'
+      ? 'Converting USDC to ONyc on Solana…'
+      : 'Redeeming ONyc to USDC on Solana…',
     receipt: solanaSig !== null
       ? { signature: solanaSig, explorer: 'Solscan', href: solanaTxUrl(solanaSig) }
       : undefined,
   }
 
-  // Final FOGO-side delivery. Prefer the action's `finalSig` (matched
-  // inbound's target for withdraws; inbound op's target for orphan
-  // deposit-deliveries); fall back to the live FOGO delivery oracle.
-  const fogoFromRow = action?.finalSig ?? null
-  const fogoOracleSig = fogoDelivery?.kind === 'delivered' ? fogoDelivery.signature : null
-  const fogoReceiptSig = fogoFromRow ?? fogoOracleSig
   // Only trust the oracle's time when it describes the same tx as the
   // displayed sig — otherwise we render a mismatched (sig, time) pair.
   const fogoReceiptTime = fogoDelivery?.kind === 'delivered' && fogoDelivery.signature === fogoReceiptSig
@@ -516,11 +551,15 @@ function buildSteps(detail: TxDetail): Step[] {
       ? 'ONyc delivered to your FOGO wallet'
       : 'USDC delivered to your FOGO wallet',
     detail: kind === 'deposit'
-      ? 'ONyc arrives in your wallet. Your balance updates automatically — no action needed.'
-      : 'USDC arrives in your wallet. Your balance updates automatically — no action needed.',
-    state: fogoReceiptSig !== null
+      ? 'ONyc arrives in your wallet — your balance updates automatically.'
+      : 'USDC arrives in your wallet — your balance updates automatically.',
+    state: fogoDelivered
       ? 'done'
-      : solanaStep.state === 'done' ? 'active' : 'idle',
+      : solanaDone ? 'active' : 'idle',
+    // Shown once the Solana leg is done and we're awaiting the final mint.
+    activeHint: kind === 'deposit'
+      ? 'Bridging ONyc to FOGO…'
+      : 'Bridging USDC to FOGO…',
     atMs: fogoReceiptTime,
     receipt: fogoReceiptSig !== null
       ? { signature: fogoReceiptSig, explorer: 'FogoScan', href: fogoTxUrl(fogoReceiptSig) }

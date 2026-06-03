@@ -1,4 +1,4 @@
-import { MAX_FEE_BPS, ONYC_DECIMALS, ONYC_MINT, RELAYER_PROGRAM_ID, USDC_DECIMALS, USDC_MINT } from '@fogo-onre/sdk'
+import { MAX_FEE_BPS, MAX_SLIPPAGE_BPS, ONYC_DECIMALS, ONYC_MINT, RELAYER_PROGRAM_ID, USDC_DECIMALS, USDC_MINT } from '@fogo-onre/sdk'
 import { AccountLayout, getAssociatedTokenAddressSync, getMint, TOKEN_PROGRAM_ID } from '@solana/spl-token'
 import { PublicKey } from '@solana/web3.js'
 import chalk from 'chalk'
@@ -33,6 +33,7 @@ export function relayerCommands(): Command {
       console.log(chalk.dim(`  feeVault:         ${config.feeVault.toBase58()}`))
       console.log(chalk.dim(`  depositFeeBps:    ${config.depositFeeBps}`))
       console.log(chalk.dim(`  withdrawFeeBps:   ${config.withdrawFeeBps}`))
+      console.log(chalk.dim(`  maxSlippageBps:   ${config.maxSlippageBps}  (cap ${MAX_SLIPPAGE_BPS})`))
     })
 
   relayer
@@ -166,6 +167,7 @@ export function relayerCommands(): Command {
     .option('--fee-vault <pubkey>', 'New ONyc fee vault (must hold ONyc, not be relayer ATA)')
     .option('--deposit-fee-bps <bps>', 'New deposit fee bps (subject to timelock for increases)')
     .option('--withdraw-fee-bps <bps>', 'New withdraw fee bps (subject to timelock for increases)')
+    .option('--max-slippage-bps <bps>', `New NAV slippage floor + Jupiter quote slippage, bps [0, ${MAX_SLIPPAGE_BPS}] (no timelock)`)
     .option('--new-authority <pubkey>', 'Set pendingAuthority (claimed via accept-authority)')
     .option('--clear-pending-authority', 'Cancel a pending authority handover')
     .option('--confirm', 'Actually broadcast the transaction (default: dry-run)')
@@ -173,6 +175,7 @@ export function relayerCommands(): Command {
       feeVault?: string
       depositFeeBps?: string
       withdrawFeeBps?: string
+      maxSlippageBps?: string
       newAuthority?: string
       clearPendingAuthority?: boolean
       confirm?: boolean
@@ -189,6 +192,7 @@ export function relayerCommands(): Command {
       const feeVault = opts.feeVault ? new PublicKey(opts.feeVault) : undefined
       const depositFeeBps = opts.depositFeeBps !== undefined ? Number(opts.depositFeeBps) : undefined
       const withdrawFeeBps = opts.withdrawFeeBps !== undefined ? Number(opts.withdrawFeeBps) : undefined
+      const maxSlippageBps = opts.maxSlippageBps !== undefined ? Number(opts.maxSlippageBps) : undefined
       const newAuthority = opts.clearPendingAuthority
         ? null
         : opts.newAuthority
@@ -204,14 +208,18 @@ export function relayerCommands(): Command {
           throw new Error(`${name} = ${bps} out of range [0, ${MAX_FEE_BPS}]`)
         }
       }
+      if (maxSlippageBps !== undefined && (!Number.isInteger(maxSlippageBps) || maxSlippageBps < 0 || maxSlippageBps > MAX_SLIPPAGE_BPS)) {
+        throw new Error(`max-slippage-bps = ${maxSlippageBps} out of range [0, ${MAX_SLIPPAGE_BPS}]`)
+      }
 
       const noChange
         = feeVault === undefined
           && depositFeeBps === undefined
           && withdrawFeeBps === undefined
+          && maxSlippageBps === undefined
           && newAuthority === undefined
       if (noChange) {
-        throw new Error('no fields to update — pass at least one --fee-vault / --*-fee-bps / --new-authority / --clear-pending-authority')
+        throw new Error('no fields to update — pass at least one --fee-vault / --*-fee-bps / --max-slippage-bps / --new-authority / --clear-pending-authority')
       }
 
       console.log(chalk.cyan('Configure plan'))
@@ -224,6 +232,9 @@ export function relayerCommands(): Command {
       }
       if (withdrawFeeBps !== undefined) {
         console.log(chalk.dim(`  withdrawFeeBps:  ${config.withdrawFeeBps} → ${withdrawFeeBps}`))
+      }
+      if (maxSlippageBps !== undefined) {
+        console.log(chalk.dim(`  maxSlippageBps:  ${config.maxSlippageBps} → ${maxSlippageBps}`))
       }
       if (newAuthority === null) {
         console.log(chalk.dim(`  pendingAuthority: <cleared>`))
@@ -243,6 +254,7 @@ export function relayerCommands(): Command {
           feeVault: feeVault ?? undefined,
           depositFeeBps: depositFeeBps ?? null,
           withdrawFeeBps: withdrawFeeBps ?? null,
+          maxSlippageBps: maxSlippageBps ?? null,
           newAuthority: newAuthority ?? null,
         })
         return builder.rpc()

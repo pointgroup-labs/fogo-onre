@@ -1,6 +1,7 @@
 'use client'
 
 import type { FlowStatus } from '@/hooks/useFlowStatus'
+import type { RelayerFlowStatus } from '@/hooks/useRelayerFlowStatus'
 import type { FogoDeliveryReceipt } from '@/lib/bridgeDelivery/fogoReceipt'
 import type { DisplayAction } from '@/lib/bridgeHistory/bridgeAction'
 import type { PersistedFlowStatus } from '@/lib/flow-status/types'
@@ -13,6 +14,7 @@ import { useBridgeHistory } from '@/hooks/useBridgeHistory'
 import { useDepositUsdcAmount } from '@/hooks/useDepositUsdcAmount'
 import { useFlowStatus } from '@/hooks/useFlowStatus'
 import { useFogoDelivery } from '@/hooks/useFogoDelivery'
+import { useRelayerFlowStatus } from '@/hooks/useRelayerFlowStatus'
 import { findJournalEntryBySignature } from '@/lib/bridgeHistory/merge'
 
 /**
@@ -55,6 +57,14 @@ export interface TxDetail {
    * where `flow` (which needs a journal baseline) can't fire.
    */
   fogoDelivery: FogoDeliveryReceipt | null
+  /**
+   * Live relayer Flow sub-status on Solana (`Received` → `Swapped`), read via
+   * a single filtered `getProgramAccounts`. Lets the timeline flip the Solana
+   * step to `done` and the FOGO step to `active` the moment the swap lands,
+   * instead of waiting for FOGO delivery. `null` before receive or after the
+   * Flow PDA is closed (delivery then carries the signal).
+   */
+  relayerStatus: RelayerFlowStatus | null
   sessionEstablished: boolean
   /**
    * `true` while the wallet SDK is in any of its booting phases
@@ -151,6 +161,16 @@ export function useTxDetail(signature: string): TxDetail {
     sourceBlockTime,
   })
 
+  // Live relayer sub-status (Received → Swapped). Polls a single filtered
+  // getProgramAccounts and stops the instant FOGO delivery is confirmed
+  // (`fogoDelivery` non-null) or the swap lands. Gives the timeline a true
+  // mid-bridge signal without depending on Wormholescan.
+  const relayerStatus = useRelayerFlowStatus({
+    ownerB58,
+    kind,
+    delivered: fogoDelivery !== null || flow?.phase === 'delivered',
+  })
+
   // Orphan deposit-delivery rows arrive carrying the inbound ONyc amount
   // (Wormholescan can't see the paymaster-wrapped USDC burn). The exact
   // USDC is recovered lazily here — ~3 Solana RPC calls for this one open
@@ -193,6 +213,7 @@ export function useTxDetail(signature: string): TxDetail {
     journal,
     flow,
     fogoDelivery,
+    relayerStatus,
     sessionEstablished,
     sessionInitializing,
     historyLoading: history.isLoading,

@@ -1,6 +1,5 @@
 import chalk from 'chalk'
 import { program as cli } from 'commander'
-import { crankerCommands } from './commands/cranker'
 import { relayerCommands } from './commands/relayer'
 import { initContext } from './context'
 
@@ -36,7 +35,6 @@ cli
   })
 
 cli.addCommand(relayerCommands())
-cli.addCommand(crankerCommands())
 
 cli.parseAsync()
   .then(() => process.exit(0))

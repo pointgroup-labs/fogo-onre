@@ -83,8 +83,13 @@ export interface FlowWatchInput {
   baselineBalance: bigint | null
 }
 
-function isTerminal(phase: FlowPhase | undefined): boolean {
-  return phase === 'delivered' || phase === 'expired'
+// Only `delivered` stops the watcher. `expired` is a *timeout* hint, not a
+// terminal state: a cross-chain delivery can still land after the SLA window
+// (e.g. the relayer recovered from congestion, or a stuck leg was unblocked),
+// and we must keep polling + the push subscription alive so the late mint
+// still promotes the phase to `delivered`.
+function isDelivered(phase: FlowPhase | undefined): boolean {
+  return phase === 'delivered'
 }
 
 export function useFlowStatus(input: FlowWatchInput): FlowStatus | null {
@@ -105,12 +110,12 @@ export function useFlowStatus(input: FlowWatchInput): FlowStatus | null {
     enabled,
     refetchOnWindowFocus: false,
     refetchInterval: (q) => {
-      if (isTerminal(q.state.data?.phase)) {
+      if (isDelivered(q.state.data?.phase)) {
         return false
       }
       return visible ? POLL_MS : false
     },
-    staleTime: q => (isTerminal(q.state.data?.phase) ? Infinity : POLL_MS),
+    staleTime: q => (isDelivered(q.state.data?.phase) ? Infinity : POLL_MS),
     placeholderData: presetBaseline !== null && signature !== null && startedAt !== null
       ? { phase: 'submitted', signature, startedAt, baselineBalance: presetBaseline }
       : undefined,
@@ -156,14 +161,14 @@ export function useFlowStatus(input: FlowWatchInput): FlowStatus | null {
   // guard inside the queryFn is what actually promotes to 'delivered'.
   //
   // `query.data?.phase` is in the dep list specifically so the effect
-  // re-runs and tears down the socket once the flow turns terminal;
+  // re-runs and tears down the socket once the flow is `delivered`;
   // otherwise we'd hold a subscription open for the lifetime of the
   // mount.
   useEffect(() => {
     if (!enabled || ownerKey === null) {
       return
     }
-    if (isTerminal(query.data?.phase)) {
+    if (isDelivered(query.data?.phase)) {
       return
     }
     const connection = getFogoConnection(fogoRpcUrl)

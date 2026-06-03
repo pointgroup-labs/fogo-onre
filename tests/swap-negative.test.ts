@@ -305,6 +305,38 @@ describe('swap negatives (malicious router + custody guards)', () => {
         swapAccounts: honestAccounts(),
       })).rejects.toThrow(/AtaAuthorityTampered/)
     })
+
+    it('clears a pre-existing delegate and lets the honest swap proceed', async () => {
+      // Regression for the AtaAuthorityTampered DoS: a stale delegate planted
+      // before the handler runs (residue from old bytecode) must be revoked
+      // pre-CPI, not block the flow. The honest mode-0 swap then succeeds and
+      // leaves the ATA pristine.
+      const data = new Uint8Array(165)
+      data.set(assetMint.publicKey.toBytes(), 0)
+      data.set(relayerAuthorityPda.toBytes(), 32)
+      const view = new DataView(data.buffer)
+      view.setBigUint64(64, grossOnyc + 10n, true) // amount
+      view.setUint32(72, 1, true) // delegate COption tag = Some
+      data.set(Keypair.generate().publicKey.toBytes(), 76) // stale delegate
+      data[108] = 1 // state = Initialized
+      view.setBigUint64(121, grossOnyc, true) // delegated_amount
+      svm.setAccount(assetAta, {
+        executable: false,
+        owner: TOKEN_PROGRAM_ID,
+        lamports: 2_039_280,
+        data,
+        rentEpoch: 0,
+      })
+
+      await runSwap({
+        swapProgram: ROUTER_ID,
+        swapIxData: ixData(0, netOnyc, outUsdc),
+        swapAccounts: honestAccounts(),
+      })
+
+      const after = svm.getAccount(assetAta)!
+      expect(new DataView(new Uint8Array(after.data).buffer).getUint32(72, true)).toBe(0)
+    })
   })
 
   describe('step 6 — configure cannot rotate config mints', () => {

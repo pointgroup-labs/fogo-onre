@@ -4,15 +4,13 @@ use anchor_spl::{
     token_interface::{Mint, TokenAccount, TokenInterface},
 };
 
-use crate::constants::{CONFIG_SEED, RELAYER_SEED};
-use crate::error::RelayerError;
-use crate::state::RelayerConfig;
+use crate::{
+    constants::{CONFIG_SEED, RELAYER_SEED},
+    error::RelayerError,
+    state::RelayerConfig,
+};
 
-pub fn handler(
-    ctx: Context<Initialize>,
-    deposit_fee_bps: u16,
-    withdraw_fee_bps: u16,
-) -> Result<()> {
+pub fn handler(ctx: Context<Initialize>, deposit_fee_bps: u16, withdraw_fee_bps: u16) -> Result<()> {
     let config = &mut ctx.accounts.relayer_config;
     config.authority = ctx.accounts.authority.key();
     config.pending_authority = None;
@@ -24,7 +22,6 @@ pub fn handler(
     config.deposit_fee_bps = deposit_fee_bps;
     config.withdraw_fee_bps = withdraw_fee_bps;
     config.max_slippage_bps = crate::constants::DEFAULT_SLIPPAGE_BPS;
-    // Explicit even though `init` zero-fills.
     config.pending_fee = None;
     config.validate()?;
 

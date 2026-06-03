@@ -1,8 +1,6 @@
 use anchor_lang::prelude::*;
 
-use crate::constants::CONFIG_SEED;
-use crate::error::RelayerError;
-use crate::state::RelayerConfig;
+use crate::{constants::CONFIG_SEED, error::RelayerError, state::RelayerConfig};
 
 /// Step two of two-step authority rotation: pending authority self-promotes.
 /// Current authority does not sign — lets independent multisigs rotate
@@ -10,23 +8,14 @@ use crate::state::RelayerConfig;
 pub fn handler(ctx: Context<AcceptAuthority>) -> Result<()> {
     let config = &mut ctx.accounts.relayer_config;
 
-    let pending = config
-        .pending_authority
-        .ok_or(RelayerError::NoPendingAuthority)?;
+    let pending = config.pending_authority.ok_or(RelayerError::NoPendingAuthority)?;
 
-    require_keys_eq!(
-        ctx.accounts.pending_authority.key(),
-        pending,
-        RelayerError::PendingAuthorityMismatch
-    );
+    require_keys_eq!(ctx.accounts.pending_authority.key(), pending, RelayerError::PendingAuthorityMismatch);
 
     config.authority = pending;
     config.pending_authority = None;
 
-    msg!(
-        "Relayer authority rotated. New authority: {}.",
-        config.authority,
-    );
+    msg!("Relayer authority rotated. New authority: {}.", config.authority,);
 
     Ok(())
 }

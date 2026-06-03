@@ -1,64 +1,22 @@
-//! Route-agnostic inbound NTT receive. Security pins: VAA recipient ==
-//! re-derived `pda([USER_INBOX_SEED, user_wallet])`; `NttManagerMessage.sender`
-//! ∈ {OnRe, Fogo} setters; sweep amount == `inbox_item.amount`.
+//! Route-agnostic inbound NTT receive.
 
 use anchor_lang::prelude::*;
-use anchor_spl::token_interface::{
-    transfer_checked, Mint, TokenAccount, TokenInterface, TransferChecked,
+use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface, TransferChecked, transfer_checked};
+
+use crate::{
+    constants::{
+        CONFIG_SEED, FOGO_WORMHOLE_CHAIN_ID, NTT_REDEEM_IX, NTT_RELEASE_INBOUND_UNLOCK_IX, RELAYER_SEED,
+        USER_INBOX_SEED, allowed_intent_setters,
+    },
+    cpi::invoke_relayer_signed,
+    error::RelayerError,
+    events::Received,
+    ntt::{
+        InboxItem, NttRedeemArgs, NttReleaseInboundArgs, ReleaseStatus, TRANSCEIVER_MESSAGE_FROM_CHAIN_OFFSET,
+        derive_inbox_item_pda_from_vtm, parse_fogo_sender_from_vtm, validate_ntt_redeem_release_accounts,
+    },
+    state::{Direction, Flow, FlowStatus, RelayerConfig, receive_ntt_program},
 };
-
-use crate::constants::{
-    allowed_intent_setters, CONFIG_SEED, FOGO_WORMHOLE_CHAIN_ID, NTT_REDEEM_IX,
-    NTT_RELEASE_INBOUND_UNLOCK_IX, RELAYER_SEED, USER_INBOX_SEED,
-};
-use crate::cpi::invoke_relayer_signed;
-use crate::error::RelayerError;
-use crate::events::Received;
-use crate::ntt::{
-    derive_inbox_item_pda_from_vtm, parse_fogo_sender_from_vtm,
-    validate_ntt_redeem_release_accounts, InboxItem, NttRedeemArgs, NttReleaseInboundArgs,
-    ReleaseStatus, TRANSCEIVER_MESSAGE_FROM_CHAIN_OFFSET,
-};
-use crate::state::{receive_ntt_program, Direction, Flow, FlowStatus, RelayerConfig};
-
-/// Re-validate `inbox_item` on the skip path (already `Released`), where the
-/// redeem CPI's seed-check against `transceiver_message` never runs. Pins the
-/// owner too: without it a cranker could forge a system-owned look-alike and
-/// have us sweep their pre-funded `user_inbox_ata`.
-fn validate_skip_path_inbox_item(
-    ntt_program: &Pubkey,
-    ntt_inbox_item: &AccountInfo,
-    ntt_transceiver_message: &AccountInfo,
-) -> Result<()> {
-    require_keys_eq!(
-        *ntt_inbox_item.owner,
-        *ntt_program,
-        RelayerError::InvalidInboxItem
-    );
-
-    let vtm_data = ntt_transceiver_message.try_borrow_data()?;
-    require!(
-        vtm_data.len() >= TRANSCEIVER_MESSAGE_FROM_CHAIN_OFFSET + 2,
-        RelayerError::InvalidTransceiverMessage
-    );
-    let from_chain = u16::from_le_bytes([
-        vtm_data[TRANSCEIVER_MESSAGE_FROM_CHAIN_OFFSET],
-        vtm_data[TRANSCEIVER_MESSAGE_FROM_CHAIN_OFFSET + 1],
-    ]);
-    require!(
-        from_chain == FOGO_WORMHOLE_CHAIN_ID,
-        RelayerError::WrongOriginChain
-    );
-
-    let (expected_inbox_item, _) = derive_inbox_item_pda_from_vtm(ntt_program, &vtm_data)?;
-    drop(vtm_data);
-    require_keys_eq!(
-        ntt_inbox_item.key(),
-        expected_inbox_item,
-        RelayerError::InboxItemMismatch
-    );
-    Ok(())
-}
 
 pub fn handler<'info>(
     ctx: Context<'info, Receive<'info>>,
@@ -66,48 +24,27 @@ pub fn handler<'info>(
     redeem_accounts_len: u8,
 ) -> Result<()> {
     let ntt_program = receive_ntt_program(direction);
-    require_keys_eq!(
-        ctx.accounts.ntt_program.key(),
-        ntt_program,
-        RelayerError::BadNttProgram
-    );
+
+    require_keys_eq!(ctx.accounts.ntt_program.key(), ntt_program, RelayerError::BadNttProgram);
+    require_keys_eq!(ctx.accounts.ntt_transceiver_message.owner.key(), ntt_program, RelayerError::BadNttProgram);
 
     let cfg = &ctx.accounts.relayer_config;
     let token_mint = match direction {
         Direction::Deposit => cfg.base_mint,
         Direction::Withdraw => cfg.asset_mint,
     };
-    require_keys_eq!(
-        ctx.accounts.recv_mint.key(),
-        token_mint,
-        RelayerError::BadReceiveMint
-    );
 
-    // Direction-selected manager: this owner check is runtime, and must
-    // precede the first VTM data read.
-    require_keys_eq!(
-        *ctx.accounts.ntt_transceiver_message.owner,
-        ntt_program,
-        RelayerError::BadNttProgram
-    );
+    require_keys_eq!(ctx.accounts.recv_mint.key(), token_mint, RelayerError::BadReceiveMint);
 
     let fogo_sender_raw = parse_fogo_sender_from_vtm(&ctx.accounts.ntt_transceiver_message)?;
 
     // Pin the VAA's NTT sender to the {OnRe, Fogo} intent-setter allowlist;
     // any other sender is a non-intent path and must not receive.
     let allowed = allowed_intent_setters();
-    require!(
-        allowed.iter().any(|s| s.to_bytes() == fogo_sender_raw),
-        RelayerError::UnexpectedFogoSender
-    );
+    require!(allowed.iter().any(|s| s.to_bytes() == fogo_sender_raw), RelayerError::UnexpectedFogoSender);
 
-    // `try_load(..).ok()` distinguishes "fresh / wrong shape" (run full
-    // CPI chain) from "valid Released InboxItem" (skip both CPIs).
     let pre_inbox = InboxItem::try_load(&ctx.accounts.ntt_inbox_item).ok();
-    let inbox_already_released = matches!(
-        pre_inbox.as_ref().map(|i| &i.release_status),
-        Some(ReleaseStatus::Released)
-    );
+    let inbox_already_released = matches!(pre_inbox.as_ref().map(|i| &i.release_status), Some(ReleaseStatus::Released));
     if inbox_already_released {
         validate_skip_path_inbox_item(
             &ntt_program,
@@ -118,10 +55,7 @@ pub fn handler<'info>(
 
     let split = redeem_accounts_len as usize;
     let total = ctx.remaining_accounts.len();
-    require!(
-        split > 0 && split < total,
-        RelayerError::InvalidAccountSplit
-    );
+    require!(split > 0 && split < total, RelayerError::InvalidAccountSplit);
     let (redeem_accs, release_accs) = ctx.remaining_accounts.split_at(split);
 
     validate_ntt_redeem_release_accounts(
@@ -137,21 +71,12 @@ pub fn handler<'info>(
     let authority = ctx.accounts.relayer_authority.to_account_info();
 
     if !inbox_already_released {
-        invoke_relayer_signed(
-            ntt_program,
-            &NTT_REDEEM_IX,
-            &NttRedeemArgs {},
-            redeem_accs,
-            Some(&authority),
-            bump,
-        )?;
+        invoke_relayer_signed(ntt_program, &NTT_REDEEM_IX, &NttRedeemArgs {}, redeem_accs, Some(&authority), bump)?;
 
         invoke_relayer_signed(
             ntt_program,
             &NTT_RELEASE_INBOUND_UNLOCK_IX,
-            &NttReleaseInboundArgs {
-                revert_on_delay: false,
-            },
+            &NttReleaseInboundArgs { revert_on_delay: false },
             release_accs,
             Some(&authority),
             bump,
@@ -166,21 +91,19 @@ pub fn handler<'info>(
         ctx.accounts.user_inbox_authority.key(),
         RelayerError::UserInboxAuthorityMismatch
     );
+
     let amount = inbox.amount;
     require!(amount > 0, RelayerError::ZeroAmountFlow);
 
     ctx.accounts.user_inbox_ata.reload()?;
-    require!(
-        ctx.accounts.user_inbox_ata.amount >= amount,
-        RelayerError::InsufficientInboxBalance
-    );
+    require!(ctx.accounts.user_inbox_ata.amount >= amount, RelayerError::InsufficientInboxBalance);
 
     // Sweep exactly the recorded amount; the inbox may keep dust without
     // corrupting us.
     let user_wallet_key = ctx.accounts.user_wallet.key();
     let inbox_bump = ctx.bumps.user_inbox_authority;
-    let inbox_bump_arr = [inbox_bump];
-    let inbox_seeds: &[&[u8]] = &[USER_INBOX_SEED, user_wallet_key.as_ref(), &inbox_bump_arr];
+    let inbox_seeds: &[&[u8]] = &[USER_INBOX_SEED, user_wallet_key.as_ref(), &[inbox_bump]];
+
     transfer_checked(
         CpiContext::new_with_signer(
             *ctx.accounts.token_program.key,
@@ -201,10 +124,10 @@ pub fn handler<'info>(
     let flow = &mut ctx.accounts.flow;
     flow.recipient = user_wallet_key;
     flow.status = FlowStatus::Received;
+    flow.direction = direction;
     flow.amount = amount;
     flow.payer = ctx.accounts.payer.key();
     flow.bump = ctx.bumps.flow;
-    flow.direction = direction;
 
     emit!(Received {
         flow: flow_key,
@@ -278,4 +201,29 @@ pub struct Receive<'info> {
 
     pub token_program: Interface<'info, TokenInterface>,
     pub system_program: Program<'info, System>,
+}
+
+/// Re-validate `inbox_item` on the skip path (already `Released`), where the
+/// redeem CPI's seed-check against `transceiver_message` never runs. Pins the
+/// owner too: without it a cranker could forge a system-owned look-alike and
+/// have us sweep their pre-funded `user_inbox_ata`.
+fn validate_skip_path_inbox_item(
+    ntt_program: &Pubkey,
+    ntt_inbox_item: &AccountInfo,
+    ntt_transceiver_message: &AccountInfo,
+) -> Result<()> {
+    require_keys_eq!(*ntt_inbox_item.owner, *ntt_program, RelayerError::InvalidInboxItem);
+
+    let vtm_data = ntt_transceiver_message.try_borrow_data()?;
+    require!(vtm_data.len() >= TRANSCEIVER_MESSAGE_FROM_CHAIN_OFFSET + 2, RelayerError::InvalidTransceiverMessage);
+    let from_chain = u16::from_le_bytes([
+        vtm_data[TRANSCEIVER_MESSAGE_FROM_CHAIN_OFFSET],
+        vtm_data[TRANSCEIVER_MESSAGE_FROM_CHAIN_OFFSET + 1],
+    ]);
+    require!(from_chain == FOGO_WORMHOLE_CHAIN_ID, RelayerError::WrongOriginChain);
+
+    let (expected_inbox_item, _) = derive_inbox_item_pda_from_vtm(ntt_program, &vtm_data)?;
+    drop(vtm_data);
+    require_keys_eq!(ntt_inbox_item.key(), expected_inbox_item, RelayerError::InboxItemMismatch);
+    Ok(())
 }

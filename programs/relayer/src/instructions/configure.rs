@@ -1,9 +1,11 @@
 use anchor_lang::prelude::*;
 use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};
 
-use crate::constants::{CONFIG_SEED, RELAYER_SEED};
-use crate::error::RelayerError;
-use crate::state::RelayerConfig;
+use crate::{
+    constants::{CONFIG_SEED, RELAYER_SEED},
+    error::RelayerError,
+    state::RelayerConfig,
+};
 
 pub fn handler(
     ctx: Context<Configure>,
@@ -34,29 +36,22 @@ pub fn handler(
     }
 
     if let Some(vault) = &ctx.accounts.fee_vault {
-        require_keys_neq!(
-            vault.key(),
-            ctx.accounts.asset_ata.key(),
-            RelayerError::FeeVaultAliasesUserAta
-        );
+        require_keys_neq!(vault.key(), ctx.accounts.asset_ata.key(), RelayerError::FeeVaultAliasesUserAta);
         config.fee_vault = vault.key();
     }
     if let Some(proposed) = new_authority {
         config.pending_authority = if proposed == Pubkey::default() {
             None
         } else {
-            require_keys_neq!(
-                proposed,
-                config.authority,
-                RelayerError::PendingAuthorityIsCurrent
-            );
+            require_keys_neq!(proposed, config.authority, RelayerError::PendingAuthorityIsCurrent);
             Some(proposed)
         };
     }
     config.validate()?;
 
     msg!(
-        "Relayer reconfigured. deposit_fee_bps: {}, withdraw_fee_bps: {}, max_slippage_bps: {}, pending_fee: {:?}, fee_vault: {}, authority: {}, pending_authority: {:?}.",
+        "Relayer reconfigured. deposit_fee_bps: {}, withdraw_fee_bps: {}, max_slippage_bps: {}, pending_fee: {:?}, \
+         fee_vault: {}, authority: {}, pending_authority: {:?}.",
         config.deposit_fee_bps,
         config.withdraw_fee_bps,
         config.max_slippage_bps,

@@ -112,6 +112,17 @@ const schema = z.object({
    */
   SOLANA_PRIORITY_FEE_MICROLAMPORTS: z.coerce.number().int().min(0).default(10_000),
   /**
+   * Base58 Address Lookup Table compressing the `send` leg's stable
+   * NTT/Wormhole accounts. Required for the outbound `transfer_lock` +
+   * `release_wormhole_outbound` tx to fit the 1232-byte limit — without
+   * it the v0 message carries every account inline and overflows.
+   *
+   * Defaults to the live mainnet send-leg LUT (33 accounts, see
+   * docs/deploy-mainnet.md §7) so a forgotten env var can't silently
+   * brick every send. Override for devnet/localnet.
+   */
+  SEND_LOOKUP_TABLE: z.string().min(32).default('9aF7QN6HTtfQ6Wvo2UMFeTuHyaBxidMHhbTbN16Bwuyk'),
+  /**
    * Path to the on-disk checkpoint file (per-emitter Wormholescan
    * watermarks). Empty string disables persistence — in-memory
    * watermarks still apply within a process lifetime. Idempotency
@@ -151,6 +162,7 @@ export type CrankerConfig = {
   heartbeatStaleMs: number
   maxConcurrentAdvances: number
   solanaPriorityFeeMicroLamports: number
+  sendLookupTable: string
   checkpointPath: string
   logLevel: 'debug' | 'info' | 'warn' | 'error'
 }
@@ -186,6 +198,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     heartbeatStaleMs: parsed.HEARTBEAT_STALE_MS,
     maxConcurrentAdvances: parsed.MAX_CONCURRENT_ADVANCES,
     solanaPriorityFeeMicroLamports: parsed.SOLANA_PRIORITY_FEE_MICROLAMPORTS,
+    sendLookupTable: parsed.SEND_LOOKUP_TABLE,
     checkpointPath: parsed.CHECKPOINT_PATH,
     logLevel: parsed.LOG_LEVEL,
   }

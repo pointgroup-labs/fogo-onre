@@ -1,14 +1,19 @@
-//! PDA-signed CPI helpers. Target program ID and discriminator are pinned at
-//! the call site, so a compromised operator key can influence only *arguments*
-//! and forwarded `remaining_accounts` — never the target program or method.
+use anchor_lang::{
+    prelude::*,
+    solana_program::{
+        instruction::{AccountMeta, Instruction},
+        program::invoke_signed,
+    },
+};
+use anchor_spl::token_interface::{TransferChecked, transfer_checked};
 
-use anchor_lang::prelude::*;
-use anchor_lang::solana_program::instruction::{AccountMeta, Instruction};
-use anchor_lang::solana_program::program::invoke_signed;
-use anchor_spl::token_interface::{transfer_checked, TransferChecked};
+use crate::{constants::RELAYER_SEED, error::RelayerError};
 
-use crate::constants::{RELAYER_SEED, SPL_TOKEN_APPROVE_IX_TAG};
-use crate::error::RelayerError;
+/// SPL `Approve` instruction tag.
+pub const SPL_TOKEN_APPROVE_IX_TAG: u8 = 4;
+
+/// SPL `Revoke` instruction tag.
+pub const SPL_TOKEN_REVOKE_IX_TAG: u8 = 5;
 
 /// Invoke an external program signed by the relayer authority PDA.
 ///
@@ -31,11 +36,7 @@ pub fn invoke_relayer_signed<'info, A: AnchorSerialize>(
     for a in remaining_accounts {
         let is_authority = authority.is_some_and(|auth| a.key == auth.key);
         authority_seen |= is_authority;
-        metas.push(AccountMeta {
-            pubkey: *a.key,
-            is_signer: a.is_signer || is_authority,
-            is_writable: a.is_writable,
-        });
+        metas.push(AccountMeta { pubkey: *a.key, is_signer: a.is_signer || is_authority, is_writable: a.is_writable });
     }
 
     if authority.is_some() {
@@ -49,11 +50,7 @@ pub fn invoke_relayer_signed<'info, A: AnchorSerialize>(
     let auth_bump_arr = [authority_bump];
     let auth_seeds: &[&[u8]] = &[RELAYER_SEED, &auth_bump_arr];
 
-    let ix = Instruction {
-        program_id,
-        accounts: metas,
-        data,
-    };
+    let ix = Instruction { program_id, accounts: metas, data };
     invoke_signed(&ix, remaining_accounts, &[auth_seeds])?;
     Ok(())
 }
@@ -77,12 +74,7 @@ pub fn relayer_signed_transfer_checked<'info>(
     transfer_checked(
         CpiContext::new_with_signer(
             *token_program.key,
-            TransferChecked {
-                from: from.clone(),
-                mint: mint.clone(),
-                to: to.clone(),
-                authority: authority.clone(),
-            },
+            TransferChecked { from: from.clone(), mint: mint.clone(), to: to.clone(), authority: authority.clone() },
             &[seeds],
         ),
         amount,
@@ -128,12 +120,7 @@ pub fn approve_ntt_session_authority<'info>(
 
     invoke_signed(
         &approve_ix,
-        &[
-            source_ata.clone(),
-            session_auth_info.to_account_info(),
-            relayer_authority.clone(),
-            token_program.clone(),
-        ],
+        &[source_ata.clone(), session_auth_info.to_account_info(), relayer_authority.clone(), token_program.clone()],
         &[signer_seeds],
     )?;
     Ok(())
@@ -174,12 +161,36 @@ pub fn approve_swap_delegate<'info>(
 
     invoke_signed(
         &approve_ix,
-        &[
-            source_ata.clone(),
-            delegate.clone(),
-            relayer_authority.clone(),
-            token_program.clone(),
+        &[source_ata.clone(), delegate.clone(), relayer_authority.clone(), token_program.clone()],
+        &[signer_seeds],
+    )?;
+    Ok(())
+}
+
+/// Clear any delegate on a relayer-owned ATA (PDA-signed). Idempotent: an
+/// account with no delegate stays `None`. Run before the swap CPI so a stale
+/// pre-existing approval can't DoS the post-CPI pristine-ATA assert.
+pub fn revoke_relayer_delegate<'info>(
+    token_program: &AccountInfo<'info>,
+    source_ata: &AccountInfo<'info>,
+    relayer_authority: &AccountInfo<'info>,
+    authority_bump: u8,
+) -> Result<()> {
+    let bump_arr = [authority_bump];
+    let signer_seeds: &[&[u8]] = &[RELAYER_SEED, &bump_arr];
+
+    let revoke_ix = Instruction {
+        program_id: *token_program.key,
+        accounts: vec![
+            AccountMeta::new(*source_ata.key, false),
+            AccountMeta::new_readonly(*relayer_authority.key, true),
         ],
+        data: vec![SPL_TOKEN_REVOKE_IX_TAG],
+    };
+
+    invoke_signed(
+        &revoke_ix,
+        &[source_ata.clone(), relayer_authority.clone(), token_program.clone()],
         &[signer_seeds],
     )?;
     Ok(())

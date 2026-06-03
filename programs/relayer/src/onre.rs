@@ -2,13 +2,15 @@
 
 use anchor_lang::prelude::*;
 
-use crate::constants::{
-    ONRE_APR_SCALE, ONRE_DEPOSIT_OFFER_SEED, ONRE_OFFER_ACCOUNT_SIZE, ONRE_OFFER_MAX_VECTORS,
-    ONRE_OFFER_VECTORS_OFFSET, ONRE_OFFER_VECTOR_SIZE, ONRE_PRICE_DENOMINATOR, ONRE_PROGRAM_ID,
-    ONRE_SECONDS_IN_YEAR,
+use crate::{
+    constants::{
+        ONRE_APR_SCALE, ONRE_DEPOSIT_OFFER_SEED, ONRE_OFFER_ACCOUNT_SIZE, ONRE_OFFER_MAX_VECTORS,
+        ONRE_OFFER_VECTOR_SIZE, ONRE_OFFER_VECTORS_OFFSET, ONRE_PRICE_DENOMINATOR, ONRE_PROGRAM_ID,
+        ONRE_SECONDS_IN_YEAR,
+    },
+    error::RelayerError,
+    state::Direction,
 };
-use crate::error::RelayerError;
-use crate::state::Direction;
 
 /// Mirror of upstream OnRe's `OfferVector` (offer_state.rs): five back-to-back
 /// `u64`s, 40 bytes, `#[zero_copy] #[repr(C)]`. `start_time` selects the active
@@ -48,10 +50,7 @@ fn read_offer_vector(data: &[u8], off: usize) -> OnreOfferVector {
 /// and `offer_layout_matches_fixture` guard against upstream growing the array,
 /// which would otherwise under-state the NAV floor.
 pub fn parse_active_offer_vector(data: &[u8], now: u64) -> Result<OnreOfferVector> {
-    require!(
-        data.len() >= ONRE_OFFER_ACCOUNT_SIZE,
-        RelayerError::OnreOfferTooShort
-    );
+    require!(data.len() >= ONRE_OFFER_ACCOUNT_SIZE, RelayerError::OnreOfferTooShort);
 
     (0..ONRE_OFFER_MAX_VECTORS)
         .map(|i| read_offer_vector(data, ONRE_OFFER_VECTORS_OFFSET + i * ONRE_OFFER_VECTOR_SIZE))
@@ -70,20 +69,12 @@ pub fn calculate_step_price(v: &OnreOfferVector, now: u64) -> Result<u64> {
 
     let elapsed = now.saturating_sub(v.base_time);
     let step = elapsed / v.price_fix_duration;
-    let step_end = step
-        .checked_add(1)
-        .and_then(|s| s.checked_mul(v.price_fix_duration))
-        .ok_or(RelayerError::OnreNavOverflow)?;
+    let step_end =
+        step.checked_add(1).and_then(|s| s.checked_mul(v.price_fix_duration)).ok_or(RelayerError::OnreNavOverflow)?;
 
-    let factor_den = ONRE_APR_SCALE
-        .checked_mul(ONRE_SECONDS_IN_YEAR)
-        .ok_or(RelayerError::OnreNavOverflow)?;
-    let y_part = (v.apr as u128)
-        .checked_mul(step_end as u128)
-        .ok_or(RelayerError::OnreNavOverflow)?;
-    let factor_num = factor_den
-        .checked_add(y_part)
-        .ok_or(RelayerError::OnreNavOverflow)?;
+    let factor_den = ONRE_APR_SCALE.checked_mul(ONRE_SECONDS_IN_YEAR).ok_or(RelayerError::OnreNavOverflow)?;
+    let y_part = (v.apr as u128).checked_mul(step_end as u128).ok_or(RelayerError::OnreNavOverflow)?;
+    let factor_num = factor_den.checked_add(y_part).ok_or(RelayerError::OnreNavOverflow)?;
 
     let price_u128 = (v.base_price as u128)
         .checked_mul(factor_num)
@@ -103,44 +94,20 @@ pub fn read_offer_nav_price(
     onyc_mint: &Pubkey,
     now_unix: u64,
 ) -> Result<u64> {
-    require_keys_eq!(
-        *onre_offer.owner,
-        ONRE_PROGRAM_ID,
-        RelayerError::OnreOfferOwnerMismatch
-    );
+    require_keys_eq!(*onre_offer.owner, ONRE_PROGRAM_ID, RelayerError::OnreOfferOwnerMismatch);
     let (expected_offer_pda, _bump) = Pubkey::find_program_address(
-        &[
-            ONRE_DEPOSIT_OFFER_SEED,
-            usdc_mint.as_ref(),
-            onyc_mint.as_ref(),
-        ],
+        &[ONRE_DEPOSIT_OFFER_SEED, usdc_mint.as_ref(), onyc_mint.as_ref()],
         &ONRE_PROGRAM_ID,
     );
-    require_keys_eq!(
-        onre_offer.key(),
-        expected_offer_pda,
-        RelayerError::OnreOfferAddressMismatch
-    );
+    require_keys_eq!(onre_offer.key(), expected_offer_pda, RelayerError::OnreOfferAddressMismatch);
 
     let offer_data = onre_offer.try_borrow_data()?;
-    require!(
-        offer_data.len() >= ONRE_OFFER_ACCOUNT_SIZE,
-        RelayerError::OnreOfferTooShort
-    );
-    let in_mint = Pubkey::try_from(&offer_data[8..40])
-        .map_err(|_| error!(RelayerError::OnreOfferTooShort))?;
-    let out_mint = Pubkey::try_from(&offer_data[40..72])
-        .map_err(|_| error!(RelayerError::OnreOfferTooShort))?;
-    require_keys_eq!(
-        in_mint,
-        *usdc_mint,
-        RelayerError::OnreOfferTokenInMintMismatch
-    );
-    require_keys_eq!(
-        out_mint,
-        *onyc_mint,
-        RelayerError::OnreOfferTokenOutMintMismatch
-    );
+    require!(offer_data.len() >= ONRE_OFFER_ACCOUNT_SIZE, RelayerError::OnreOfferTooShort);
+
+    let in_mint = Pubkey::try_from(&offer_data[8..40]).map_err(|_| error!(RelayerError::OnreOfferTooShort))?;
+    let out_mint = Pubkey::try_from(&offer_data[40..72]).map_err(|_| error!(RelayerError::OnreOfferTooShort))?;
+    require_keys_eq!(in_mint, *usdc_mint, RelayerError::OnreOfferTokenInMintMismatch);
+    require_keys_eq!(out_mint, *onyc_mint, RelayerError::OnreOfferTokenOutMintMismatch);
 
     let active = parse_active_offer_vector(&offer_data, now_unix)?;
     calculate_step_price(&active, now_unix)
@@ -163,20 +130,14 @@ pub fn redemption_expected_out(
     token_in_decimals: u8,
     token_out_decimals: u8,
 ) -> Result<u64> {
-    let pow_out = 10u128
-        .checked_pow(token_out_decimals as u32)
-        .ok_or(RelayerError::OnreNavOverflow)?;
-    let pow_in = 10u128
-        .checked_pow(token_in_decimals as u32)
-        .ok_or(RelayerError::OnreNavOverflow)?;
+    let pow_out = 10u128.checked_pow(token_out_decimals as u32).ok_or(RelayerError::OnreNavOverflow)?;
+    let pow_in = 10u128.checked_pow(token_in_decimals as u32).ok_or(RelayerError::OnreNavOverflow)?;
 
     let num = (token_in_amount as u128)
         .checked_mul(price as u128)
         .and_then(|x| x.checked_mul(pow_out))
         .ok_or(RelayerError::OnreNavOverflow)?;
-    let den = pow_in
-        .checked_mul(ONRE_PRICE_DENOMINATOR)
-        .ok_or(RelayerError::OnreNavOverflow)?;
+    let den = pow_in.checked_mul(ONRE_PRICE_DENOMINATOR).ok_or(RelayerError::OnreNavOverflow)?;
 
     u64::try_from(num / den).map_err(|_| error!(RelayerError::OnreNavOverflow))
 }
@@ -191,27 +152,16 @@ pub fn redemption_expected_out(
 /// ```
 ///
 /// Returns gross (pre-fee) ONyc; the caller applies the slippage floor.
-pub fn deposit_expected_out(
-    usdc_in_amount: u64,
-    price: u64,
-    usdc_decimals: u8,
-    onyc_decimals: u8,
-) -> Result<u64> {
+pub fn deposit_expected_out(usdc_in_amount: u64, price: u64, usdc_decimals: u8, onyc_decimals: u8) -> Result<u64> {
     require!(price > 0, RelayerError::OnreNoActiveVector);
-    let pow_out = 10u128
-        .checked_pow(onyc_decimals as u32)
-        .ok_or(RelayerError::OnreNavOverflow)?;
-    let pow_in = 10u128
-        .checked_pow(usdc_decimals as u32)
-        .ok_or(RelayerError::OnreNavOverflow)?;
+    let pow_out = 10u128.checked_pow(onyc_decimals as u32).ok_or(RelayerError::OnreNavOverflow)?;
+    let pow_in = 10u128.checked_pow(usdc_decimals as u32).ok_or(RelayerError::OnreNavOverflow)?;
 
     let num = (usdc_in_amount as u128)
         .checked_mul(pow_out)
         .and_then(|x| x.checked_mul(ONRE_PRICE_DENOMINATOR))
         .ok_or(RelayerError::OnreNavOverflow)?;
-    let den = (price as u128)
-        .checked_mul(pow_in)
-        .ok_or(RelayerError::OnreNavOverflow)?;
+    let den = (price as u128).checked_mul(pow_in).ok_or(RelayerError::OnreNavOverflow)?;
 
     u64::try_from(num / den).map_err(|_| error!(RelayerError::OnreNavOverflow))
 }
@@ -227,9 +177,7 @@ pub fn oracle_expected_out(
 ) -> Result<u64> {
     match direction {
         Direction::Deposit => deposit_expected_out(swap_in, price, base_decimals, asset_decimals),
-        Direction::Withdraw => {
-            redemption_expected_out(swap_in, price, asset_decimals, base_decimals)
-        }
+        Direction::Withdraw => redemption_expected_out(swap_in, price, asset_decimals, base_decimals),
     }
 }
 
@@ -240,9 +188,7 @@ pub fn oracle_expected_out(
 pub fn apply_slippage_floor(gross_expected: u64, slippage_bps: u16) -> Result<u64> {
     require!(slippage_bps <= 10_000, RelayerError::OnreInvalidSlippageBps);
     let factor = 10_000u128 - slippage_bps as u128;
-    let prod = (gross_expected as u128)
-        .checked_mul(factor)
-        .ok_or(RelayerError::OnreNavOverflow)?;
+    let prod = (gross_expected as u128).checked_mul(factor).ok_or(RelayerError::OnreNavOverflow)?;
     u64::try_from(prod / 10_000).map_err(|_| error!(RelayerError::OnreNavOverflow))
 }
 
@@ -256,10 +202,7 @@ mod tests {
         let dep = oracle_expected_out(price, 1_000_000, Direction::Deposit, 6, 9).unwrap();
         let wd = oracle_expected_out(price, 1_000_000_000, Direction::Withdraw, 6, 9).unwrap();
         assert_eq!(dep, deposit_expected_out(1_000_000, price, 6, 9).unwrap());
-        assert_eq!(
-            wd,
-            redemption_expected_out(1_000_000_000, price, 9, 6).unwrap()
-        );
+        assert_eq!(wd, redemption_expected_out(1_000_000_000, price, 9, 6).unwrap());
     }
 
     /// Drift tripwire: parses the real mainnet `Offer` dump (the same

@@ -1,6 +1,6 @@
 [package]
 name = "fogo-onre-relayer"
-version = "0.1.4"
+version = "0.2.0"
 description = "Fogo OnRe relayer — stateless PDA-custody bridge between OnRe and Wormhole NTT on Solana"
 edition = { workspace = true }
 authors = { workspace = true }

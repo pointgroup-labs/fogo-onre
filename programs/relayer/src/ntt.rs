@@ -27,16 +27,9 @@ impl NttTransferArgs {
     }
 }
 
-pub fn derive_session_authority(
-    program_id: &Pubkey,
-    sender: &Pubkey,
-    args: &NttTransferArgs,
-) -> (Pubkey, u8) {
+pub fn derive_session_authority(program_id: &Pubkey, sender: &Pubkey, args: &NttTransferArgs) -> (Pubkey, u8) {
     let hash = args.args_hash();
-    Pubkey::find_program_address(
-        &[NTT_SESSION_AUTHORITY_SEED, sender.as_ref(), hash.as_ref()],
-        program_id,
-    )
+    Pubkey::find_program_address(&[NTT_SESSION_AUTHORITY_SEED, sender.as_ref(), hash.as_ref()], program_id)
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize)]
@@ -55,8 +48,7 @@ pub struct NttReleaseOutboundArgs {
     pub revert_on_delay: bool,
 }
 
-pub const VALIDATED_TRANSCEIVER_MESSAGE_DISC: [u8; 8] =
-    [0x61, 0x00, 0x70, 0x7D, 0x6B, 0xDC, 0x25, 0xB5];
+pub const VALIDATED_TRANSCEIVER_MESSAGE_DISC: [u8; 8] = [0x61, 0x00, 0x70, 0x7D, 0x6B, 0xDC, 0x25, 0xB5];
 
 /// On-disk byte layout of `ValidatedTransceiverMessage<NativeTokenTransfer<EmptyPayload>>`
 /// (Borsh; total 213 bytes after the 8-byte Anchor disc):
@@ -101,18 +93,10 @@ pub const RELEASE_IDX_RECIPIENT_ATA: usize = 3;
 pub fn parse_fogo_sender_from_vtm(vtm: &AccountInfo) -> Result<[u8; 32]> {
     use crate::error::RelayerError;
     let data = vtm.try_borrow_data()?;
-    require!(
-        data.len() >= TRANSCEIVER_MESSAGE_SENDER_OFFSET + 32,
-        RelayerError::InvalidTransceiverMessage
-    );
-    require!(
-        data[..8] == VALIDATED_TRANSCEIVER_MESSAGE_DISC,
-        RelayerError::InvalidTransceiverMessage
-    );
+    require!(data.len() >= TRANSCEIVER_MESSAGE_SENDER_OFFSET + 32, RelayerError::InvalidTransceiverMessage);
+    require!(data[..8] == VALIDATED_TRANSCEIVER_MESSAGE_DISC, RelayerError::InvalidTransceiverMessage);
     let mut out = [0u8; 32];
-    out.copy_from_slice(
-        &data[TRANSCEIVER_MESSAGE_SENDER_OFFSET..TRANSCEIVER_MESSAGE_SENDER_OFFSET + 32],
-    );
+    out.copy_from_slice(&data[TRANSCEIVER_MESSAGE_SENDER_OFFSET..TRANSCEIVER_MESSAGE_SENDER_OFFSET + 32]);
     require!(out != [0u8; 32], RelayerError::ZeroFogoSender);
     Ok(out)
 }
@@ -128,43 +112,27 @@ pub fn validate_ntt_redeem_release_accounts<'info>(
     expected_inbox_item: Pubkey,
     expected_recipient_ata: Pubkey,
 ) -> Result<()> {
-    use crate::constants::FOGO_WORMHOLE_CHAIN_ID;
-    use crate::error::RelayerError;
+    use crate::{constants::FOGO_WORMHOLE_CHAIN_ID, error::RelayerError};
 
     require!(
-        redeem_accs.len() >= REDEEM_ACCOUNTS_MIN_LEN
-            && release_accs.len() >= RELEASE_ACCOUNTS_MIN_LEN,
+        redeem_accs.len() >= REDEEM_ACCOUNTS_MIN_LEN && release_accs.len() >= RELEASE_ACCOUNTS_MIN_LEN,
         RelayerError::InvalidAccountSplit
     );
     require!(
         redeem_accs[REDEEM_IDX_TRANSCEIVER_MESSAGE].key() == expected_transceiver_message,
         RelayerError::TransceiverMessageMismatch
     );
-    require!(
-        redeem_accs[REDEEM_IDX_INBOX_ITEM].key() == expected_inbox_item,
-        RelayerError::InboxItemMismatch
-    );
+    require!(redeem_accs[REDEEM_IDX_INBOX_ITEM].key() == expected_inbox_item, RelayerError::InboxItemMismatch);
 
     // Pin inbound origin to FOGO. Without this, a future non-FOGO peer
     // registration would let foreign-chain VAAs create Flow PDAs that
     // outbound legs blindly bridge back to FOGO.
     let (expected_peer, _) = derive_ntt_peer(ntt_program, FOGO_WORMHOLE_CHAIN_ID);
     let (expected_inbox_rl, _) = derive_ntt_inbox_rate_limit(ntt_program, FOGO_WORMHOLE_CHAIN_ID);
-    require_keys_eq!(
-        redeem_accs[REDEEM_IDX_PEER].key(),
-        expected_peer,
-        RelayerError::WrongOriginChain
-    );
-    require_keys_eq!(
-        redeem_accs[REDEEM_IDX_INBOX_RATE_LIMIT].key(),
-        expected_inbox_rl,
-        RelayerError::WrongOriginChain
-    );
+    require_keys_eq!(redeem_accs[REDEEM_IDX_PEER].key(), expected_peer, RelayerError::WrongOriginChain);
+    require_keys_eq!(redeem_accs[REDEEM_IDX_INBOX_RATE_LIMIT].key(), expected_inbox_rl, RelayerError::WrongOriginChain);
 
-    require!(
-        release_accs[RELEASE_IDX_INBOX_ITEM].key() == expected_inbox_item,
-        RelayerError::InboxItemMismatch
-    );
+    require!(release_accs[RELEASE_IDX_INBOX_ITEM].key() == expected_inbox_item, RelayerError::InboxItemMismatch);
     require!(
         release_accs[RELEASE_IDX_RECIPIENT_ATA].key() == expected_recipient_ata,
         RelayerError::RecipientAtaMismatch
@@ -193,14 +161,8 @@ const NTT_WIRE_PREFIX: [u8; 4] = [0x99, b'N', b'T', b'T'];
 /// reproduces exactly what redeem's Anchor seed constraint would have
 /// enforced — without it, a cranker could pair a real intent_transfer VTM
 /// with an unrelated already-released InboxItem.
-pub fn derive_inbox_item_pda_from_vtm(
-    program_id: &Pubkey,
-    vtm_data: &[u8],
-) -> Result<(Pubkey, u8)> {
-    require!(
-        vtm_data.len() >= TRANSCEIVER_MESSAGE_TOTAL_LEN,
-        crate::error::RelayerError::InvalidTransceiverMessage
-    );
+pub fn derive_inbox_item_pda_from_vtm(program_id: &Pubkey, vtm_data: &[u8]) -> Result<(Pubkey, u8)> {
+    require!(vtm_data.len() >= TRANSCEIVER_MESSAGE_TOTAL_LEN, crate::error::RelayerError::InvalidTransceiverMessage);
 
     let from_chain_le = u16::from_le_bytes([
         vtm_data[TRANSCEIVER_MESSAGE_FROM_CHAIN_OFFSET],
@@ -209,20 +171,17 @@ pub fn derive_inbox_item_pda_from_vtm(
     let from_chain_be = from_chain_le.to_be_bytes();
 
     let id = &vtm_data[TRANSCEIVER_MESSAGE_ID_OFFSET..TRANSCEIVER_MESSAGE_ID_OFFSET + 32];
-    let sender =
-        &vtm_data[TRANSCEIVER_MESSAGE_SENDER_OFFSET..TRANSCEIVER_MESSAGE_SENDER_OFFSET + 32];
+    let sender = &vtm_data[TRANSCEIVER_MESSAGE_SENDER_OFFSET..TRANSCEIVER_MESSAGE_SENDER_OFFSET + 32];
 
     let trimmed_amount_le = u64::from_le_bytes(
-        vtm_data[TRANSCEIVER_MESSAGE_TRIMMED_AMOUNT_OFFSET
-            ..TRANSCEIVER_MESSAGE_TRIMMED_AMOUNT_OFFSET + 8]
+        vtm_data[TRANSCEIVER_MESSAGE_TRIMMED_AMOUNT_OFFSET..TRANSCEIVER_MESSAGE_TRIMMED_AMOUNT_OFFSET + 8]
             .try_into()
             .unwrap(),
     );
     let trimmed_amount_be = trimmed_amount_le.to_be_bytes();
     let trimmed_decimals = vtm_data[TRANSCEIVER_MESSAGE_TRIMMED_DECIMALS_OFFSET];
 
-    let source_token = &vtm_data
-        [TRANSCEIVER_MESSAGE_SOURCE_TOKEN_OFFSET..TRANSCEIVER_MESSAGE_SOURCE_TOKEN_OFFSET + 32];
+    let source_token = &vtm_data[TRANSCEIVER_MESSAGE_SOURCE_TOKEN_OFFSET..TRANSCEIVER_MESSAGE_SOURCE_TOKEN_OFFSET + 32];
 
     let to_chain_le = u16::from_le_bytes([
         vtm_data[TRANSCEIVER_MESSAGE_TO_CHAIN_OFFSET],
@@ -257,10 +216,7 @@ pub fn derive_inbox_item_pda_from_vtm(
     hash_input[2..147].copy_from_slice(&msg_wire);
     let digest = solana_keccak_hasher::hash(&hash_input).to_bytes();
 
-    Ok(Pubkey::find_program_address(
-        &[INBOX_ITEM_SEED, &digest],
-        program_id,
-    ))
+    Ok(Pubkey::find_program_address(&[INBOX_ITEM_SEED, &digest], program_id))
 }
 
 /// NTT v1 `InboxItem` Anchor discriminator — **empirically captured** from
@@ -303,13 +259,9 @@ impl InboxItem {
     /// `try_load(...).ok()` to distinguish "fresh" from "fatal".
     pub fn try_load(account: &AccountInfo) -> Result<Self> {
         let data = account.try_borrow_data()?;
-        require!(
-            data.len() >= 8 && data[..8] == INBOX_ITEM_DISC,
-            crate::error::RelayerError::InvalidInboxItem
-        );
+        require!(data.len() >= 8 && data[..8] == INBOX_ITEM_DISC, crate::error::RelayerError::InvalidInboxItem);
         let mut cursor: &[u8] = &data[8..];
-        Self::deserialize(&mut cursor)
-            .map_err(|_| crate::error::RelayerError::InvalidInboxItem.into())
+        Self::deserialize(&mut cursor).map_err(|_| crate::error::RelayerError::InvalidInboxItem.into())
     }
 }
 
@@ -319,16 +271,10 @@ const NTT_INBOX_RATE_LIMIT_SEED: &[u8] = b"inbox_rate_limit";
 /// NTT manager `peer` PDA for a Wormhole chain id. Pinned against
 /// `FOGO_WORMHOLE_CHAIN_ID` to refuse non-FOGO inbound VAAs.
 pub fn derive_ntt_peer(program_id: &Pubkey, chain_id: u16) -> (Pubkey, u8) {
-    Pubkey::find_program_address(
-        &[NTT_MANAGER_PEER_SEED, &chain_id.to_be_bytes()],
-        program_id,
-    )
+    Pubkey::find_program_address(&[NTT_MANAGER_PEER_SEED, &chain_id.to_be_bytes()], program_id)
 }
 
 /// NTT manager per-chain `inbox_rate_limit` PDA. Same chain-pinning rationale.
 pub fn derive_ntt_inbox_rate_limit(program_id: &Pubkey, chain_id: u16) -> (Pubkey, u8) {
-    Pubkey::find_program_address(
-        &[NTT_INBOX_RATE_LIMIT_SEED, &chain_id.to_be_bytes()],
-        program_id,
-    )
+    Pubkey::find_program_address(&[NTT_INBOX_RATE_LIMIT_SEED, &chain_id.to_be_bytes()], program_id)
 }

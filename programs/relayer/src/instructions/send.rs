@@ -1,31 +1,24 @@
-//! Route-agnostic outbound send. Routes on `flow.direction`: deposit pushes the
-//! asset out, withdraw pushes the base out — each locks via NTT and publishes
-//! the outbound VAA to `flow.recipient`. Closing the flow PDA blocks replay.
+//! Route-agnostic outbound send.
 
 use anchor_lang::prelude::*;
 use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};
 
-use crate::constants::{
-    CONFIG_SEED, FOGO_WORMHOLE_CHAIN_ID, NTT_RELEASE_WORMHOLE_OUTBOUND_IX, NTT_TRANSFER_LOCK_IX,
-    RELAYER_SEED,
+use crate::{
+    constants::{
+        CONFIG_SEED, FOGO_WORMHOLE_CHAIN_ID, NTT_RELEASE_WORMHOLE_OUTBOUND_IX, NTT_TRANSFER_LOCK_IX, RELAYER_SEED,
+    },
+    cpi::{approve_ntt_session_authority, invoke_relayer_signed},
+    error::RelayerError,
+    events::Sent,
+    ntt::{NttReleaseOutboundArgs, NttTransferArgs, derive_session_authority},
+    state::{Direction, Flow, FlowStatus, RelayerConfig},
 };
-use crate::cpi::{approve_ntt_session_authority, invoke_relayer_signed};
-use crate::error::RelayerError;
-use crate::events::Sent;
-use crate::ntt::{derive_session_authority, NttReleaseOutboundArgs, NttTransferArgs};
-use crate::state::{Direction, Flow, FlowStatus, RelayerConfig};
 
 /// `transfer_lock_account_count` splits `remaining_accounts` into the NTT
 /// `transfer_lock` prefix and the `release_wormhole_outbound` suffix.
-pub fn handler<'info>(
-    ctx: Context<'info, Send<'info>>,
-    transfer_lock_account_count: u8,
-) -> Result<()> {
+pub fn handler<'info>(ctx: Context<'info, Send<'info>>, transfer_lock_account_count: u8) -> Result<()> {
     let direction = ctx.accounts.flow.direction;
-    require!(
-        ctx.accounts.flow.status == FlowStatus::Swapped,
-        RelayerError::FlowStatusMismatch
-    );
+    require!(ctx.accounts.flow.status == FlowStatus::Swapped, RelayerError::FlowStatusMismatch);
 
     let amount = ctx.accounts.flow.amount;
     require!(amount > 0, RelayerError::ZeroAmountFlow);
@@ -33,7 +26,6 @@ pub fn handler<'info>(
     let recipient = ctx.accounts.flow.recipient;
     let ntt_program = crate::state::send_ntt_program(direction);
 
-    // Deposit pushes the asset out; withdraw pushes the base out.
     let from_ata = match direction {
         Direction::Deposit => ctx.accounts.asset_ata.to_account_info(),
         Direction::Withdraw => ctx.accounts.base_ata.to_account_info(),
@@ -46,12 +38,8 @@ pub fn handler<'info>(
         should_queue: false,
     };
 
-    // NTT binds session-authority to a hash of the transfer args.
-    let (session_authority, _) = derive_session_authority(
-        &ntt_program,
-        &ctx.accounts.relayer_authority.key(),
-        &transfer_args,
-    );
+    let (session_authority, _) =
+        derive_session_authority(&ntt_program, &ctx.accounts.relayer_authority.key(), &transfer_args);
 
     let bump = ctx.accounts.relayer_config.relayer_authority_bump;
 
@@ -68,22 +56,12 @@ pub fn handler<'info>(
     )?;
 
     let split = transfer_lock_account_count as usize;
-    require!(
-        ctx.remaining_accounts.len() > split,
-        RelayerError::InvalidAccountSplit,
-    );
+    require!(ctx.remaining_accounts.len() > split, RelayerError::InvalidAccountSplit,);
     let (transfer_lock_accs, release_accs) = ctx.remaining_accounts.split_at(split);
 
     let authority = ctx.accounts.relayer_authority.to_account_info();
 
-    ntt_lock_and_publish(
-        ntt_program,
-        &transfer_args,
-        transfer_lock_accs,
-        release_accs,
-        &authority,
-        bump,
-    )?;
+    ntt_lock_and_publish(ntt_program, &transfer_args, transfer_lock_accs, release_accs, &authority, bump)?;
 
     emit!(Sent {
         flow: ctx.accounts.flow.key(),
@@ -121,9 +99,7 @@ fn ntt_lock_and_publish<'info>(
     invoke_relayer_signed(
         ntt_program,
         &NTT_RELEASE_WORMHOLE_OUTBOUND_IX,
-        &NttReleaseOutboundArgs {
-            revert_on_delay: false,
-        },
+        &NttReleaseOutboundArgs { revert_on_delay: false },
         release_accs,
         None,
         bump,

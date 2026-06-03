@@ -363,6 +363,7 @@ async function main(): Promise<void> {
     rpcTimeoutMs: cfg.rpcTimeoutMs,
     txConfirmTimeoutMs: cfg.txConfirmTimeoutMs,
     priorityFeeMicroLamports: cfg.solanaPriorityFeeMicroLamports,
+    sendLookupTable: cfg.sendLookupTable ? new PublicKey(cfg.sendLookupTable) : undefined,
     metrics,
     log,
     // Cross-scan cache: FOGO source-tx → user wallet. claim_usdc resolves

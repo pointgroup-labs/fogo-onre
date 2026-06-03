@@ -193,13 +193,13 @@ export async function swap(
         reason: `Jupiter quote ${route.quotedOutAmount} below NAV floor ${navFloor} (gross ${grossExpected})`,
       }
     }
-    if (!route.swapDelegate) {
-      return {
-        kind: 'noop',
-        reason: 'Jupiter route did not surface a swap_delegate (programAuthority); cannot bound on-chain Approve safely',
-      }
-    }
 
+    // `shared_accounts_route` pulls the input via the `userTransferAuthority`
+    // owner-signature (= relayer_authority, signed by the handler's
+    // invoke_signed), never via an SPL delegate. Passing the sentinel
+    // (relayer_authority) skips the on-chain Approve, so no standing
+    // delegation lingers to trip the post-CPI pristine-ATA guard
+    // (AtaAuthorityTampered). Mirrors the deposit/take_offer path above.
     const [flowPda] = findOutflightFlowPda(resolved.nttInboxItem, client.program.programId)
     const swapIx = await client
       .swap({
@@ -210,7 +210,7 @@ export async function swap(
         nttInboxItem: resolved.nttInboxItem,
         onreOffer,
         swapProgram: route.programId,
-        swapDelegate: route.swapDelegate,
+        swapDelegate: relayerAuthorityPda,
         swapIxData: route.ixData,
         swapAccounts: route.routeAccounts,
       })

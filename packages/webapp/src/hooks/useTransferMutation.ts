@@ -26,8 +26,9 @@ import {
   FOGO_BRIDGE_PAYMASTER_DOMAIN,
   FOGO_BRIDGE_VARIATION,
 } from '@/constants'
-import { findFeeConfigPda, readBridgeTransferFee } from '@/lib/bridge/feeConfig'
+import { findFeeConfigPda, readFeeConfig } from '@/lib/bridge/feeConfig'
 import { fetchBridgeSponsor } from '@/lib/bridge/intentBridgeShared'
+import { assertSessionActive } from '@/lib/bridge/sessionLiveness'
 import { addFlow, pendingWithdrawExists } from '@/lib/flow-status/store'
 import { useSettings } from '@/store/settings'
 import { getFogoConnection } from '@/utils/connections'
@@ -79,6 +80,11 @@ export function useTransferMutation(options: UseTransferMutationOptions = {}) {
       if (!isEstablished(sessionState)) {
         throw new Error('Wallet not connected')
       }
+      // `isEstablished` only reflects the cached session keypair, not the
+      // chain. A session revoked/expired out-of-band still reads as
+      // connected but the patched token program rejects its debit
+      // (`0xee6b2809`), which the paymaster returns as an opaque 502.
+      await assertSessionActive(getFogoConnection(fogoRpcUrl), sessionState.sessionPublicKey)
       if (args.kind === 'withdraw' && pendingWithdrawExists(qc)) {
         throw new Error(
           'A previous redeem is still in flight. Wait for it to finish or check Bridge history.',
@@ -102,7 +108,7 @@ export function useTransferMutation(options: UseTransferMutationOptions = {}) {
           staleTime: 30_000,
           queryFn: async () => {
             const feeConfig = findFeeConfigPda(new PublicKey(args.mintB58))
-            return readBridgeTransferFee(getFogoConnection(fogoRpcUrl), feeConfig)
+            return (await readFeeConfig(getFogoConnection(fogoRpcUrl), feeConfig)).bridgeTransferFee
           },
         })
       }

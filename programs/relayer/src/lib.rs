@@ -25,11 +25,7 @@ pub mod fogo_onre_relayer {
     use super::*;
 
     /// One-time setup: config PDA + relayer-authority-owned ATAs.
-    pub fn initialize(
-        ctx: Context<Initialize>,
-        deposit_fee_bps: u16,
-        withdraw_fee_bps: u16,
-    ) -> Result<()> {
+    pub fn initialize(ctx: Context<Initialize>, deposit_fee_bps: u16, withdraw_fee_bps: u16) -> Result<()> {
         initialize::handler(ctx, deposit_fee_bps, withdraw_fee_bps)
     }
 
@@ -48,10 +44,7 @@ pub mod fogo_onre_relayer {
     /// `transfer_lock` + atomic `release_wormhole_outbound`. Replaces
     /// `lock_onyc` and `send_usdc_to_user`. `transfer_lock_account_count`
     /// splits `remaining_accounts` between the two NTT CPIs.
-    pub fn send<'info>(
-        ctx: Context<'info, Send<'info>>,
-        transfer_lock_account_count: u8,
-    ) -> Result<()> {
+    pub fn send<'info>(ctx: Context<'info, Send<'info>>, transfer_lock_account_count: u8) -> Result<()> {
         instructions::send::handler(ctx, transfer_lock_account_count)
     }
 
@@ -76,14 +69,7 @@ pub mod fogo_onre_relayer {
         slippage_bps: Option<u16>,
         price_oracle: Option<Pubkey>,
     ) -> Result<()> {
-        configure::handler(
-            ctx,
-            deposit_fee_bps,
-            withdraw_fee_bps,
-            new_authority,
-            slippage_bps,
-            price_oracle,
-        )
+        configure::handler(ctx, deposit_fee_bps, withdraw_fee_bps, new_authority, slippage_bps, price_oracle)
     }
 
     /// Two-step rotation, step 2. Signer must equal `pending_authority`;

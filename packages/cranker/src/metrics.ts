@@ -53,6 +53,12 @@ export function createMetrics(opts: MetricsOptions) {
     labelNames: ['reason'] as const,
     registers: [registry],
   })
+  const flowUnsweptObserved = new Counter({
+    name: 'cranker_flow_unswept_observed_total',
+    help: 'Per-scan observations of a flow whose NTT inbox-item is Released but whose unlocked tokens are still parked in the recipient ATA (raw redeem done, relayer receive not yet swept). A healthy sweep clears within a scan or two, so this barely moves; sustained growth (rate > 0 for several minutes) means a wedged receive/swap/send and a likely stranded user deposit/withdraw.',
+    labelNames: ['leg'] as const,
+    registers: [registry],
+  })
   const intentReplayObserved = new Counter({
     name: 'cranker_intent_replay_observed_total',
     help: 'Inbound VAAs whose NTT sender is the dormant intent program\'s setter PDA — a cross-program replay signal (still on-chain-accepted via the {OnRe,Fogo} allowlist, so this is observational only). Any nonzero value warrants investigation.',
@@ -145,6 +151,7 @@ export function createMetrics(opts: MetricsOptions) {
     rpcErrors,
     flowAdvance,
     flowSkipped,
+    flowUnsweptObserved,
     intentReplayObserved,
     bridgeRedeemed,
     bridgeScanIterations,

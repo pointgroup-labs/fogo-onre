@@ -12,7 +12,7 @@ import {
   nttTransferArgsHash,
   resolveNttVaa,
 } from '@fogo-onre/sdk'
-import { Keypair, PublicKey, SystemProgram } from '@solana/web3.js'
+import { Keypair, PublicKey, SystemProgram, TransactionMessage, VersionedTransaction } from '@solana/web3.js'
 import { SolanaNtt } from '@wormhole-foundation/sdk-solana-ntt'
 import { makePriorityFeeIx } from '../utils/priority-fee'
 import { DEFAULT_NTT_VERSION, fetchVaaBytes, WORMHOLE_CORE_MAINNET } from '../utils/wormhole'
@@ -159,7 +159,7 @@ export async function send(
       outboxItem.publicKey,
     )
 
-    const sig = await client
+    const sendIx = await client
       .send({
         payer: keypair.publicKey,
         direction: isDeposit ? { deposit: {} } : { withdraw: {} },
@@ -174,9 +174,36 @@ export async function send(
         outboxItem: outboxItem.publicKey,
         release,
       })
-      .preInstructions([makePriorityFeeIx(ctx.priorityFeeMicroLamports), ...fundIxs])
-      .signers([outboxItem])
-      .rpc()
+      .instruction()
+
+    // transfer_lock + release_wormhole_outbound + the Flow close overflow the
+    // legacy 1232-byte limit; the send-leg LUT is mandatory, not optional —
+    // without it every send is structurally too large. Fail legibly rather
+    // than emitting a cryptic "tx too large" each scan.
+    if (!ctx.sendLookupTable) {
+      return {
+        kind: 'noop',
+        severity: 'config',
+        reason: 'SEND_LOOKUP_TABLE not configured — send tx exceeds the 1232-byte limit without the send-leg LUT; set SEND_LOOKUP_TABLE to the send-leg LUT address and restart',
+      }
+    }
+    const lut = await connection.getAddressLookupTable(ctx.sendLookupTable)
+    if (!lut.value) {
+      throw new Error(`send AddressLookupTable ${ctx.sendLookupTable.toBase58()} not found`)
+    }
+    const altAccounts = [lut.value]
+
+    const { blockhash } = await connection.getLatestBlockhash('confirmed')
+    const messageV0 = new TransactionMessage({
+      payerKey: keypair.publicKey,
+      recentBlockhash: blockhash,
+      instructions: [makePriorityFeeIx(ctx.priorityFeeMicroLamports), ...fundIxs, sendIx],
+    }).compileToV0Message(altAccounts)
+    const vtx = new VersionedTransaction(messageV0)
+    const sig = await ctx.provider.sendAndConfirm(vtx, [outboxItem], {
+      commitment: 'confirmed',
+      skipPreflight: false,
+    })
 
     metrics.txSent.inc({ instruction: 'send', result: 'ok' })
     metrics.flowAdvance.inc({ leg: input.direction, from_status: 'Swapped', to_status: 'Closed' })

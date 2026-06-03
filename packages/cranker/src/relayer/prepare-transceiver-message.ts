@@ -111,6 +111,43 @@ export type PrepareTransceiverMessageResult
     | { kind: 'prepared', signatures: string[] }
     | { kind: 'error', error: Error }
 
+/** Flatten an error's message + any attached program logs into searchable strings. */
+function errorStrings(err: unknown): string[] {
+  const out: string[] = []
+  if (err && typeof err === 'object') {
+    const e = err as { message?: unknown, logs?: unknown, errorLogs?: unknown, transactionLogs?: unknown }
+    if (typeof e.message === 'string') {
+      out.push(e.message)
+    }
+    // web3.js surfaces program logs on `.logs`, `.errorLogs`, or
+    // `.transactionLogs` depending on the error path — scan all three.
+    for (const logs of [e.logs, e.errorLogs, e.transactionLogs]) {
+      if (Array.isArray(logs)) {
+        for (const l of logs) {
+          if (typeof l === 'string') {
+            out.push(l)
+          }
+        }
+      }
+    }
+  } else if (typeof err === 'string') {
+    out.push(err)
+  }
+  return out
+}
+
+/**
+ * True when the failure is the System program refusing to `Allocate` the
+ * transceiver_message PDA because it *already exists* — i.e. a concurrent
+ * cranker, an earlier scan tick, or Wormhole's generic relayer posted it
+ * after our idempotency probe but before our receive landed. Scoped to this
+ * exact PDA so unrelated allocate failures still surface as real errors.
+ */
+function transceiverMessageAlreadyExists(err: unknown, pda: PublicKey): boolean {
+  const pdaStr = pda.toBase58()
+  return errorStrings(err).some(s => s.includes('already in use') && s.includes(pdaStr))
+}
+
 /**
  * Pre-step for any handler that consumes an NTT `transceiver_message`
  * PDA: ensures that PDA exists on Solana, owned by the corresponding
@@ -367,6 +404,17 @@ export async function prepareTransceiverMessage(
       log.info('received transceiver message (non-shim)', { signature: sig, transceiverMessage: transceiverMessagePda.toBase58() })
     }
   } catch (err) {
+    // Lost the create race: the PDA was posted between our probe and our
+    // receive. The post-condition (PDA exists, owned by the manager) holds,
+    // and derivation matches `client.receive`'s account — so treat it as
+    // prepared and let the flow advance instead of erroring out forever.
+    if (transceiverMessageAlreadyExists(err, transceiverMessagePda)) {
+      log.debug('transceiver_message already exists (create race) — treating as prepared', {
+        pda: transceiverMessagePda.toBase58(),
+        manager: manager.toBase58(),
+      })
+      return { kind: 'already-prepared' }
+    }
     return { kind: 'error', error: err instanceof Error ? err : new Error(String(err)) }
   }
 
