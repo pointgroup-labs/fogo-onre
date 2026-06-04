@@ -1,8 +1,8 @@
 # Fogo OnRe
 
-[![FOGO](https://img.shields.io/badge/FOGO-000?logo=lightning&logoColor=white&style=for-the-badge)](https://fogo.io)
-[![CI](https://img.shields.io/github/actions/workflow/status/pointgroup-labs/fogo-onre/ci.yml?branch=main&logo=githubactions&logoColor=white&style=for-the-badge&label=CI)](https://github.com/pointgroup-labs/fogo-onre/actions/workflows/ci.yml)
-[![Wormhole NTT](https://img.shields.io/badge/Wormhole-NTT-000?style=for-the-badge)](https://wormhole.com/products/native-token-transfers)
+[![FOGO](https://img.shields.io/badge/FOGO-grey?logo=lightning&style=for-the-badge)](https://fogo.io)
+[![npm](https://img.shields.io/npm/v/@ignitionfi/fogo-onre?logo=npm&logoColor=white&style=for-the-badge)](https://www.npmjs.com/package/@ignitionfi/fogo-onre)
+[![CI](https://img.shields.io/github/actions/workflow/status/pointgroup-labs/fogo-onre/ci.yml?logo=githubactions&logoColor=white&style=for-the-badge&label=CI)](https://github.com/pointgroup-labs/fogo-onre/actions/workflows/ci.yml)
 
 A cross-chain yield bridge. Deposit **USDC.s on FOGO** and receive **ONyc**
 — a token that earns yield from
@@ -34,7 +34,7 @@ capital only in-flight and CPIs into OnRe to swap. Each leg is the same
 three-step pipeline, driven by three permissionless relayer instructions:
 
 | Step       | Instruction | Deposit                     | Withdraw                     |
-| ---------- | ----------- | --------------------------- | ---------------------------- |
+|------------|-------------|-----------------------------|------------------------------|
 | 1. Receive | `receive`   | claim inbound USDC from NTT | claim inbound ONyc from NTT  |
 | 2. Swap    | `swap`      | USDC → ONyc on OnRe         | ONyc → USDC on OnRe          |
 | 3. Send    | `send`      | NTT-send ONyc back to FOGO  | NTT-send USDC.s back to FOGO |
@@ -64,14 +64,14 @@ relayer ID is the declared ID across clusters — confirm the deploy status
 on-chain before assuming any cluster is live.
 
 | Program                  | Chain  | ID                                            |
-| ------------------------ | ------ | --------------------------------------------- |
+|--------------------------|--------|-----------------------------------------------|
 | Relayer                  | Solana | `onrenRKgX54qtWeK3cuaTBE71xx7dWMXn82ubH61vAp` |
 | `intent_transfer` (fork) | FOGO   | `inTFf5S7ZtYr8SkwGG85mjDwAyJwjqEPdH2p2nuyrL9` |
 
 ## Components
 
 | Path                        | Description                                                                                |
-| --------------------------- | ------------------------------------------------------------------------------------------ |
+|-----------------------------|--------------------------------------------------------------------------------------------|
 | `programs/relayer/`         | Anchor program (Rust) — the Solana relayer.                                                |
 | `programs/intent-transfer/` | First-party fork of FOGO's intent_transfer entry, with reviewed edits; workspace-excluded. |
 | `packages/sdk/`             | TypeScript SDK (`@fogo-onre/sdk`): client + builders.                                      |
