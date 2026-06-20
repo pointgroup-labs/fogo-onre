@@ -1,15 +1,12 @@
 import type { AdvanceContext, AdvanceResult } from './types'
 import {
-  deriveUserWalletFromFogoTx,
   describeStatus,
   findAuthorityPda,
   findNttPeerPda,
-  findUserInboxAuthorityPda,
+  findUserInboxWithMinPda,
   FOGO_WORMHOLE_CHAIN_ID,
-  NTT_ONYC_PROGRAM_ID,
-  NTT_USDC_PROGRAM_ID,
+  recoverWalletAndMinOutCandidates,
   resolveNttVaa,
-  WH_TRANSCEIVER_ONYC_PROGRAM_ID,
 } from '@fogo-onre/sdk'
 import { createAssociatedTokenAccountIdempotentInstruction, getAssociatedTokenAddressSync } from '@solana/spl-token'
 import { PublicKey, SystemProgram } from '@solana/web3.js'
@@ -30,7 +27,10 @@ export type ReceiveInput = {
   direction: 'deposit' | 'withdraw'
   fogoTx: string
   vaaHex?: string
+  /** Override the recovered wallet; pair with `minSwapOut` to skip tx recovery. */
   userWallet?: PublicKey
+  /** Override the memo-recovered floor; required when `userWallet` is passed. */
+  minSwapOut?: bigint
   recvMint?: PublicKey
   nttProgram?: PublicKey
 }
@@ -48,15 +48,35 @@ export async function receive(
 ): Promise<AdvanceResult> {
   const { connection, keypair, client, metrics } = ctx
   const isDeposit = input.direction === 'deposit'
-  const nttProgram = input.nttProgram ?? (isDeposit ? NTT_USDC_PROGRAM_ID : NTT_ONYC_PROGRAM_ID)
 
   try {
-    // Withdraw needs a real ONyc NTT manager; while it still aliases the
-    // USDC manager the CPI cannot custody ONyc. Symmetric on the send leg.
-    if (!isDeposit && NTT_ONYC_PROGRAM_ID.equals(NTT_USDC_PROGRAM_ID)) {
+    // Pre-flight: RelayerConfig must exist (catastrophic if not). Fetched
+    // first so the NTT manager comes from the pair config, not constants.
+    const cfgInfo = await withTimeout(
+      connection.getAccountInfo(client.configPda),
+      ctx.rpcTimeoutMs,
+      'getAccountInfo(RelayerConfig)',
+    ).catch(() => null)
+    if (!cfgInfo) {
+      return {
+        kind: 'error',
+        error: new Error(`RelayerConfig not found at ${client.configPda.toBase58()}`),
+        partialSignatures: [],
+      }
+    }
+    const cfg = await client.fetchConfig()
+    const nttBaseProgram = cfg.nttBaseProgram as PublicKey
+    const nttAssetProgram = cfg.nttAssetProgram as PublicKey
+    // receive pulls in the received token: deposit→base manager, withdraw→asset.
+    const nttProgram = input.nttProgram ?? (isDeposit ? nttBaseProgram : nttAssetProgram)
+    const recvMint = input.recvMint ?? ((isDeposit ? cfg.baseMint : cfg.assetMint) as PublicKey)
+
+    // Withdraw needs a distinct asset manager; if it still aliases the base
+    // manager (placeholder) the CPI cannot custody the asset token.
+    if (!isDeposit && nttAssetProgram.equals(nttBaseProgram)) {
       return {
         kind: 'noop',
-        reason: 'ONyc NTT manager not deployed (NTT_ONYC_PROGRAM_ID == NTT_USDC_PROGRAM_ID placeholder)',
+        reason: 'asset NTT manager not deployed (cfg.nttAssetProgram == cfg.nttBaseProgram placeholder)',
       }
     }
 
@@ -81,53 +101,45 @@ export async function receive(
       }
     }
 
-    // Pre-flight: RelayerConfig must exist (catastrophic if not).
-    const cfgInfo = await withTimeout(
-      connection.getAccountInfo(client.configPda),
-      ctx.rpcTimeoutMs,
-      'getAccountInfo(RelayerConfig)',
-    ).catch(() => null)
-    if (!cfgInfo) {
-      return {
-        kind: 'error',
-        error: new Error(`RelayerConfig not found at ${client.configPda.toBase58()}`),
-        partialSignatures: [],
-      }
-    }
-    const cfg = await client.fetchConfig()
-    const recvMint = input.recvMint ?? ((isDeposit ? cfg.baseMint : cfg.assetMint) as PublicKey)
-
-    // Recover userWallet from the FOGO tx and check it derives the VAA
-    // recipient (the VAA carries only non-invertible PDAs). Cached per scan.
-    function deriveInboxAuthority(wallet: PublicKey): PublicKey {
-      const [pda] = findUserInboxAuthorityPda(wallet, client.program.programId)
+    // Recover { userWallet, minSwapOut } from the FOGO tx (wallet = source-ATA
+    // owner, floor = `onre:mso:<n>` memo) and check the
+    // min-bearing inbox PDA derives the VAA recipient. The memo is UNTRUSTED:
+    // a wrong/missing value derives the wrong recipient, so the check below —
+    // and the on-chain `receive` re-derivation — reject it (no skim). Cached
+    // per scan.
+    function deriveInboxAuthority(wallet: PublicKey, minSwapOut: bigint): PublicKey {
+      const [pda] = findUserInboxWithMinPda(wallet, minSwapOut, client.program.programId)
       return pda
     }
     let userWallet: PublicKey
-    if (input.userWallet) {
+    let minSwapOut: bigint
+    if (input.userWallet !== undefined && input.minSwapOut !== undefined) {
       userWallet = input.userWallet
+      minSwapOut = input.minSwapOut
     } else {
       const cached = ctx.userWalletCache.get(input.fogoTx)
-      const recovered = cached
-        ?? await withTimeout(
-          deriveUserWalletFromFogoTx(ctx.fogoConnection, input.fogoTx),
+      let matched = cached ?? null
+      if (!matched) {
+        const candidates = await withTimeout(
+          recoverWalletAndMinOutCandidates(ctx.fogoConnection, input.fogoTx),
           ctx.rpcTimeoutMs,
-          'deriveUserWalletFromFogoTx',
-        ).catch(() => null)
-      if (!recovered) {
+          'recoverWalletAndMinOutCandidates',
+        ).catch(() => [])
+        // Pick the candidate whose inbox PDA derives the VAA recipient —
+        // robust to extra/decoy memos or bridge ixs in the source tx.
+        matched = candidates.find(c =>
+          deriveInboxAuthority(c.userWallet, c.minSwapOut).equals(resolved.recipientOnSolana),
+        ) ?? null
+      }
+      if (!matched) {
         return {
           kind: 'noop',
-          reason: `FOGO tx ${input.fogoTx} not found — likely beyond RPC history retention; VAA recipient ${resolved.recipientOnSolana.toBase58()}`,
+          reason: `no { wallet, min_swap_out } candidate from FOGO tx ${input.fogoTx} derives VAA recipient ${resolved.recipientOnSolana.toBase58()} — not an OnRe ${input.direction} (missing tx / absent or unparseable memo / mismatch)`,
         }
       }
-      if (!deriveInboxAuthority(recovered).equals(resolved.recipientOnSolana)) {
-        return {
-          kind: 'noop',
-          reason: `recovered wallet ${recovered.toBase58()} from FOGO tx ${input.fogoTx} doesn't derive VAA recipient ${resolved.recipientOnSolana.toBase58()} — not an OnRe ${input.direction}`,
-        }
-      }
-      userWallet = recovered
-      ctx.userWalletCache.set(input.fogoTx, recovered)
+      userWallet = matched.userWallet
+      minSwapOut = matched.minSwapOut
+      ctx.userWalletCache.set(input.fogoTx, matched)
     }
 
     // Refuse to crank if the Flow receipt already exists (someone else got
@@ -143,7 +155,7 @@ export async function receive(
     // Withdraw-only: FOGO peer must be registered on the ONyc NTT manager,
     // else redeem wiring fails Anchor's constraint. Operator config → noop.
     if (!isDeposit) {
-      const [fogoPeerPda] = findNttPeerPda(FOGO_WORMHOLE_CHAIN_ID, NTT_ONYC_PROGRAM_ID)
+      const [fogoPeerPda] = findNttPeerPda(FOGO_WORMHOLE_CHAIN_ID, nttProgram)
       const peerInfo = await withTimeout(
         connection.getAccountInfo(fogoPeerPda),
         ctx.rpcTimeoutMs,
@@ -157,7 +169,7 @@ export async function receive(
       }
     }
 
-    const [userInboxAuthority] = findUserInboxAuthorityPda(userWallet, client.program.programId)
+    const [userInboxAuthority] = findUserInboxWithMinPda(userWallet, minSwapOut, client.program.programId)
     const userInboxAta = getAssociatedTokenAddressSync(recvMint, userInboxAuthority, true)
 
     if (isDeposit) {
@@ -214,7 +226,7 @@ export async function receive(
       transceiverMessagePda: resolved.nttTransceiverMessage,
       manager: nttProgram,
       token: recvMint,
-      transceiver: isDeposit ? nttProgram : WH_TRANSCEIVER_ONYC_PROGRAM_ID,
+      transceiver: nttProgram,
       expectedOwner: nttProgram,
       rpcTimeoutMs: ctx.rpcTimeoutMs,
       txConfirmTimeoutMs: ctx.txConfirmTimeoutMs,
@@ -244,10 +256,14 @@ export async function receive(
         payer: keypair.publicKey,
         direction: isDeposit ? { deposit: {} } : { withdraw: {} },
         userWallet,
+        minSwapOut,
         recvMint,
         nttInboxItem: resolved.nttInboxItem,
         nttTransceiverMessage: resolved.nttTransceiverMessage,
         ntt: { transceiverAddress: nttProgram },
+        // Route the SDK through the config's managers, not its OnRe defaults.
+        nttBaseProgram: cfg.nttBaseProgram as PublicKey,
+        nttAssetProgram: cfg.nttAssetProgram as PublicKey,
       })
       .preInstructions([makePriorityFeeIx(ctx.priorityFeeMicroLamports), ...fundIxs, ensureUserInboxAtaIx])
       .rpc()

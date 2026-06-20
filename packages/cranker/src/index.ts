@@ -1,3 +1,4 @@
+import type { RecoveredWalletAndMinOut } from '@fogo-onre/sdk'
 import type { BridgeRedeemTarget } from './bridge'
 import type { CrankerConfig } from './config'
 import type { Metrics } from './metrics'
@@ -6,13 +7,13 @@ import type { WatermarkStore } from './state'
 import type { Logger } from './utils/log'
 import { readFileSync } from 'node:fs'
 import { AnchorProvider, Wallet } from '@anchor-lang/core'
-import { RelayerClient } from '@fogo-onre/sdk'
+import { ONYC_MINT, RelayerClient, USDC_MINT } from '@fogo-onre/sdk'
 import { Connection, Keypair, LAMPORTS_PER_SOL, PublicKey } from '@solana/web3.js'
 import { buildSolanaOnycToFogoTarget, buildSolanaUsdcToFogoTarget, scanAndRedeemBridge } from './bridge'
 import { loadConfig } from './config'
 import { runDaemon } from './daemon'
 import { createMetrics } from './metrics'
-import { makeEnumerator, scanAndAdvance } from './relayer'
+import { makeEnumerator, scanAndAdvance, scanAndRefund } from './relayer'
 import { FlowStateTracker, loadCheckpoint, saveCheckpoint, watermarksFromCheckpoint } from './state'
 import { BoundedMap } from './utils/bounded-map'
 import { createLogger, errorFields, errorMessage, writeLogLine } from './utils/log'
@@ -40,20 +41,11 @@ export function installShutdownHandlers(controller: AbortController, log?: Logge
 }
 
 /**
- * Background balance poller. Used for both Solana SOL and FOGO native fees
- * — the cranker keypair pays gas on both chains (Solana txs from the
- * relayer-Flow scanner, FOGO txs from the bridge-redeem path which signs
- * with this same keypair against the FOGO RPC). Two pollers run in
- * parallel, one per chain.
- *
- * On RPC failure the balance gauge is set to **NaN** rather than left at
- * the last good value — otherwise a long RPC outage masks a draining
- * balance and the low-balance alert never fires. The companion
- * `cranker_balance_poll_age_seconds{chain}` gauge keeps growing during
- * the outage so an alert can distinguish "RPC down" from "poller dead".
- *
- * Errors are logged but never thrown — a temporary RPC blip shouldn't
- * kill the daemon.
+ * Background balance poller for the cranker keypair's gas (one per chain;
+ * it pays on both Solana and FOGO). On RPC failure the gauge is set to NaN,
+ * not left stale — else an outage masks a draining balance and the alert never
+ * fires; the companion age gauge keeps growing so "RPC down" stays
+ * distinguishable from "poller dead". Errors logged, never thrown.
  */
 export function startBalancePoller(args: {
   chain: 'solana' | 'fogo'
@@ -89,10 +81,9 @@ export function startBalancePoller(args: {
 }
 
 /**
- * Best-effort WebSocket-alive flag. `prom-client` Gauge defaults to 0,
- * so we set it to 1 once we can confirm the WS is live (slot subscription
- * landed). On error, set 0. This signals the operator (and Grafana) when
- * the WS is dead and the daemon is falling back to polling.
+ * Best-effort WebSocket-alive flag: set to 1 once a slot subscription lands,
+ * 0 on error. Signals the operator when the WS is dead and the daemon is
+ * falling back to polling.
  */
 export function startWsKeepalive(args: {
   connection: Connection
@@ -133,8 +124,11 @@ type ScanDeps = {
   metrics: Metrics
   log: Logger
   enumerateFlows: EnumerateFlowsFn
+  /** When set, this tick also runs a refund sweep over `Received` flows past timeout. */
+  refundEnumerateFlows?: EnumerateFlowsFn
   seenAdvanceErrors: Map<string, string>
   seenBridgeErrors: Map<string, string>
+  seenRefundErrors: Map<string, string>
   flowState: FlowStateTracker
   /** Per-emitter Wormholescan watermarks, shared with `makeEnumerator`. */
   watermarks: WatermarkStore
@@ -153,7 +147,7 @@ type ScanDeps = {
  * scan itself threw — surface it but don't drag the other leg down.
  */
 async function runScanIteration(deps: ScanDeps, signal: AbortSignal): Promise<void> {
-  const { advanceCtxBase, bridgeTargets, cfg, metrics, log, enumerateFlows, seenAdvanceErrors, seenBridgeErrors, flowState, watermarks, wakeup } = deps
+  const { advanceCtxBase, bridgeTargets, cfg, metrics, log, enumerateFlows, refundEnumerateFlows, seenAdvanceErrors, seenBridgeErrors, seenRefundErrors, flowState, watermarks, wakeup } = deps
   const advanceCtx = { ...advanceCtxBase, abortSignal: signal }
   // Coalesce the wake signal: a tick that advances 12 flows shouldn't
   // signal 12 separate wakes. The scan*-side `progress` boolean does the
@@ -207,12 +201,31 @@ async function runScanIteration(deps: ScanDeps, signal: AbortSignal): Promise<vo
     ),
   )
 
-  const settled = await Promise.allSettled([flowScan, ...bridgeScans])
+  // Refund is the exception path; isolate it like the bridge legs so a
+  // refund failure (or a missing NTT send-back wiring) never trips the
+  // daemon backoff for the healthy swap/send + bridge legs. Off by default
+  // (REFUND_INTERVAL_MS=0); only the refund tick passes an enumerator.
+  const refundScan = refundEnumerateFlows
+    ? scanAndRefund({ ...advanceCtxBase, abortSignal: signal }, {
+        maxConcurrentRefunds: cfg.maxConcurrentRefunds,
+        rpcTimeoutMs: cfg.rpcTimeoutMs,
+        enumerateTimeoutMs: cfg.enumerateTimeoutMs,
+        enumerateFlows: refundEnumerateFlows,
+        seenRefundErrors,
+      })
+    : Promise.resolve()
+
+  const settled = await Promise.allSettled([flowScan, refundScan, ...bridgeScans])
   const flowResult = settled[0]
-  const bridgeResults = settled.slice(1)
+  const refundResult = settled[1]
+  const bridgeResults = settled.slice(2)
 
   if (flowResult.status === 'rejected') {
     metrics.bridgeScanIterations.inc({ target: 'flow', result: 'error' })
+  }
+  if (refundResult.status === 'rejected') {
+    metrics.bridgeScanIterations.inc({ target: 'refund', result: 'error' })
+    log.warn('refund scan leg failed', errorFields(refundResult.reason))
   }
   bridgeResults.forEach((br, i) => {
     const targetName = bridgeTargets[i]?.name ?? 'bridge'
@@ -227,7 +240,8 @@ async function runScanIteration(deps: ScanDeps, signal: AbortSignal): Promise<vo
   // Re-throw only if EVERY leg (flow + all bridges) failed: a single
   // sick leg shouldn't trip the daemon backoff while the rest are
   // healthy. Mirrors the prior single-bridge behavior — a "total
-  // outage" signal, not a "any failure" signal.
+  // outage" signal, not a "any failure" signal. The refund leg is
+  // best-effort and excluded from the total-outage signal.
   const allFailed = flowResult.status === 'rejected'
     && bridgeResults.every(br => br.status === 'rejected')
   if (allFailed) {
@@ -265,13 +279,13 @@ async function main(): Promise<void> {
     commitment: 'confirmed',
     preflightCommitment: 'confirmed',
   })
-  const client = new RelayerClient(provider)
+  const client = new RelayerClient(provider, { baseMint: USDC_MINT, assetMint: ONYC_MINT })
 
-  const relayerConfig = await client.fetchConfig()
+  const pairConfig = await client.fetchConfig()
 
   log.info('cranker started', {
     cranker: keypair.publicKey.toBase58(),
-    authority: (relayerConfig.authority as PublicKey).toBase58(),
+    authority: (pairConfig.authority as PublicKey).toBase58(),
     relayerProgram: client.program.programId.toBase58(),
     metricsPort: metrics.actualPort(),
     fogoUsdcEmitterConfigured: Boolean(cfg.fogoUsdcEmitterHex),
@@ -351,6 +365,23 @@ async function main(): Promise<void> {
       })
     : undefined
 
+  // Refund enumerator — bypasses the watermark and pages deep (like backstop)
+  // because a `Received` flow may sit waiting for its REFUND_TIMEOUT before it
+  // becomes refundable, long after the incremental watermark passed it. Built
+  // only when refund sweeps are enabled (REFUND_INTERVAL_MS > 0).
+  const refundEnumerateFlows = cfg.refundIntervalMs > 0
+    ? makeEnumerator({
+        fogoWormholeChainId: cfg.fogoWormholeChainId,
+        fogoUsdcEmitterHex: cfg.fogoUsdcEmitterHex,
+        fogoOnycEmitterHex: cfg.fogoOnycEmitterHex,
+        pageSize: cfg.wormholescanPageSize,
+        maxPages: cfg.wormholescanBackstopMaxPages,
+        baseUrl: cfg.wormholescanUrl,
+        watermarks,
+        bypassWatermark: true,
+      })
+    : undefined
+
   const advanceCtxBase = {
     connection,
     fogoConnection,
@@ -366,10 +397,11 @@ async function main(): Promise<void> {
     sendLookupTable: cfg.sendLookupTable ? new PublicKey(cfg.sendLookupTable) : undefined,
     metrics,
     log,
-    // Cross-scan cache: FOGO source-tx → user wallet. claim_usdc resolves
-    // user wallets by reading the original FOGO bridge_ntt_tokens source
-    // ATA owner; cache so repeat scans don't re-fetch the same tx.
-    userWalletCache: new BoundedMap<string, PublicKey>(USER_WALLET_CACHE_MAX),
+    // Cross-scan cache: FOGO source-tx → recovered { userWallet, minSwapOut }.
+    // `receive` recovers the wallet from the bridge_ntt_tokens source-ATA
+    // owner and the floor from the tx memo; cache so repeat scans don't
+    // re-fetch the same tx.
+    userWalletCache: new BoundedMap<string, RecoveredWalletAndMinOut>(USER_WALLET_CACHE_MAX),
   } satisfies Omit<AdvanceContext, 'abortSignal'>
 
   try {
@@ -377,6 +409,7 @@ async function main(): Promise<void> {
     // unrecoverable flows don't spam warn every scan interval.
     const seenAdvanceErrors = new Map<string, string>()
     const seenBridgeErrors = new Map<string, string>()
+    const seenRefundErrors = new Map<string, string>()
 
     // Per-flow ephemeral processing FSM (idle / inFlight / cooldown /
     // poisoned). Gates dispatch to skip flows already in flight or
@@ -478,6 +511,9 @@ async function main(): Promise<void> {
     // operators see a backstop sweep at startup, which is exactly when
     // post-restart stranding is most likely.
     let lastBackstopAt = 0
+    // Edge-triggered against wall-clock (not tick count) so a wakeup burst of
+    // fast ticks doesn't fire a refund sweep every tick.
+    let lastRefundAt = 0
 
     await runDaemon({
       scan: (signal) => {
@@ -499,6 +535,14 @@ async function main(): Promise<void> {
           })
           enumerator = backstopEnumerateFlows
         }
+        // Refund sweep runs on its own (slow) cadence, alongside (not instead
+        // of) the swap/send scan that tick — they drive different flows.
+        let refundEnum: EnumerateFlowsFn | undefined
+        if (refundEnumerateFlows && now - lastRefundAt >= cfg.refundIntervalMs) {
+          lastRefundAt = now
+          log.info('refund scan tick', { intervalMs: cfg.refundIntervalMs })
+          refundEnum = refundEnumerateFlows
+        }
         return runScanIteration({
           advanceCtxBase,
           bridgeTargets,
@@ -506,8 +550,10 @@ async function main(): Promise<void> {
           metrics,
           log,
           enumerateFlows: enumerator,
+          refundEnumerateFlows: refundEnum,
           seenAdvanceErrors,
           seenBridgeErrors,
+          seenRefundErrors,
           flowState,
           watermarks,
           wakeup,

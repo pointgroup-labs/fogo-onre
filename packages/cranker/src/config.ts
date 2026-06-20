@@ -29,37 +29,33 @@ const schema = z.object({
   WORMHOLESCAN_PAGE_SIZE: z.coerce.number().int().min(1).max(200).default(50),
   WORMHOLESCAN_MAX_PAGES: z.coerce.number().int().min(1).max(20).default(2),
   /**
-   * Backstop scan: the incremental enumerator stops at the watermark.
-   * Periodically (every `BACKSTOP_INTERVAL_MS`) the daemon runs a
-   * second enumeration that ignores the watermark and walks
-   * `WORMHOLESCAN_BACKSTOP_MAX_PAGES` deep. Catches flows the
-   * incremental scan stranded — e.g. a VAA that arrived during daemon
-   * downtime (watermark fast-forwarded past it on resume) or a
-   * post-watermark dispatch that failed and left an orphan Flow PDA
-   * the incremental scan no longer pages.
-   *
-   * Default 50 pages × 50 items = 2,500 VAAs per emitter ≈ several
-   * days at mainnet deposit volume — enough to catch every reasonable
-   * stranding window without scanning the entire emitter history.
+   * Backstop scan depth: a periodic enumeration that ignores the watermark,
+   * catching flows the incremental scan stranded — VAAs that arrived during
+   * downtime (watermark fast-forwarded past them) or orphan Flow PDAs from a
+   * failed post-watermark dispatch. 50×50 ≈ several days of mainnet volume.
    */
   WORMHOLESCAN_BACKSTOP_MAX_PAGES: z.coerce.number().int().min(1).max(200).default(50),
   /** Period between backstop sweeps. 0 disables. Default 5 minutes. */
   BACKSTOP_INTERVAL_MS: z.coerce.number().int().min(0).default(300_000),
+  /**
+   * Period between refund sweeps: NTT-sends the original token back for
+   * `Received` flows past `REFUND_TIMEOUT_SLOTS`. 0 disables (default: opt in
+   * until the NTT send-back manager wiring is verified). Suggested ~15min.
+   */
+  REFUND_INTERVAL_MS: z.coerce.number().int().min(0).default(0),
+  /** Refund-side concurrency budget — separate so it can't starve normal advances. */
+  MAX_CONCURRENT_REFUNDS: z.coerce.number().int().min(1).max(32).default(2),
   /** FOGO Wormhole chain ID (source chain for VAA polling). Defaults to SDK constant. */
   FOGO_WORMHOLE_CHAIN_ID: z.coerce.number().int().min(1).default(FOGO_WORMHOLE_CHAIN_ID),
   /** Hex emitter (32 bytes, no 0x) for the FOGO USDC NTT manager. Defaults to PDA derived from SDK's NTT_USDC_PROGRAM_ID. */
   FOGO_USDC_EMITTER_HEX: z.string().regex(/^[0-9a-f]{64}$/i).default(DEFAULT_USDC_EMITTER_HEX),
   /** Hex emitter for the FOGO ONyc NTT manager. Defaults to PDA derived from SDK's NTT_ONYC_PROGRAM_ID. */
   FOGO_ONYC_EMITTER_HEX: z.string().regex(/^[0-9a-f]{64}$/i).default(DEFAULT_ONYC_EMITTER_HEX),
-  /**
-   * Hex emitter for the Solana ONyc NTT manager. Outbound source for the bridge pipeline.
-   *  Defaults to PDA derived from SDK's NTT_ONYC_PROGRAM_ID (same bytecode as FOGO side).
-   */
+  /** Hex emitter for the Solana ONyc NTT manager — outbound bridge source. Defaults to the NTT_ONYC_PROGRAM_ID PDA. */
   SOLANA_ONYC_EMITTER_HEX: z.string().regex(/^[0-9a-f]{64}$/i).default(DEFAULT_SOLANA_ONYC_EMITTER_HEX),
   /**
-   * Hex emitter for the Solana USDC.s NTT manager. Outbound source for
-   * the redeem-completion leg of the bridge pipeline. Defaults to PDA
-   * derived from SDK's `NTT_USDC_PROGRAM_ID`.
+   * Hex emitter for the Solana USDC.s NTT manager — source for the
+   * redeem-completion leg. Defaults to the SDK's `NTT_USDC_PROGRAM_ID` PDA.
    */
   SOLANA_USDC_EMITTER_HEX: z.string().regex(/^[0-9a-f]{64}$/i).default(DEFAULT_SOLANA_USDC_EMITTER_HEX),
   /** Set to "false" to disable the Solana → FOGO ONyc bridge pipeline (e.g. during incident triage). */
@@ -73,61 +69,40 @@ const schema = z.object({
   BALANCE_POLL_INTERVAL_MS: z.coerce.number().int().min(5000).default(60_000),
   RPC_TIMEOUT_MS: z.coerce.number().int().min(1000).default(15_000),
   /**
-   * Budget for a single `enumerateFlows` call (Wormholescan paging +
-   * per-VAA Flow PDA lookups). Separate from `RPC_TIMEOUT_MS` because
-   * a fresh process with no checkpoint must backfill the full page
-   * window — easily 50–100 round-trips — and 15s isn't enough.
+   * Budget for one `enumerateFlows` call. Separate from `RPC_TIMEOUT_MS`
+   * because a fresh checkpoint-less process backfills the full page window
+   * (50–100 round-trips) and 15s isn't enough.
    */
   ENUMERATE_TIMEOUT_MS: z.coerce.number().int().min(5000).default(90_000),
   /**
-   * Per-transaction confirmation budget. Applied around every
-   * `sendAndConfirmTransaction` (and equivalent send + confirm pairs)
-   * in the bridge / relayer paths.
-   *
-   * Floor (30s) and default (90s) tuned for the `core.postVaa`
-   * sequence, which fans out into several `verify_signatures` txs
-   * followed by one `post_vaa` tx — each confirmed with this same
-   * budget. Under mainnet congestion `confirmed`-commitment routinely
-   * drifts to 20–40s per tx; a too-tight value aborts mid-sequence
-   * and leaves the Flow in `Pending` until the next scan.
-   * The 30s minimum is *intentionally* defensive — anything lower
-   * silently bricks withdraw flows during congestion windows.
+   * Per-transaction confirmation budget. The 30s floor is sized for the
+   * `core.postVaa` multi-tx sequence (several `verify_signatures` + one
+   * `post_vaa`); anything lower aborts mid-sequence and silently bricks
+   * withdraw flows under congestion.
    */
   TX_CONFIRM_TIMEOUT_MS: z.coerce.number().int().min(30_000).default(90_000),
   WORMHOLESCAN_TIMEOUT_MS: z.coerce.number().int().min(1000).default(10_000),
   HEARTBEAT_STALE_MS: z.coerce.number().int().min(30_000).default(120_000),
   MAX_CONCURRENT_ADVANCES: z.coerce.number().int().min(1).max(32).default(4),
   /**
-   * Priority fee in micro-lamports per compute unit, prepended to
-   * every Solana tx the cranker submits. Without a non-zero value,
-   * mainnet leaders deprioritize the tx and the blockhash routinely
-   * expires before inclusion (surfaces as
-   * `TransactionExpiredBlockheightExceededError`).
-   *
-   * Default 10_000 µ-lamports/CU = 0.001 SOL on a 100k-CU tx, which
-   * comfortably clears the floor on a moderately congested mainnet
-   * without overspending. Bump to 50_000+ during incidents; the
-   * cranker re-builds blockhash on each scan so a config bump takes
-   * effect on the next attempt.
+   * Priority fee (µ-lamports/CU) prepended to every Solana tx. Without a
+   * non-zero value mainnet leaders deprioritize the tx and the blockhash
+   * expires before inclusion. Default 10_000 clears a moderately congested
+   * mainnet; bump to 50_000+ during incidents (takes effect next scan).
    */
   SOLANA_PRIORITY_FEE_MICROLAMPORTS: z.coerce.number().int().min(0).default(10_000),
   /**
-   * Base58 Address Lookup Table compressing the `send` leg's stable
-   * NTT/Wormhole accounts. Required for the outbound `transfer_lock` +
-   * `release_wormhole_outbound` tx to fit the 1232-byte limit — without
-   * it the v0 message carries every account inline and overflows.
-   *
-   * Defaults to the live mainnet send-leg LUT (33 accounts, see
-   * docs/deploy-mainnet.md §7) so a forgotten env var can't silently
-   * brick every send. Override for devnet/localnet.
+   * Address Lookup Table compressing the `send` leg's stable NTT/Wormhole
+   * accounts — required for the outbound tx to fit the 1232-byte limit (else
+   * the v0 message inlines every account and overflows). Defaults to the live
+   * mainnet send-leg LUT so a forgotten env var can't brick sends.
    */
   SEND_LOOKUP_TABLE: z.string().min(32).default('9aF7QN6HTtfQ6Wvo2UMFeTuHyaBxidMHhbTbN16Bwuyk'),
   /**
-   * Path to the on-disk checkpoint file (per-emitter Wormholescan
-   * watermarks). Empty string disables persistence — in-memory
-   * watermarks still apply within a process lifetime. Idempotency
-   * on-chain means a lost checkpoint just causes a one-time backfill,
-   * never a missed dispatch.
+   * On-disk checkpoint file (per-emitter watermarks). Empty string disables
+   * persistence (in-memory watermarks still apply per process). On-chain
+   * idempotency makes a lost checkpoint a one-time backfill, never a missed
+   * dispatch.
    */
   CHECKPOINT_PATH: z.string().default('./cranker-checkpoint.json'),
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
@@ -143,6 +118,8 @@ export type CrankerConfig = {
   wormholescanMaxPages: number
   wormholescanBackstopMaxPages: number
   backstopIntervalMs: number
+  refundIntervalMs: number
+  maxConcurrentRefunds: number
   fogoWormholeChainId: number
   fogoUsdcEmitterHex: string
   fogoOnycEmitterHex: string
@@ -179,6 +156,8 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     wormholescanMaxPages: parsed.WORMHOLESCAN_MAX_PAGES,
     wormholescanBackstopMaxPages: parsed.WORMHOLESCAN_BACKSTOP_MAX_PAGES,
     backstopIntervalMs: parsed.BACKSTOP_INTERVAL_MS,
+    refundIntervalMs: parsed.REFUND_INTERVAL_MS,
+    maxConcurrentRefunds: parsed.MAX_CONCURRENT_REFUNDS,
     fogoWormholeChainId: parsed.FOGO_WORMHOLE_CHAIN_ID,
     fogoUsdcEmitterHex: parsed.FOGO_USDC_EMITTER_HEX,
     fogoOnycEmitterHex: parsed.FOGO_ONYC_EMITTER_HEX,

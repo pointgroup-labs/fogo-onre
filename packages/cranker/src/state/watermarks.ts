@@ -1,27 +1,9 @@
 /**
- * Per-(chain, emitter) "highest sequence seen" memo. Cuts Wormholescan
- * paging load: instead of re-paging from page 0 every tick, the harvest
- * loop stops once an entire page sits below `watermark - BACKFILL_COUNT`.
- *
- * Wormholescan returns VAAs newest-first (see WormholescanClient docs),
- * so a page where every entry is at-or-below the floor proves every
- * subsequent page is too — bounded paging without dropping signals.
- *
- * `BACKFILL_COUNT` is the slack we always re-process near the head, in
- * case a guardian-signed VAA arrives slightly out of sequence order
- * relative to a previously-seen one. Five is small enough to be
- * negligible work and large enough to absorb realistic reordering.
- *
- * The store itself is in-memory; persistence is opt-in via
- * `checkpoint.ts`. Idempotency on-chain means a lost watermark just
- * causes a one-time backfill — never a missed dispatch.
- *
- * Keys are `${chainId}:${emitterHex}`. Keying by emitter alone cross-
- * contaminates floors when two scanners observe the same emitter from
- * different source chains (e.g. the FOGO-ONyc relayer enumerator and
- * the Solana-ONyc bridge scanner share `SOLANA_ONYC_EMITTER_HEX ===
- * FOGO_ONYC_EMITTER_HEX` under the default config). Always use
- * `watermarkKey(chainId, emitter)` to compose the key.
+ * Per-(chain, emitter) "highest sequence seen" memo bounding Wormholescan
+ * paging: newest-first ordering ends paging once a page sits entirely at-or-
+ * below `watermark - BACKFILL_COUNT` (slack absorbs out-of-order VAAs). Keys
+ * are `${chainId}:${emitterHex}` — emitter alone cross-contaminates floors when
+ * two source chains share one (`SOLANA_ONYC_EMITTER_HEX === FOGO_ONYC_*`).
  */
 export type WatermarkStore = Map<string, bigint>
 

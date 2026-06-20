@@ -6,11 +6,7 @@ import type { AdvanceContext } from './types'
 import {
   decodeNttInboxItem,
   describeStatus,
-  NTT_ONYC_PROGRAM_ID,
-  NTT_USDC_PROGRAM_ID,
-  ONYC_MINT,
   resolveNttVaa,
-  USDC_MINT,
   WormholescanClient,
 } from '@fogo-onre/sdk'
 import { getAssociatedTokenAddressSync } from '@solana/spl-token'
@@ -30,12 +26,7 @@ import { readSplTokenAmount } from './account-layouts'
  */
 const TERMINAL_CACHE_MAX = 50_000
 
-const VAA_LEG = {
-  deposit: { nttProgramId: NTT_USDC_PROGRAM_ID },
-  withdraw: { nttProgramId: NTT_ONYC_PROGRAM_ID },
-} as const
-
-type VaaLeg = keyof typeof VAA_LEG
+type VaaLeg = 'deposit' | 'withdraw'
 
 export type EnumerateOptions = {
   fogoWormholeChainId: number
@@ -109,6 +100,18 @@ export function makeEnumerator(opts: EnumerateOptions) {
 
   return async function enumerateFlows(ctx: AdvanceContext): Promise<ScannedFlow[]> {
     const out: ScannedFlow[] = []
+    // Per-pair NTT managers + recipient mints come from PairConfig — never
+    // hardcode them, or a non-OnRe pair resolves VAAs under the wrong
+    // manager and peeks the wrong recipient ATA.
+    const cfg = await ctx.client.fetchConfig()
+    const legManager: Record<VaaLeg, PublicKey> = {
+      deposit: cfg.nttBaseProgram as PublicKey,
+      withdraw: cfg.nttAssetProgram as PublicKey,
+    }
+    const legRecvMint: Record<VaaLeg, PublicKey> = {
+      deposit: cfg.baseMint as PublicKey,
+      withdraw: cfg.assetMint as PublicKey,
+    }
     ctx.log.debug('scan iteration starting', {
       chainId: opts.fogoWormholeChainId,
       pageSize: opts.pageSize,
@@ -138,7 +141,9 @@ export function makeEnumerator(opts: EnumerateOptions) {
         // Per-VAA Flow PDA lookups are independent reads; fan them out so a
         // 50-item page costs ~1 RPC RTT, not 50.
         const resolutions = await Promise.all(
-          items.map(async item => scanWormholescanVaa(ctx, item, leg, terminalCache)),
+          items.map(async item =>
+            scanWormholescanVaa(ctx, item, leg, legManager[leg], legRecvMint[leg], terminalCache),
+          ),
         )
         if (ctx.abortSignal.aborted) {
           return
@@ -178,9 +183,11 @@ async function scanWormholescanVaa(
   ctx: AdvanceContext,
   item: WormholescanVaa,
   leg: VaaLeg,
+  nttProgramId: PublicKey,
+  recvMint: PublicKey,
   terminalCache: BoundedMap<string, true>,
 ): Promise<VaaResolution> {
-  const resolved = resolveVaaForLeg(ctx, item.vaa, leg)
+  const resolved = resolveVaaForLeg(ctx, item.vaa, nttProgramId)
   if (!resolved) {
     // Non-NTT VAA from this emitter (or malformed bytes). Permanently
     // uninteresting — recording lets the floor advance past it.
@@ -287,7 +294,7 @@ async function scanWormholescanVaa(
   // ATA to tell the two apart.
   let status: FlowStatus = flow ? (describeStatus(flow.status) as FlowStatus) : 'Pending'
   if (fetchOutcome === 'missing') {
-    const terminal = await classifyMissingFlow(ctx, leg, resolved.nttInboxItem)
+    const terminal = await classifyMissingFlow(ctx, leg, recvMint, resolved.nttInboxItem)
     if (terminal) {
       status = terminal
     }
@@ -336,6 +343,7 @@ async function scanWormholescanVaa(
 export async function classifyMissingFlow(
   ctx: AdvanceContext,
   leg: VaaLeg,
+  recvMint: PublicKey,
   nttInboxItem: PublicKey,
 ): Promise<FlowStatus | null> {
   let info: Awaited<ReturnType<AdvanceContext['connection']['getAccountInfo']>>
@@ -372,7 +380,6 @@ export async function classifyMissingFlow(
 
   // Released. Distinguish "send completed & swept" from "raw-redeemed but
   // relayer hasn't swept yet" by reading the recipient ATA balance.
-  const recvMint = leg === 'withdraw' ? ONYC_MINT : USDC_MINT
   const recipientAta = getAssociatedTokenAddressSync(recvMint, inbox.recipientAddress, true)
   let ataInfo: Awaited<ReturnType<AdvanceContext['connection']['getAccountInfo']>>
   try {
@@ -432,19 +439,16 @@ export function isUndecodableAccountError(err: unknown): boolean {
   return /BorshAccountsCoder|Union\.decode|Structure\.decode/.test(stack)
 }
 
-function resolveVaaForLeg(ctx: AdvanceContext, vaaBytes: Uint8Array, leg: VaaLeg): ResolvedNttVaa | null {
+function resolveVaaForLeg(ctx: AdvanceContext, vaaBytes: Uint8Array, nttProgramId: PublicKey): ResolvedNttVaa | null {
   try {
-    return resolveNttVaa({
-      vaaBytes,
-      nttProgramId: VAA_LEG[leg].nttProgramId,
-    })
+    return resolveNttVaa({ vaaBytes, nttProgramId })
   } catch (err) {
     // Non-NTT VAAs from the same emitter (or malformed bytes) are skipped
     // silently in production-info mode; debug surfaces them for triage.
     // Use compact error fields (message only, no stack) — these fire on
     // every non-NTT VAA the emitter has ever published, often hundreds
     // per page, and the stack is identical/uninformative for all of them.
-    ctx.log.debug('resolveNttVaa skipped', { leg, ...errorFieldsCompact(err) })
+    ctx.log.debug('resolveNttVaa skipped', { ...errorFieldsCompact(err) })
     return null
   }
 }
