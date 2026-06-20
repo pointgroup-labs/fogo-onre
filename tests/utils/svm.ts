@@ -15,7 +15,7 @@ const FIXTURES_DIR = path.resolve(
 const RELAYER_PROGRAM_ID = 'onrenRKgX54qtWeK3cuaTBE71xx7dWMXn82ubH61vAp'
 const RELAYER_SO_PATH = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
-  '../../target/deploy/fogo_onre_relayer.so',
+  '../../target/deploy/fogo_ntt_relayer.so',
 )
 
 /**

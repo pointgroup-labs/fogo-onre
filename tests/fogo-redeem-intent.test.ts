@@ -11,9 +11,11 @@
 import type { BuildBridgeNttIxParams, NttBridgeSubAccounts } from '@fogo-onre/sdk'
 import {
   buildFogoRedeemIntentIx,
-  findUserInboxAuthorityPda,
+  findUserInboxWithMinPda,
   INTENT_TRANSFER_PROGRAM_ID,
+  MEMO_PROGRAM_ID,
   ONRE_INTENT_PROGRAM_ID,
+  parseMinSwapOutMemo,
 } from '@fogo-onre/sdk'
 import { Ed25519Program, Keypair, PublicKey } from '@solana/web3.js'
 import { describe, expect, it } from 'vitest'
@@ -64,6 +66,8 @@ function dummyBridge(): Omit<BuildBridgeNttIxParams, 'intentTransferProgramId'> 
   }
 }
 
+const MIN_DESTINATION_AMOUNT = 4_200_000n
+
 function dummyIntent() {
   return {
     fromChainId: 'fogo',
@@ -85,35 +89,54 @@ describe('buildFogoRedeemIntentIx', () => {
       userWallet,
       signMessage,
       intent: dummyIntent(),
+      minSwapOut: MIN_DESTINATION_AMOUNT,
       bridge: dummyBridge(),
     })
     expect(bridgeIx.programId.equals(ONRE_INTENT_PROGRAM_ID)).toBe(true)
     expect(ONRE_INTENT_PROGRAM_ID.equals(INTENT_TRANSFER_PROGRAM_ID)).toBe(false)
   })
 
-  it('pins the recipient to the per-user inbox PDA (Task 11 shape)', async () => {
-    const [expectedInbox] = findUserInboxAuthorityPda(userWallet)
+  it('commits the floor via the min-bearing inbox PDA in a v0.2 message', async () => {
+    const [expectedInbox] = findUserInboxWithMinPda(userWallet, MIN_DESTINATION_AMOUNT)
     const { recipientAddress, message } = await buildFogoRedeemIntentIx({
       userWallet,
       signMessage,
       intent: dummyIntent(),
+      minSwapOut: MIN_DESTINATION_AMOUNT,
       bridge: dummyBridge(),
     })
     expect(recipientAddress.equals(expectedInbox)).toBe(true)
     const text = new TextDecoder().decode(message)
+    expect(text).toContain('version: 0.2')
     expect(text).toContain(`recipient_address: ${expectedInbox.toBase58()}`)
+    expect(text).not.toContain('min_destination_amount')
   })
 
-  it('prepends the Ed25519 verifier ix over the signed message', async () => {
-    const { ixs, verifierIx } = await buildFogoRedeemIntentIx({
+  it('orders ixs [memo, verifier, bridge] with the verifier immediately before the bridge', async () => {
+    const { ixs, verifierIx, bridgeIx } = await buildFogoRedeemIntentIx({
       userWallet,
       signMessage,
       intent: dummyIntent(),
+      minSwapOut: MIN_DESTINATION_AMOUNT,
       bridge: dummyBridge(),
     })
     expect(verifierIx.programId.equals(Ed25519Program.programId)).toBe(true)
-    expect(ixs[0]).toBe(verifierIx)
-    expect(ixs).toHaveLength(2)
+    expect(ixs[1]).toBe(verifierIx)
+    expect(ixs[2]).toBe(bridgeIx)
+    expect(ixs).toHaveLength(3)
+  })
+
+  it('emits the min_swap_out memo carrying the same committed floor', async () => {
+    const { ixs, memoIx } = await buildFogoRedeemIntentIx({
+      userWallet,
+      signMessage,
+      intent: dummyIntent(),
+      minSwapOut: MIN_DESTINATION_AMOUNT,
+      bridge: dummyBridge(),
+    })
+    expect(ixs[0]).toBe(memoIx)
+    expect(memoIx.programId.equals(MEMO_PROGRAM_ID)).toBe(true)
+    expect(parseMinSwapOutMemo(memoIx.data.toString('utf8'))).toBe(MIN_DESTINATION_AMOUNT)
   })
 
   it('honors an explicit program-id override (switch-back)', async () => {
@@ -121,6 +144,7 @@ describe('buildFogoRedeemIntentIx', () => {
       userWallet,
       signMessage,
       intent: dummyIntent(),
+      minSwapOut: MIN_DESTINATION_AMOUNT,
       bridge: dummyBridge(),
       intentTransferProgramId: INTENT_TRANSFER_PROGRAM_ID,
     })

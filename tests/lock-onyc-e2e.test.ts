@@ -59,9 +59,7 @@ describe('send (deposit) e2e (NTT transfer_lock)', () => {
     svm = createSvm()
     authority = Keypair.generate()
     const provider = createProvider(svm, authority)
-    client = new RelayerClient(provider as any)
 
-    ;[relayerAuthorityPda] = findAuthorityPda(client.program.programId)
     ;[nttTokenAuthorityPda] = findTokenAuthorityPda(NTT_ONYC_PROGRAM_ID)
 
     // Create USDC mint (normal)
@@ -69,6 +67,10 @@ describe('send (deposit) e2e (NTT transfer_lock)', () => {
 
     // Create ONyc mint with mint authority = NTT token_authority PDA
     assetMint = createMintWithAuthority(svm, authority, nttTokenAuthorityPda, 6)
+
+    client = new RelayerClient(provider as any, { baseMint: baseMint.publicKey, assetMint: assetMint.publicKey })
+
+    ;[relayerAuthorityPda] = findAuthorityPda(client.program.programId)
 
     // External ONyc fee vault — authority-owned ATA, distinct from the
     // relayer's operating ONyc ATA created by `initialize`.
@@ -138,7 +140,7 @@ describe('send (deposit) e2e (NTT transfer_lock)', () => {
 
   it.skip('send (deposit) succeeds with full NTT CPI (transfer_lock)', async () => {
     const nttInboxItem = Keypair.generate()
-    const [inflightPda, bump] = findInflightFlowPda(nttInboxItem.publicKey, client.program.programId)
+    const [inflightPda, bump] = findInflightFlowPda(client.configPda, nttInboxItem.publicKey, client.program.programId)
 
     const amount = 500_000n
 

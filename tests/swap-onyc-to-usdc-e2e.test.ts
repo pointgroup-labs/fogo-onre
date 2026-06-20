@@ -8,19 +8,16 @@
  * infeasible hermetically (no mainnet route fixtures).
  *
  * The handler skims the withdraw fee in ONyc to `fee_vault` BEFORE the swap,
- * swaps exactly `net_onyc`, requires the USDC out to clear the NAV floor read
- * from the config-pinned OnRe Offer, and flips the flow to Swapped with
+ * swaps exactly `net_onyc`, requires the USDC out to clear the user-signed
+ * `flow.min_swap_out`, and flips the flow to Swapped with
  * `amount = usdc_received`.
  */
 
 import { BN } from '@anchor-lang/core'
 import {
-  applySlippageFloor,
-  calculateStepPrice,
+  computeMinSwapOut,
   findAuthorityPda,
   findOutflightFlowPda,
-  parseActiveOfferVector,
-  redemptionExpectedOut,
   RelayerClient,
 } from '@fogo-onre/sdk'
 import { getAssociatedTokenAddressSync, TOKEN_PROGRAM_ID } from '@solana/spl-token'
@@ -34,7 +31,6 @@ import {
   createSvm,
   createTokenAccount,
   loadAndPatchOnreOffer,
-  setConfigPriceOracle,
 } from './utils'
 
 const ROUTER_ID = new PublicKey('8uyMF1riG7YSjvPrJcd5VbRaDCnYeqWyPe6HzMevn4bT')
@@ -55,7 +51,7 @@ describe('withdraw swap e2e (asset→base via local router)', () => {
   const withdrawFeeBps = 100 // 1%
   const feeOnyc = (grossOnyc * BigInt(withdrawFeeBps)) / 10_000n // 5_000
   const netOnyc = grossOnyc - feeOnyc // 495_000
-  const outUsdc = 5_000_000n // 5 USDC — comfortably above the NAV floor
+  const outUsdc = 5_000_000n // 5 USDC — comfortably above the signed floor
 
   beforeEach(() => {
     svm = createSvm()
@@ -64,13 +60,14 @@ describe('withdraw swap e2e (asset→base via local router)', () => {
 
     authority = Keypair.generate()
     const provider = createProvider(svm, authority)
-    client = new RelayerClient(provider as any)
+
+    baseMint = createMint(svm, authority, 6)
+    assetMint = createMint(svm, authority, 6)
+    client = new RelayerClient(provider as any, { baseMint: baseMint.publicKey, assetMint: assetMint.publicKey })
 
     ;[relayerAuthorityPda] = findAuthorityPda(client.program.programId)
     ;[poolAuthority] = PublicKey.findProgramAddressSync([POOL_AUTH_SEED], ROUTER_ID)
 
-    baseMint = createMint(svm, authority, 6)
-    assetMint = createMint(svm, authority, 6)
     feeVault = createAta(svm, authority, assetMint.publicKey, authority.publicKey)
   })
 
@@ -89,7 +86,19 @@ describe('withdraw swap e2e (asset→base via local router)', () => {
     svm.airdrop(relayerAuthorityPda, BigInt(5e9))
 
     offerPda = loadAndPatchOnreOffer(svm, baseMint.publicKey, assetMint.publicKey)
-    setConfigPriceOracle(svm, client.configPda, offerPda)
+
+    // User-signed floor: USDC out for net ONyc at the offer's step price, with
+    // a 1% tolerance. The realised `outUsdc` (5 USDC) clears it comfortably.
+    const minSwapOut = computeMinSwapOut({
+      direction: 'withdraw',
+      postTrimInAmount: grossOnyc,
+      offerData: svm.getAccount(offerPda)!.data,
+      nowUnix: 1_773_882_000n,
+      baseDecimals: 6,
+      onycDecimals: 6,
+      slippageBps: 100,
+      withdrawFeeBps,
+    })
 
     // Relayer ATAs: fund ONyc with the gross; USDC starts at zero.
     const assetAta = getAssociatedTokenAddressSync(assetMint.publicKey, relayerAuthorityPda, true)
@@ -106,7 +115,7 @@ describe('withdraw swap e2e (asset→base via local router)', () => {
 
     // Seed the outflight Flow directly (no real NTT receive leg).
     const nttInboxItem = Keypair.generate().publicKey
-    const [outflightFlowPda, flowBump] = findOutflightFlowPda(nttInboxItem, client.program.programId)
+    const [outflightFlowPda, flowBump] = findOutflightFlowPda(client.configPda, nttInboxItem, client.program.programId)
     const flowData = await client.program.coder.accounts.encode('flow', {
       recipient: new PublicKey(new Uint8Array(32).fill(7)),
       status: { received: {} },
@@ -114,6 +123,8 @@ describe('withdraw swap e2e (asset→base via local router)', () => {
       payer: authority.publicKey,
       bump: flowBump,
       direction: { withdraw: {} },
+      minSwapOut: new BN(minSwapOut.toString()),
+      receivedSlot: new BN(0),
     })
     svm.setAccount(outflightFlowPda, {
       executable: false,
@@ -148,7 +159,6 @@ describe('withdraw swap e2e (asset→base via local router)', () => {
           assetMint: assetMint.publicKey,
           feeVault,
           nttInboxItem,
-          onreOffer: offerPda,
           swapProgram: ROUTER_ID,
           swapDelegate: relayerAuthorityPda,
           swapIxData,
@@ -173,18 +183,10 @@ describe('withdraw swap e2e (asset→base via local router)', () => {
     expect(readBalance(assetAta)).toEqual(0n) // gross fully left (fee + net)
     expect(readBalance(baseAta)).toEqual(outUsdc)
 
-    // Reproduce the handler's withdraw NAV floor from the same Offer + clock +
-    // net_onyc + configured slippage, then prove the realised USDC clears it.
-    const offerData = svm.getAccount(offerPda)!.data
-    const navNow = 1_773_882_000n
-    const navPrice = calculateStepPrice(parseActiveOfferVector(offerData, navNow), navNow)
-    const config = await client.fetchConfig()
-    const floor = applySlippageFloor(
-      redemptionExpectedOut(netOnyc, navPrice, 6, 6),
-      config.maxSlippageBps,
-    )
-    expect(floor).toBeGreaterThan(0n)
-    expect(outUsdc >= floor).toBe(true)
+    // The handler enforces the user-signed `flow.min_swap_out`; prove the
+    // realised USDC cleared it (and that it was a non-trivial, positive floor).
+    expect(minSwapOut).toBeGreaterThan(0n)
+    expect(outUsdc >= minSwapOut).toBe(true)
 
     const flow = await client.fetchFlow(outflightFlowPda)
     expect(flow.status).toEqual({ swapped: {} })

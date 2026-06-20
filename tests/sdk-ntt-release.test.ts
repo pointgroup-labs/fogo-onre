@@ -136,10 +136,10 @@ describe('relayerClient.send encodes transferLockAccountCount=14', () => {
   const connection = new Connection('http://127.0.0.1:8899', 'confirmed')
   const wallet = new Wallet(Keypair.generate())
   const provider = new AnchorProvider(connection, wallet, { commitment: 'confirmed' })
-  const client = new RelayerClient(provider as any)
 
   const baseMint = Keypair.generate().publicKey
   const assetMint = Keypair.generate().publicKey
+  const client = new RelayerClient(provider as any, { baseMint, assetMint })
   const nttInboxItem = Keypair.generate().publicKey
   const payer = Keypair.generate().publicKey
   const outboxItem = Keypair.generate().publicKey

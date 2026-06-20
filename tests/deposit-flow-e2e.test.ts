@@ -24,7 +24,7 @@ import {
   findInflightFlowPda,
   findIntentTransferSetterPda,
   findTokenAuthorityPda,
-  findUserInboxAuthorityPda,
+  findUserInboxWithMinPda,
   FOGO_WORMHOLE_CHAIN_ID,
   NTT_USDC_PROGRAM_ID,
   ONRE_PROGRAM_ID,
@@ -58,7 +58,6 @@ import {
   ONRE_STATE_FIXTURE,
   ONRE_VAULT_AUTHORITY_FIXTURE,
   readPeerAddress,
-  setConfigPriceOracle,
   setRegisteredTransceiver,
   setValidatedTransceiverMessage,
 } from './utils'
@@ -73,7 +72,6 @@ describe('deposit flow e2e (receive (deposit) → swap_usdc_to_onyc)', () => {
   let nttTokenAuthorityPda: PublicKey
   let peerPda: PublicKey
   let feeVault: PublicKey
-  let offerPda: PublicKey
 
   let onreVaultAuthorityPda: PublicKey
   let onrePermAuthorityPda: PublicKey
@@ -88,6 +86,9 @@ describe('deposit flow e2e (receive (deposit) → swap_usdc_to_onyc)', () => {
     [Buffer.from('intent_transfer')], ONRE_INTENT_PROGRAM_ID,
   )[0].toBytes()
   const depositAmount = 500_000n // 0.5 USDC gross
+  // User-signed ONyc floor committed in the inbox PDA. Low enough that the
+  // real OnRe take_offer output (net of the deposit fee) clears it.
+  const depositMin = 1n
   // ONyc the OnRe vault holds (must be enough for the swap's output)
   const VAULT_ONYC_BALANCE = 10_000_000n
 
@@ -98,9 +99,7 @@ describe('deposit flow e2e (receive (deposit) → swap_usdc_to_onyc)', () => {
 
     authority = Keypair.generate()
     const provider = createProvider(svm, authority)
-    client = new RelayerClient(provider as any)
 
-    ;[relayerAuthorityPda] = findAuthorityPda(client.program.programId)
     ;[nttTokenAuthorityPda] = findTokenAuthorityPda(NTT_USDC_PROGRAM_ID)
     ;[onreVaultAuthorityPda] = findOnreVaultAuthorityPda()
     ;[onrePermAuthorityPda] = findOnrePermissionlessAuthorityPda()
@@ -113,6 +112,10 @@ describe('deposit flow e2e (receive (deposit) → swap_usdc_to_onyc)', () => {
     // ONyc mint authority = OnRe mint_authority PDA (the swap mints ONyc to
     // the relayer ATA from the OnRe vault).
     assetMint = createMintWithAuthority(svm, authority, onreMintAuthorityPda, 6)
+
+    client = new RelayerClient(provider as any, { baseMint: baseMint.publicKey, assetMint: assetMint.publicKey })
+
+    ;[relayerAuthorityPda] = findAuthorityPda(client.program.programId)
     feeVault = createAta(svm, authority, assetMint.publicKey, authority.publicKey)
 
     await client
@@ -133,9 +136,9 @@ describe('deposit flow e2e (receive (deposit) → swap_usdc_to_onyc)', () => {
     loadFixture(svm, ONRE_VAULT_AUTHORITY_FIXTURE)
     loadFixture(svm, ONRE_PERM_AUTHORITY_FIXTURE)
     loadFixture(svm, ONRE_MINT_AUTHORITY_FIXTURE)
-    offerPda = loadAndPatchOnreOffer(svm, baseMint.publicKey, assetMint.publicKey)
-    // Swap NAV-oracle pin requires config.price_oracle == the Offer PDA.
-    setConfigPriceOracle(svm, client.configPda, offerPda)
+    // Patch the OnRe Offer fixture — the take_offer CPI reads it (via
+    // swapAccounts). The relayer no longer pins it as a NAV oracle.
+    loadAndPatchOnreOffer(svm, baseMint.publicKey, assetMint.publicKey)
 
     const vaultUsdcAta = getAssociatedTokenAddressSync(baseMint.publicKey, onreVaultAuthorityPda, true)
     const vaultOnycAta = getAssociatedTokenAddressSync(assetMint.publicKey, onreVaultAuthorityPda, true)
@@ -201,7 +204,7 @@ describe('deposit flow e2e (receive (deposit) → swap_usdc_to_onyc)', () => {
     // The FOGO intent's `recipient_address` is the per-user inbox PDA; NTT
     // releases USDC there and claim_usdc PDA-signs a sweep into custody.
     const userWallet = Keypair.generate()
-    const [userInboxAuthority] = findUserInboxAuthorityPda(userWallet.publicKey, client.program.programId)
+    const [userInboxAuthority] = findUserInboxWithMinPda(userWallet.publicKey, depositMin, client.program.programId)
     createAta(svm, authority, baseMint.publicKey, userInboxAuthority)
     // Sweep destination must exist so claim_usdc can deserialize it.
     createAta(svm, authority, baseMint.publicKey, relayerAuthorityPda)
@@ -243,6 +246,7 @@ describe('deposit flow e2e (receive (deposit) → swap_usdc_to_onyc)', () => {
           direction: { deposit: {} },
           userWallet: userWallet.publicKey,
           recvMint: baseMint.publicKey,
+          minSwapOut: depositMin,
           nttInboxItem: inboxItemPda,
           nttTransceiverMessage: validatedMsgPda,
           ntt: {
@@ -270,7 +274,7 @@ describe('deposit flow e2e (receive (deposit) → swap_usdc_to_onyc)', () => {
     }
 
     // ----- Leg 2: swap (unified router-agnostic handler, real OnRe CPI) -----
-    const [inflightFlowPda] = findInflightFlowPda(inboxItemPda, client.program.programId)
+    const [inflightFlowPda] = findInflightFlowPda(client.configPda, inboxItemPda, client.program.programId)
     const takeOfferData = Buffer.concat([
       Buffer.from([37, 190, 224, 77, 197, 39, 203, 230]),
       (() => {
@@ -295,7 +299,6 @@ describe('deposit flow e2e (receive (deposit) → swap_usdc_to_onyc)', () => {
           assetMint: assetMint.publicKey,
           feeVault,
           nttInboxItem: inboxItemPda,
-          onreOffer: offerPda,
           swapProgram: ONRE_PROGRAM_ID,
           swapDelegate: relayerAuthorityPda,
           swapIxData: takeOfferData,
@@ -316,13 +319,13 @@ describe('deposit flow e2e (receive (deposit) → swap_usdc_to_onyc)', () => {
     expect(flowAfterSwap.amount.toNumber()).toBeGreaterThan(0)
 
     // The Flow PDA still exists at status=Swapped (closed only by leg 4).
-    const [inflightPda] = findInflightFlowPda(inboxItemPda, client.program.programId)
+    const [inflightPda] = findInflightFlowPda(client.configPda, inboxItemPda, client.program.programId)
     expect(svm.getAccount(inflightPda)).not.toBeNull()
   })
 
   it('receive (deposit) accepts the OnRe fork setter (allowlist member 2)', async () => {
     const userWallet = Keypair.generate()
-    const [userInboxAuthority] = findUserInboxAuthorityPda(userWallet.publicKey, client.program.programId)
+    const [userInboxAuthority] = findUserInboxWithMinPda(userWallet.publicKey, depositMin, client.program.programId)
     createAta(svm, authority, baseMint.publicKey, userInboxAuthority)
     createAta(svm, authority, baseMint.publicKey, relayerAuthorityPda)
 
@@ -358,6 +361,7 @@ describe('deposit flow e2e (receive (deposit) → swap_usdc_to_onyc)', () => {
         direction: { deposit: {} },
         userWallet: userWallet.publicKey,
         recvMint: baseMint.publicKey,
+        minSwapOut: depositMin,
         nttInboxItem: inboxItemPda,
         nttTransceiverMessage: validatedMsgPda,
         ntt: { transceiverAddress: NTT_USDC_PROGRAM_ID },

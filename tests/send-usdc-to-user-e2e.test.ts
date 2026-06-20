@@ -60,15 +60,17 @@ describe('send (withdraw) e2e (NTT transfer_lock outbound on USDC.s, Locking mod
     svm = createSvm()
     authority = Keypair.generate()
     const provider = createProvider(svm, authority)
-    client = new RelayerClient(provider as any)
 
-    ;[relayerAuthorityPda] = findAuthorityPda(client.program.programId)
     ;[nttTokenAuthorityPda] = findTokenAuthorityPda(NTT_USDC_PROGRAM_ID)
 
     // USDC.s is the NTT-managed mint here — `token_authority` PDA must hold
     // mint authority so `transfer_lock` can move USDC.s into custody.
     baseMint = createMintWithAuthority(svm, authority, nttTokenAuthorityPda, 6)
     assetMint = createMint(svm, authority, 6)
+    client = new RelayerClient(provider as any, { baseMint: baseMint.publicKey, assetMint: assetMint.publicKey })
+
+    ;[relayerAuthorityPda] = findAuthorityPda(client.program.programId)
+
     const feeVault = createAta(svm, authority, assetMint.publicKey, authority.publicKey)
 
     await client
@@ -127,7 +129,7 @@ describe('send (withdraw) e2e (NTT transfer_lock outbound on USDC.s, Locking mod
     // reads only `status`, `amount`, `fogo_sender`, `payer`.
     nttInboxItem = Keypair.generate().publicKey
     let bump: number
-    ;[outflightFlow, bump] = findOutflightFlowPda(nttInboxItem, client.program.programId)
+    ;[outflightFlow, bump] = findOutflightFlowPda(client.configPda, nttInboxItem, client.program.programId)
     setFlowAccount(
       svm,
       outflightFlow,

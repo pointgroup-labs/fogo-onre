@@ -1,18 +1,15 @@
 /**
- * Drift tripwire mirror: every test in this file has a paired test in
- * `programs/relayer/src/onre.rs` (mod tests). When upstream OnRe re-lays
- * out `Offer` or changes the price formula, BOTH suites must fire — if
- * only one does, the TS preview and on-chain handler will compute
- * different floors and the cranker's quote-vs-floor decision becomes a
- * lie.
+ * OnRe NAV math now lives TS-only — it backs the client `min_out` preview
+ * the cranker quotes against. The on-chain floor is the user-signed
+ * `flow.min_swap_out`, not a re-derived NAV, so there is no Rust handler
+ * to keep in lockstep. These tests still gate upstream `Offer` layout /
+ * price-formula drift via the fixture pins below.
  */
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import {
-  applySlippageFloor,
   calculateStepPrice,
   depositExpectedOut,
-  MAX_SLIPPAGE_BPS,
   ONRE_OFFER_ACCOUNT_SIZE,
   ONRE_OFFER_MAX_VECTORS,
   ONRE_OFFER_VECTOR_SIZE,
@@ -22,30 +19,6 @@ import {
   synthOfferBuffer,
 } from '@fogo-onre/sdk'
 import { describe, expect, it } from 'vitest'
-
-describe('applySlippageFloor', () => {
-  it('zero bps is identity', () => {
-    expect(applySlippageFloor(1_000_000n, 0)).toBe(1_000_000n)
-  })
-
-  it('50 bps is half-percent haircut', () => {
-    expect(applySlippageFloor(1_000_000n, 50)).toBe(995_000n)
-  })
-
-  it('exact 10_000 bps yields zero', () => {
-    expect(applySlippageFloor(1_000_000n, 10_000)).toBe(0n)
-  })
-
-  it('rejects misconfigured >10_000 bps', () => {
-    expect(() => applySlippageFloor(1_000_000n, 10_001)).toThrow(/OnreInvalidSlippageBps/)
-  })
-
-  it('handles u64::MAX gross without intermediate overflow', () => {
-    const u64Max = (1n << 64n) - 1n
-    const expected = (u64Max * 9_950n) / 10_000n
-    expect(applySlippageFloor(u64Max, 50)).toBe(expected)
-  })
-})
 
 describe('redemptionExpectedOut', () => {
   it('identity at 1:1 price, equal decimals', () => {
@@ -167,10 +140,9 @@ describe('calculateStepPrice', () => {
 })
 
 /**
- * Drift tripwire — paired with `offer_layout_matches_fixture` in
- * `programs/relayer/src/onre.rs`. If OnRe re-lays out `Offer`, both
- * suites must fire together; if only one fires, TS preview and
- * on-chain handler disagree on what `Offer` even *is*.
+ * Drift tripwire: pins the TS `Offer` parser to the canonical mainnet
+ * fixture (`onre-offer.bin`). If OnRe re-lays out `Offer`, this fires so
+ * the `min_out` preview is refreshed in lockstep with the fixture.
  */
 describe('offer mainnet fixture parity', () => {
   it('parses the same active vector the Rust suite asserts', () => {
@@ -194,38 +166,5 @@ describe('offer mainnet fixture parity', () => {
     expect(active.base_price).toBe(1_085_708_975n)
     expect(active.apr).toBe(97_593n)
     expect(active.price_fix_duration).toBe(86_400n)
-  })
-})
-
-/**
- * Drift tripwire — pairs the TS-side `MAX_SLIPPAGE_BPS` mirror against
- * the on-chain `pub const MAX_SLIPPAGE_BPS: u16` in
- * `programs/relayer/src/constants.rs`. The Rust constant isn't
- * `#[constant]`-annotated so the IDL doesn't carry it; we close the
- * loop with a regex grep at test time.
- *
- * If this fires, both sides need a coordinated bump in the same
- * commit — otherwise the cranker computes the wrong NAV floor and
- * mis-classifies quote outcomes.
- */
-describe('max-slippage-bps rust mirror', () => {
-  it('matches the on-chain constants.rs value', () => {
-    const constantsPath = resolve(
-      __dirname,
-      '../programs/relayer/src/constants.rs',
-    )
-    const src = readFileSync(constantsPath, 'utf8')
-    const match = src.match(/pub\s+const\s+MAX_SLIPPAGE_BPS\s*:\s*u16\s*=\s*(\d+)\s*;/)
-    if (!match) {
-      throw new Error(
-        'Could not find `pub const MAX_SLIPPAGE_BPS: u16 = N;` in '
-        + `${constantsPath}. Either the constant was renamed/retyped, or this `
-        + 'test\'s regex needs updating. Either case requires hand review — '
-        + 'do not silently update the regex without confirming the on-chain '
-        + 'semantics still match `applySlippageFloor` in onre-nav.ts.',
-      )
-    }
-    const onChainValue = Number(match[1])
-    expect(onChainValue).toBe(MAX_SLIPPAGE_BPS)
   })
 })

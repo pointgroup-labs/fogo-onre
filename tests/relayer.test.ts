@@ -6,9 +6,8 @@ import {
   findInflightFlowPda,
   findIntentTransferSetterPda,
   findNttPeerPda,
-  findOnreOfferPda,
   findOutflightFlowPda,
-  findUserInboxAuthorityPda,
+  findUserInboxWithMinPda,
   FOGO_WORMHOLE_CHAIN_ID,
   NTT_ONYC_PROGRAM_ID,
   NTT_USDC_PROGRAM_ID,
@@ -28,10 +27,13 @@ import {
   FlowStatus,
   logMatches,
   mintTo,
-  setConfigPriceOracle,
   setFlowAccount,
   setValidatedTransceiverMessage,
 } from './utils'
+
+// User-signed swap floor used across receive/swap tests. Committed into the
+// min-bearing inbox PDA the handler re-derives.
+const RECEIVE_MIN = 1_000n
 
 describe('relayer', () => {
   let svm: LiteSVM
@@ -47,9 +49,9 @@ describe('relayer', () => {
     svm = createSvm()
     authority = Keypair.generate()
     const provider = createProvider(svm, authority)
-    client = new RelayerClient(provider as any)
     baseMint = createMint(svm, authority, 6)
     assetMint = createMint(svm, authority, 6)
+    client = new RelayerClient(provider as any, { baseMint: baseMint.publicKey, assetMint: assetMint.publicKey })
     feeVault = createAta(svm, authority, assetMint.publicKey, authority.publicKey)
   })
 
@@ -128,7 +130,7 @@ describe('relayer', () => {
       // emit `Allocate ... already in use` + custom error 0x0. Pinning the
       // exact PDA address rules out an unrelated account collision.
       const logs: string[] = Array.isArray(caught.logs) ? caught.logs : []
-      const [configPda] = findConfigPda(client.program.programId)
+      const [configPda] = findConfigPda(baseMint.publicKey, assetMint.publicKey, client.program.programId)
       const allocateRegex = new RegExp(
         `Allocate: account Address \\{ address: ${configPda.toBase58()}[^}]*\\} already in use`,
       )
@@ -160,9 +162,9 @@ describe('relayer', () => {
       expect(config.withdrawFeeBps).toBe(1_000)
     })
 
-    it('deserializes a pre-price_oracle config with oracle reading as default', async () => {
-      // A freshly-initialized config leaves price_oracle (carved from the
-      // all-zero reserved block) unset, so it reads as the default pubkey.
+    it('pins the NTT manager program IDs as init-only safety fields', async () => {
+      // Defaults to the canonical USDC/ONyc managers; these are set once at
+      // init and `configure` has no path to change them.
       await client
         .initialize({
           authority: authority.publicKey,
@@ -175,7 +177,8 @@ describe('relayer', () => {
         .rpc()
 
       const cfg = await client.fetchConfig()
-      expect(cfg.priceOracle.toBase58()).toBe(PublicKey.default.toBase58())
+      expect(cfg.nttBaseProgram.toBase58()).toBe(NTT_USDC_PROGRAM_ID.toBase58())
+      expect(cfg.nttAssetProgram.toBase58()).toBe(NTT_ONYC_PROGRAM_ID.toBase58())
     })
   })
 
@@ -229,14 +232,6 @@ describe('relayer', () => {
       expect(config.feeVault.toBase58()).toBe(newFeeVault.toBase58())
     })
 
-    it('configure price_oracle sets the stored oracle pubkey', async () => {
-      const oracle = Keypair.generate().publicKey
-      await (await client.configure({ priceOracle: oracle })).rpc()
-
-      const cfg = await client.fetchConfig()
-      expect(cfg.priceOracle.toBase58()).toBe(oracle.toBase58())
-    })
-
     it('stages fee raises with feeVault omitted (Optional account = null)', async () => {
       const before = await client.fetchConfig()
       const beforeVault = before.feeVault.toBase58()
@@ -270,7 +265,7 @@ describe('relayer', () => {
     it('rejects non-authority signer', async () => {
       const rando = Keypair.generate()
       const randoProvider = createProvider(svm, rando)
-      const randoClient = new RelayerClient(randoProvider as any)
+      const randoClient = new RelayerClient(randoProvider as any, { baseMint: baseMint.publicKey, assetMint: assetMint.publicKey })
 
       // randoClient's provider wallet IS rando, so default-authority (now
       // sourced from provider.wallet.publicKey) gives us exactly the
@@ -313,7 +308,7 @@ describe('relayer', () => {
       // signature required — by design, so two independent multisigs can
       // each act in isolation).
       const newProvider = createProvider(svm, newAuthority)
-      const newClient = new RelayerClient(newProvider as any)
+      const newClient = new RelayerClient(newProvider as any, { baseMint: baseMint.publicKey, assetMint: assetMint.publicKey })
       await (await newClient.acceptAuthority()).rpc()
 
       config = await client.fetchConfig()
@@ -349,7 +344,7 @@ describe('relayer', () => {
 
       // The first proposal can no longer accept.
       const firstProvider = createProvider(svm, firstProposal)
-      const firstClient = new RelayerClient(firstProvider as any)
+      const firstClient = new RelayerClient(firstProvider as any, { baseMint: baseMint.publicKey, assetMint: assetMint.publicKey })
       await expectError(
         async () => (await firstClient.acceptAuthority()).rpc(),
         'PendingAuthorityMismatch',
@@ -369,7 +364,7 @@ describe('relayer', () => {
 
       // Cancelled proposal cannot accept.
       const proposalProvider = createProvider(svm, proposal)
-      const proposalClient = new RelayerClient(proposalProvider as any)
+      const proposalClient = new RelayerClient(proposalProvider as any, { baseMint: baseMint.publicKey, assetMint: assetMint.publicKey })
       await expectError(
         async () => (await proposalClient.acceptAuthority()).rpc(),
         'NoPendingAuthority',
@@ -379,7 +374,7 @@ describe('relayer', () => {
     it('accept_authority fails when no proposal is in flight', async () => {
       const random = Keypair.generate()
       const randomProvider = createProvider(svm, random)
-      const randomClient = new RelayerClient(randomProvider as any)
+      const randomClient = new RelayerClient(randomProvider as any, { baseMint: baseMint.publicKey, assetMint: assetMint.publicKey })
       await expectError(
         async () => (await randomClient.acceptAuthority()).rpc(),
         'NoPendingAuthority',
@@ -393,7 +388,7 @@ describe('relayer', () => {
       await (await client.configure({ newAuthority: proposal.publicKey })).rpc()
 
       const wrongProvider = createProvider(svm, wrongSigner)
-      const wrongClient = new RelayerClient(wrongProvider as any)
+      const wrongClient = new RelayerClient(wrongProvider as any, { baseMint: baseMint.publicKey, assetMint: assetMint.publicKey })
       await expectError(
         async () => (await wrongClient.acceptAuthority()).rpc(),
         'PendingAuthorityMismatch',
@@ -407,7 +402,7 @@ describe('relayer', () => {
     it('non-authority cannot propose a rotation', async () => {
       const rando = Keypair.generate()
       const randoProvider = createProvider(svm, rando)
-      const randoClient = new RelayerClient(randoProvider as any)
+      const randoClient = new RelayerClient(randoProvider as any, { baseMint: baseMint.publicKey, assetMint: assetMint.publicKey })
       const attackerKey = Keypair.generate()
 
       await expectError(
@@ -505,7 +500,7 @@ describe('relayer', () => {
     async function receiveDepositWithSender(senderBytes: Uint8Array) {
       const nttInboxItem = Keypair.generate()
       const userWallet = Keypair.generate()
-      const [userInboxAuthority] = findUserInboxAuthorityPda(userWallet.publicKey, client.program.programId)
+      const [userInboxAuthority] = findUserInboxWithMinPda(userWallet.publicKey, RECEIVE_MIN, client.program.programId)
       createAta(svm, authority, baseMint.publicKey, userInboxAuthority)
       createAta(svm, authority, baseMint.publicKey, client.authorityPda)
 
@@ -529,6 +524,7 @@ describe('relayer', () => {
           direction: { deposit: {} },
           userWallet: userWallet.publicKey,
           recvMint: baseMint.publicKey,
+          minSwapOut: RECEIVE_MIN,
           nttInboxItem: nttInboxItem.publicKey,
           nttTransceiverMessage: validatedMsgPda,
           redeemAccountsLen: 1,
@@ -559,7 +555,7 @@ describe('relayer', () => {
 
       // Inject a Flow PDA at the expected inflight address to simulate a
       // prior claim_usdc having already created it.
-      const [inflightPda, bump] = findInflightFlowPda(nttInboxItem.publicKey, client.program.programId)
+      const [inflightPda, bump] = findInflightFlowPda(client.configPda, nttInboxItem.publicKey, client.program.programId)
       setFlowAccount(svm, inflightPda, {
         recipient: fogoSender,
         status: FlowStatus.Received,
@@ -571,7 +567,7 @@ describe('relayer', () => {
       // Pre-create the per-user inbox ATA so Anchor's account
       // deserialization passes; the `inflight_flow` init constraint must
       // be the first thing to fail.
-      const [userInboxAuthority] = findUserInboxAuthorityPda(userWallet.publicKey, client.program.programId)
+      const [userInboxAuthority] = findUserInboxWithMinPda(userWallet.publicKey, RECEIVE_MIN, client.program.programId)
       createAta(svm, authority, baseMint.publicKey, userInboxAuthority)
       // Sweep destination must also exist for the same reason.
       createAta(svm, authority, baseMint.publicKey, client.authorityPda)
@@ -601,6 +597,7 @@ describe('relayer', () => {
               direction: { deposit: {} },
               userWallet: userWallet.publicKey,
               recvMint: baseMint.publicKey,
+              minSwapOut: RECEIVE_MIN,
               nttInboxItem: nttInboxItem.publicKey,
               nttTransceiverMessage: validatedMsgPda,
               redeemAccountsLen: 1,
@@ -617,7 +614,7 @@ describe('relayer', () => {
 
     it('round-trips Flow.direction', async () => {
       const nttInboxItem = Keypair.generate()
-      const [flowPda, bump] = findInflightFlowPda(nttInboxItem.publicKey, client.program.programId)
+      const [flowPda, bump] = findInflightFlowPda(client.configPda, nttInboxItem.publicKey, client.program.programId)
       setFlowAccount(svm, flowPda, {
         recipient: fogoSender,
         status: FlowStatus.Received,
@@ -636,8 +633,9 @@ describe('relayer', () => {
       // path. The skip-branch owner check must reject it before any sweep.
       const attackerWallet = Keypair.generate()
       const fakeInboxItem = Keypair.generate()
-      const [attackerInbox] = findUserInboxAuthorityPda(
+      const [attackerInbox] = findUserInboxWithMinPda(
         attackerWallet.publicKey,
+        RECEIVE_MIN,
         client.program.programId,
       )
       const attackerInboxAta = createAta(svm, authority, baseMint.publicKey, attackerInbox)
@@ -690,6 +688,7 @@ describe('relayer', () => {
               direction: { deposit: {} },
               userWallet: attackerWallet.publicKey,
               recvMint: baseMint.publicKey,
+              minSwapOut: RECEIVE_MIN,
               nttInboxItem: fakeInboxItem.publicKey,
               nttTransceiverMessage: validatedMsgPda,
               redeemAccountsLen: 1,
@@ -713,8 +712,9 @@ describe('relayer', () => {
       // setter VTM and expects InboxItemMismatch.
       const attackerWallet = Keypair.generate()
       const unrelatedInboxItem = Keypair.generate()
-      const [attackerInbox] = findUserInboxAuthorityPda(
+      const [attackerInbox] = findUserInboxWithMinPda(
         attackerWallet.publicKey,
+        RECEIVE_MIN,
         client.program.programId,
       )
       const attackerInboxAta = createAta(svm, authority, baseMint.publicKey, attackerInbox)
@@ -763,6 +763,7 @@ describe('relayer', () => {
               direction: { deposit: {} },
               userWallet: attackerWallet.publicKey,
               recvMint: baseMint.publicKey,
+              minSwapOut: RECEIVE_MIN,
               nttInboxItem: unrelatedInboxItem.publicKey,
               nttTransceiverMessage: validatedMsgPda,
               redeemAccountsLen: 1,
@@ -778,7 +779,7 @@ describe('relayer', () => {
 
     it('swap rejects flow not in Received status', async () => {
       const nttInboxItem = Keypair.generate()
-      const [inflightPda, bump] = findInflightFlowPda(nttInboxItem.publicKey, client.program.programId)
+      const [inflightPda, bump] = findInflightFlowPda(client.configPda, nttInboxItem.publicKey, client.program.programId)
 
       // Inject a Swapped flow — swap requires Received
       setFlowAccount(svm, inflightPda, {
@@ -789,7 +790,6 @@ describe('relayer', () => {
         bump,
       }, client.program.programId)
 
-      const [offerPda] = findOnreOfferPda(baseMint.publicKey, assetMint.publicKey, ONRE_PROGRAM_ID)
       await expectError(
         () =>
           client
@@ -799,7 +799,6 @@ describe('relayer', () => {
               assetMint: assetMint.publicKey,
               feeVault,
               nttInboxItem: nttInboxItem.publicKey,
-              onreOffer: offerPda,
               swapProgram: ONRE_PROGRAM_ID,
               swapDelegate: client.authorityPda,
               swapIxData: Buffer.alloc(0),
@@ -810,94 +809,9 @@ describe('relayer', () => {
       )
     })
 
-    it('swap rejects an offer account not owned by OnRe', async () => {
-      const nttInboxItem = Keypair.generate()
-      const [inflightPda, bump] = findInflightFlowPda(nttInboxItem.publicKey, client.program.programId)
-
-      // Inject a Received flow
-      setFlowAccount(svm, inflightPda, {
-        recipient: fogoSender,
-        status: FlowStatus.Received,
-        amount: 500_000n,
-        payer: authority.publicKey,
-        bump,
-      }, client.program.programId)
-
-      // Pin price_oracle to the derived offer PDA so the NAV-oracle pin
-      // passes and the owner check is what fires.
-      const [offerPda] = findOnreOfferPda(baseMint.publicKey, assetMint.publicKey, ONRE_PROGRAM_ID)
-      setConfigPriceOracle(svm, client.configPda, offerPda)
-
-      // Fund USDC ATA so the relayer has balance
-      const [authorityPda] = findAuthorityPda(client.program.programId)
-      mintTo(svm, authority, baseMint.publicKey, authorityPda, 500_000)
-
-      // OnRe is stubbed only by program ID — the derived deposit Offer PDA
-      // doesn't exist, so its owner is the system program. The NAV-floor
-      // offer pin must reject it before any CPI is attempted.
-      await expectError(
-        () =>
-          client
-            .swap({
-              flowPda: inflightPda,
-              baseMint: baseMint.publicKey,
-              assetMint: assetMint.publicKey,
-              feeVault,
-              nttInboxItem: nttInboxItem.publicKey,
-              onreOffer: offerPda,
-              swapProgram: ONRE_PROGRAM_ID,
-              swapDelegate: client.authorityPda,
-              swapIxData: Buffer.alloc(0),
-              swapAccounts: [],
-            })
-            .rpc(),
-        'OnreOfferOwnerMismatch',
-      )
-    })
-
-    it('swap rejects when price_oracle is unset (BadPriceOracle)', async () => {
-      const nttInboxItem = Keypair.generate()
-      const [inflightPda, bump] = findInflightFlowPda(nttInboxItem.publicKey, client.program.programId)
-
-      // Received flow ready to swap; config left with price_oracle UNSET
-      // (default) — `initialize` zeros it and we never configure it here.
-      setFlowAccount(svm, inflightPda, {
-        recipient: fogoSender,
-        status: FlowStatus.Received,
-        amount: 500_000n,
-        payer: authority.publicKey,
-        bump,
-      }, client.program.programId)
-
-      const [authorityPda] = findAuthorityPda(client.program.programId)
-      mintTo(svm, authority, baseMint.publicKey, authorityPda, 500_000)
-
-      // SDK derives the CORRECT offer PDA, but the fail-closed pin rejects
-      // it because relayer_config.price_oracle is still the default pubkey.
-      const [offerPda] = findOnreOfferPda(baseMint.publicKey, assetMint.publicKey, ONRE_PROGRAM_ID)
-      await expectError(
-        () =>
-          client
-            .swap({
-              flowPda: inflightPda,
-              baseMint: baseMint.publicKey,
-              assetMint: assetMint.publicKey,
-              feeVault,
-              nttInboxItem: nttInboxItem.publicKey,
-              onreOffer: offerPda,
-              swapProgram: ONRE_PROGRAM_ID,
-              swapDelegate: client.authorityPda,
-              swapIxData: Buffer.alloc(0),
-              swapAccounts: [],
-            })
-            .rpc(),
-        'BadPriceOracle',
-      )
-    })
-
     it('rejects swap on a Flow with an undecodable direction', async () => {
       const nttInboxItem = Keypair.generate()
-      const [flowPda, bump] = findInflightFlowPda(nttInboxItem.publicKey, client.program.programId)
+      const [flowPda, bump] = findInflightFlowPda(client.configPda, nttInboxItem.publicKey, client.program.programId)
 
       // direction byte 9 is not a valid Direction variant; borsh decode of
       // the Flow account must fail before the handler ever runs.
@@ -910,8 +824,6 @@ describe('relayer', () => {
         direction: 9,
       }, client.program.programId)
 
-      const [offerPda] = findOnreOfferPda(baseMint.publicKey, assetMint.publicKey, ONRE_PROGRAM_ID)
-
       await expect(
         client
           .swap({
@@ -920,7 +832,6 @@ describe('relayer', () => {
             assetMint: assetMint.publicKey,
             feeVault,
             nttInboxItem: nttInboxItem.publicKey,
-            onreOffer: offerPda,
             swapProgram: ONRE_PROGRAM_ID,
             swapDelegate: client.authorityPda,
             swapIxData: Buffer.alloc(0),
@@ -957,7 +868,7 @@ describe('relayer', () => {
 
     it('send rejects flow not in Swapped status', async () => {
       const nttInboxItem = Keypair.generate()
-      const [inflightPda, bump] = findInflightFlowPda(nttInboxItem.publicKey, client.program.programId)
+      const [inflightPda, bump] = findInflightFlowPda(client.configPda, nttInboxItem.publicKey, client.program.programId)
 
       // Inject a Received flow — send requires Swapped
       setFlowAccount(svm, inflightPda, {
@@ -990,7 +901,7 @@ describe('relayer', () => {
 
     it('send (deposit) rejects wrong rent destination', async () => {
       const nttInboxItem = Keypair.generate()
-      const [inflightPda, bump] = findInflightFlowPda(nttInboxItem.publicKey, client.program.programId)
+      const [inflightPda, bump] = findInflightFlowPda(client.configPda, nttInboxItem.publicKey, client.program.programId)
       const rando = Keypair.generate()
       svm.airdrop(rando.publicKey, BigInt(1e9))
 
@@ -1028,7 +939,7 @@ describe('relayer', () => {
 
     it('send (deposit) rejects Swapped flow without session authority PDA', async () => {
       const nttInboxItem = Keypair.generate()
-      const [inflightPda, bump] = findInflightFlowPda(nttInboxItem.publicKey, client.program.programId)
+      const [inflightPda, bump] = findInflightFlowPda(client.configPda, nttInboxItem.publicKey, client.program.programId)
 
       // Inject a Swapped flow
       setFlowAccount(svm, inflightPda, {
@@ -1078,7 +989,7 @@ describe('relayer', () => {
     // for negatives that revert in the handler body.
     function setupUserInbox(): { userWallet: PublicKey, userInboxAta: PublicKey } {
       const userWallet = Keypair.generate().publicKey
-      const [userInboxAuthority] = findUserInboxAuthorityPda(userWallet, client.program.programId)
+      const [userInboxAuthority] = findUserInboxWithMinPda(userWallet, RECEIVE_MIN, client.program.programId)
       const userInboxAta = createAta(svm, authority, assetMint.publicKey, userInboxAuthority)
       return { userWallet, userInboxAta }
     }
@@ -1143,6 +1054,7 @@ describe('relayer', () => {
               direction: { withdraw: {} },
               userWallet,
               recvMint: assetMint.publicKey,
+              minSwapOut: RECEIVE_MIN,
               nttInboxItem: nttInboxItem.publicKey,
               nttTransceiverMessage: validatedMsgPda,
               redeemAccountsLen: 1,
@@ -1184,6 +1096,7 @@ describe('relayer', () => {
               direction: { withdraw: {} },
               userWallet,
               recvMint: assetMint.publicKey,
+              minSwapOut: RECEIVE_MIN,
               nttInboxItem: nttInboxItem.publicKey,
               nttTransceiverMessage: validatedMsgPda,
               redeemAccountsLen: 0,
@@ -1200,7 +1113,7 @@ describe('relayer', () => {
     it('receive (withdraw) rejects double unlock (same ntt_inbox_item)', async () => {
       const nttInboxItem = Keypair.generate()
       const { userWallet } = setupUserInbox()
-      const [outflightPda, bump] = findOutflightFlowPda(nttInboxItem.publicKey, client.program.programId)
+      const [outflightPda, bump] = findOutflightFlowPda(client.configPda, nttInboxItem.publicKey, client.program.programId)
 
       // Inject an existing outflight flow to simulate prior unlock
       setFlowAccount(svm, outflightPda, {
@@ -1236,6 +1149,7 @@ describe('relayer', () => {
               direction: { withdraw: {} },
               userWallet,
               recvMint: assetMint.publicKey,
+              minSwapOut: RECEIVE_MIN,
               nttInboxItem: nttInboxItem.publicKey,
               nttTransceiverMessage: validatedMsgPda,
               redeemAccountsLen: 1,
@@ -1306,6 +1220,7 @@ describe('relayer', () => {
               direction: { withdraw: {} },
               userWallet,
               recvMint: assetMint.publicKey,
+              minSwapOut: RECEIVE_MIN,
               nttInboxItem: nttInboxItem.publicKey,
               nttTransceiverMessage: validatedMsgPda,
               redeemAccountsLen: 10,
@@ -1350,6 +1265,7 @@ describe('relayer', () => {
               direction: { withdraw: {} },
               userWallet,
               recvMint: assetMint.publicKey,
+              minSwapOut: RECEIVE_MIN,
               nttInboxItem: nttInboxItem.publicKey,
               nttTransceiverMessage: validatedMsgPda,
               redeemAccountsLen: 10,
@@ -1396,6 +1312,7 @@ describe('relayer', () => {
               direction: { withdraw: {} },
               userWallet,
               recvMint: assetMint.publicKey,
+              minSwapOut: RECEIVE_MIN,
               nttInboxItem: nttInboxItem.publicKey,
               nttTransceiverMessage: validatedMsgPda,
               redeemAccountsLen: 10,
@@ -1413,7 +1330,7 @@ describe('relayer', () => {
 
     it('send (withdraw) rejects flow not in Swapped status', async () => {
       const nttInboxItem = Keypair.generate()
-      const [outflightPda, bump] = findOutflightFlowPda(nttInboxItem.publicKey, client.program.programId)
+      const [outflightPda, bump] = findOutflightFlowPda(client.configPda, nttInboxItem.publicKey, client.program.programId)
 
       // Inject a Received flow — send requires Swapped
       setFlowAccount(svm, outflightPda, {
@@ -1447,7 +1364,7 @@ describe('relayer', () => {
 
     it('send (withdraw) rejects wrong rent destination', async () => {
       const nttInboxItem = Keypair.generate()
-      const [outflightPda, bump] = findOutflightFlowPda(nttInboxItem.publicKey, client.program.programId)
+      const [outflightPda, bump] = findOutflightFlowPda(client.configPda, nttInboxItem.publicKey, client.program.programId)
       const rando = Keypair.generate()
       svm.airdrop(rando.publicKey, BigInt(1e9))
 
@@ -1486,7 +1403,7 @@ describe('relayer', () => {
 
     it('send (withdraw) advances past relayer-side checks', async () => {
       const nttInboxItem = Keypair.generate()
-      const [outflightPda, bump] = findOutflightFlowPda(nttInboxItem.publicKey, client.program.programId)
+      const [outflightPda, bump] = findOutflightFlowPda(client.configPda, nttInboxItem.publicKey, client.program.programId)
 
       // Inject a Swapped flow
       setFlowAccount(svm, outflightPda, {
