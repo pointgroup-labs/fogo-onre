@@ -25,7 +25,6 @@ import { getFogoConnection } from '@/utils/connections'
 import { formatBaseUnitsExact } from '@/utils/transfer'
 import { readFeeConfig } from './feeConfig'
 import {
-  assertRecipientIsUserInbox,
   deriveIntentPdas,
   destinationAtaIsMissing,
   fetchBridgeSponsor,
@@ -65,8 +64,6 @@ export function createWithdrawBridgeContextProvider(
     const resolvedFeeConfig = overrides.feeConfig ?? pdas.feeConfig
     const feeSource = overrides.feeSource
       ?? getAssociatedTokenAddressSync(FOGO_ONYC_MINT, walletPublicKey)
-
-    assertRecipientIsUserInbox(walletPublicKey, recipientAddress)
 
     const { fogoRpcUrl, solanaRpcUrl } = getSettings()
     const fogoConn = getFogoConnection(fogoRpcUrl)

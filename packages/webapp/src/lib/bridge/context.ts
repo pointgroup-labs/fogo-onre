@@ -23,6 +23,11 @@ export interface BridgeContext {
    * `bridge_ntt_tokens` blows past the 1232-byte legacy-tx limit.
    */
   addressLookupTable?: PublicKey
+  /**
+   * Human-readable intent fields. `recipientAddress` is owned by the hook
+   * (it derives the min-bearing recipient PDA that commits the floor), so
+   * the provider omits it.
+   */
   intent: Omit<BuildBridgeOutIntentMessageParams, 'recipientAddress'>
   topLevel: {
     intentTransferProgramId: PublicKey

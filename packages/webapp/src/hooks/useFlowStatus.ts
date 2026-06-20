@@ -3,7 +3,7 @@
 import { getAssociatedTokenAddressSync } from '@solana/spl-token'
 import { Connection, PublicKey } from '@solana/web3.js'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect } from 'react'
+import { useEffect, useMemo } from 'react'
 import { FOGO_ONYC_MINT, USDC_S_MINT } from '@/constants'
 import { useDocumentVisible } from '@/hooks/useDocumentVisible'
 import { useSettings } from '@/store/settings'
@@ -103,7 +103,10 @@ export function useFlowStatus(input: FlowWatchInput): FlowStatus | null {
   const { signature, startedAt, kind, baselineBalance: presetBaseline } = input
   const enabled = signature !== null && ownerKey !== null && startedAt !== null
 
-  const queryKey = ['flow-status', signature, kind, ownerKey, fogoRpcUrl] as const
+  const queryKey = useMemo(
+    () => ['flow-status', signature, kind, ownerKey, fogoRpcUrl] as const,
+    [signature, kind, ownerKey, fogoRpcUrl],
+  )
 
   const query = useQuery<FlowStatus>({
     queryKey,

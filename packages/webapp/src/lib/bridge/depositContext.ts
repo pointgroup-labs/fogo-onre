@@ -27,7 +27,6 @@ import { getFogoConnection } from '@/utils/connections'
 import { formatBaseUnitsExact } from '@/utils/transfer'
 import { readFeeConfig } from './feeConfig'
 import {
-  assertRecipientIsUserInbox,
   deriveIntentPdas,
   destinationAtaIsMissing,
   fetchBridgeSponsor,
@@ -69,8 +68,6 @@ export function createDepositBridgeContextProvider(
     const resolvedFeeConfig = overrides.feeConfig ?? pdas.feeConfig
     const feeSource = overrides.feeSource
       ?? getAssociatedTokenAddressSync(feeMint, walletPublicKey)
-
-    assertRecipientIsUserInbox(walletPublicKey, recipientAddress)
 
     // Resolve RPC URLs from settings so a user override in the drawer
     // propagates to FOGO reads, the dest-ATA check, and the Wormhole SDK's

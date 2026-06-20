@@ -8,7 +8,7 @@
  * that is a pure function of those inputs (or of the wallet) lives here.
  */
 
-import { findUserInboxAuthorityPda, INTENT_TRANSFER_SETTER_SEED, RELAYER_PROGRAM_ID } from '@fogo-onre/sdk'
+import { INTENT_TRANSFER_SETTER_SEED } from '@fogo-onre/sdk'
 import { Network } from '@fogo/sessions-sdk-react'
 import { getAssociatedTokenAddressSync } from '@solana/spl-token'
 import { PublicKey } from '@solana/web3.js'
@@ -136,21 +136,6 @@ export function deriveIntentPdas(
     expectedNttConfig,
     feeConfig,
     fromChainIdAccount,
-  }
-}
-
-/**
- * Sanity-check the recipient handed in by the hook against the SDK's PDA
- * derivation. A mismatch means hook/SDK version skew and would otherwise
- * silently route to the wrong inbox.
- */
-export function assertRecipientIsUserInbox(walletPublicKey: PublicKey, recipientAddress: PublicKey): void {
-  const [perUserInbox] = findUserInboxAuthorityPda(walletPublicKey, RELAYER_PROGRAM_ID)
-  if (!perUserInbox.equals(recipientAddress)) {
-    throw new Error(
-      'Internal: recipientAddress mismatch — hook handed a PDA that is not the per-user inbox. '
-      + 'This indicates a hook/SDK version skew.',
-    )
   }
 }
 

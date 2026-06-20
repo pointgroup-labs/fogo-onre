@@ -12,7 +12,7 @@ import {
   SheetTitle,
   SheetTrigger,
 } from '@/components/ui/sheet'
-import { useSettings, useSettingsStore } from '@/store/settings'
+import { MAX_SLIPPAGE_TOLERANCE_BPS, useSettings, useSettingsStore } from '@/store/settings'
 
 interface RpcPreset {
   label: string
@@ -40,9 +40,11 @@ const SOLANA_PRESETS: RpcPreset[] = [
 export default function SettingsSheet() {
   const fogoRpcOverride = useSettingsStore(s => s.fogoRpcUrl)
   const solanaRpcOverride = useSettingsStore(s => s.solanaRpcUrl)
+  const slippageOverride = useSettingsStore(s => s.slippageBps)
   const setFogoRpcUrl = useSettingsStore(s => s.setFogoRpcUrl)
   const setSolanaRpcUrl = useSettingsStore(s => s.setSolanaRpcUrl)
-  const { fogoRpcUrl, solanaRpcUrl } = useSettings()
+  const setSlippageBps = useSettingsStore(s => s.setSlippageBps)
+  const { fogoRpcUrl, solanaRpcUrl, slippageDefault } = useSettings()
 
   return (
     <Sheet>
@@ -54,7 +56,7 @@ export default function SettingsSheet() {
       <SheetContent className="flex flex-col gap-6">
         <SheetHeader>
           <SheetTitle>Settings</SheetTitle>
-          <SheetDescription>Override the RPC endpoints. Changes apply immediately.</SheetDescription>
+          <SheetDescription>Override the RPC endpoints and swap tolerance. Changes apply immediately.</SheetDescription>
         </SheetHeader>
         <section className="flex flex-col gap-4 px-4 pb-4">
           <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Network</h3>
@@ -73,6 +75,14 @@ export default function SettingsSheet() {
             onChange={setSolanaRpcUrl}
           />
         </section>
+        <section className="flex flex-col gap-4 px-4 pb-4">
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Swap tolerance</h3>
+          <SlippageInput
+            value={slippageOverride}
+            defaultBps={slippageDefault}
+            onChange={setSlippageBps}
+          />
+        </section>
       </SheetContent>
     </Sheet>
   )
@@ -80,6 +90,76 @@ export default function SettingsSheet() {
 
 const CUSTOM_SENTINEL = '__custom__'
 const CUSTOM_DEBOUNCE_MS = 400
+
+const MAX_SLIPPAGE_PCT = MAX_SLIPPAGE_TOLERANCE_BPS / 100
+
+function bpsToPctStr(bps: number): string {
+  return (bps / 100).toString()
+}
+
+interface SlippageInputProps {
+  /** Persisted override in bps (`null` = use default). */
+  value: number | null
+  /** SDK default in bps, shown as the placeholder. */
+  defaultBps: number
+  onChange: (bps: number | null) => void
+}
+
+/**
+ * Swap-tolerance control. The user types a percentage; we persist bps.
+ * Empty input clears the override (falls back to the default). The floor
+ * is signed into the bridge tx, so a too-tight value just reverts on-chain.
+ */
+function SlippageInput({ value, defaultBps, onChange }: SlippageInputProps) {
+  const [draft, setDraft] = useState<string>(() => (value === null ? '' : bpsToPctStr(value)))
+  // Resync the draft when the committed `value` changes — React's documented
+  // "adjust state during render" pattern (no post-render effect / stale flash).
+  const [prevValue, setPrevValue] = useState(value)
+  if (value !== prevValue) {
+    setPrevValue(value)
+    setDraft(value === null ? '' : bpsToPctStr(value))
+  }
+
+  const commit = (raw: string) => {
+    const trimmed = raw.trim()
+    if (trimmed === '') {
+      onChange(null)
+      return
+    }
+    const pct = Number(trimmed)
+    if (!Number.isFinite(pct)) {
+      onChange(null)
+      return
+    }
+    onChange(Math.round(pct * 100))
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      <label className="text-xs font-medium text-foreground" htmlFor="slippage-tolerance">
+        Max slippage (%)
+      </label>
+      <Input
+        id="slippage-tolerance"
+        type="number"
+        inputMode="decimal"
+        min={0}
+        max={MAX_SLIPPAGE_PCT}
+        step={0.1}
+        value={draft}
+        placeholder={bpsToPctStr(defaultBps)}
+        onChange={e => setDraft(e.target.value)}
+        onBlur={() => commit(draft)}
+      />
+      <p className="text-xs text-muted-foreground">
+        Floor for the on-chain swap. Too tight reverts and retries; leave empty for
+        {' '}
+        {bpsToPctStr(defaultBps)}
+        % default.
+      </p>
+    </div>
+  )
+}
 
 interface RpcSelectProps {
   label: string
@@ -109,9 +189,12 @@ function RpcSelect({ label, presets, effective, value, onChange }: RpcSelectProp
   })
 
   const [draft, setDraft] = useState<string>(value)
-  useEffect(() => {
+  // Resync the draft when the committed `value` changes (adjust-during-render).
+  const [prevValue, setPrevValue] = useState(value)
+  if (value !== prevValue) {
+    setPrevValue(value)
     setDraft(value)
-  }, [value])
+  }
 
   const displayDefault = useMemo(() => {
     const match = presets.find(p => p.url === effective)
