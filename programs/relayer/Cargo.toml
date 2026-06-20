@@ -1,6 +1,6 @@
 [package]
 name = "fogo-ntt-relayer"
-version = "0.2.0"
+version = "0.3.0"
 description = "Cross-chain Wormhole NTT relayer with stateless PDA custody"
 edition = { workspace = true }
 authors = { workspace = true }
