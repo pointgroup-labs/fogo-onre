@@ -1,9 +1,7 @@
 /**
- * TS mirror of OnRe NAV math + Offer-account byte layout, paired
- * byte-for-byte with `programs/relayer/src/onre.rs` (the Rust side has the
- * `offer_layout_matches_fixture` tripwire; this module's tests pin the
- * same constants). Consumers compute the same NAV floor `swap` enforces
- * on-chain — drift means a "clears floor" quote gets rejected by the chain.
+ * TS mirror of OnRe NAV math + Offer-account byte layout. Consumers use it
+ * to preview the OnRe execution price feeding `computeMinSwapOut` (the
+ * user-signed swap floor); it is no longer an on-chain enforcement mirror.
  *
  * `bigint` (not Number): intermediate products exceed 2^53 and would lose
  * precision in IEEE-754. Throws (not Result): callers wrap in try/catch.
@@ -17,20 +15,6 @@ export const ONRE_OFFER_MAX_VECTORS = 10
 export const ONRE_PRICE_DENOMINATOR = 1_000_000_000n
 export const ONRE_APR_SCALE = 1_000_000n
 export const ONRE_SECONDS_IN_YEAR = 31_536_000n
-
-/**
- * Mirror of the on-chain `MAX_SLIPPAGE_BPS` compile-time constant
- * (`programs/relayer/src/constants.rs`) — the hard ceiling on the
- * authority-configurable `RelayerConfig.slippage_bps`. Drift tripwire
- * only; the floor preview uses the *configured* slippage, not this cap.
- */
-export const MAX_SLIPPAGE_BPS = 200
-
-/**
- * Mirror of the on-chain `DEFAULT_SLIPPAGE_BPS` (seeded at `initialize`).
- * Use as the floor-preview slippage when the live config is unavailable.
- */
-export const DEFAULT_SLIPPAGE_BPS = 10
 
 const U64_MAX = (1n << 64n) - 1n
 
@@ -47,18 +31,6 @@ function asU64(x: bigint, label: string): bigint {
     throw new Error(`OnreNavOverflow: ${label} out of u64 range`)
   }
   return x
-}
-
-/**
- * Mirror of `apply_slippage_floor`. Fail-closed on `bps > 10_000`.
- */
-export function applySlippageFloor(grossExpected: bigint, slippageBps: number): bigint {
-  if (!Number.isInteger(slippageBps) || slippageBps < 0 || slippageBps > 10_000) {
-    throw new Error('OnreInvalidSlippageBps: slippage out of [0, 10_000]')
-  }
-  const factor = 10_000n - BigInt(slippageBps)
-  const prod = grossExpected * factor
-  return asU64(prod / 10_000n, 'apply_slippage_floor result')
 }
 
 /**

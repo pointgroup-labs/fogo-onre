@@ -1,6 +1,6 @@
 import { Buffer } from 'node:buffer'
 import { PublicKey } from '@solana/web3.js'
-import IDL from './idl/fogo_onre_relayer.json' with { type: 'json' }
+import IDL from './idl/fogo_ntt_relayer.json' with { type: 'json' }
 
 export const SOLANA_WORMHOLE_CHAIN_ID = 1
 export const FOGO_WORMHOLE_CHAIN_ID = 51
@@ -16,9 +16,8 @@ export const NTT_ONYC_PROGRAM_ID = new PublicKey('nttpna5vXW7BN2Aa4AfTbkCncJWTEo
 
 /**
  * Wormhole NTT-transceiver program for ONyc — a deliberate alias of the
- * manager. This deploy uses NTT v3 *bundled* mode, where the transceiver
- * lives inside the manager and all transceiver-side PDAs key on the
- * manager's program ID.
+ * manager. NTT v3 *bundled* mode runs the transceiver inside the manager, so
+ * all transceiver-side PDAs key on the manager's program ID.
  */
 export const WH_TRANSCEIVER_ONYC_PROGRAM_ID = NTT_ONYC_PROGRAM_ID
 
@@ -36,20 +35,27 @@ export const RELAYER_SEED = Buffer.from('relayer')
 export const FLOW_INBOUND_SEED = Buffer.from('inflight')
 export const FLOW_OUTBOUND_SEED = Buffer.from('outflight')
 export const NTT_SESSION_AUTHORITY_SEED = Buffer.from('session_authority')
-/** Per-user inbox PDA seed under the relayer program. */
-export const USER_INBOX_SEED = Buffer.from('user_inbox')
 
 /**
- * FOGO `intent_transfer` program ID. The webapp routes deposit
- * `bridge_ntt_tokens` here; the relayer pins it as the only valid VAA
- * originator (via the singleton setter PDA).
+ * Min-bearing inbox PDA seed. Full seeds:
+ * `[USER_INBOX_SEED, wallet, minOut.to_le_bytes()]`.
+ * Commits the user-signed swap floor into the NTT `recipient_address`.
+ */
+export const USER_INBOX_SEED = Buffer.from('user_inbox')
+
+/** Refund timeout in slots. Mirrors on-chain `REFUND_TIMEOUT_SLOTS = 54_000`. */
+export const REFUND_TIMEOUT_SLOTS = 54_000n
+
+/**
+ * FOGO `intent_transfer` program ID. Webapp routes deposit `bridge_ntt_tokens`
+ * here; the relayer pins it as a valid VAA originator via the setter PDA.
  */
 export const INTENT_TRANSFER_PROGRAM_ID = new PublicKey('Xfry4dW9m42ncAqm8LyEnyS5V6xu5DSJTMRQLiGkARD')
 
 /**
- * OnRe fork of Fogo's `intent_transfer` (source-identical, `declare_id!`
- * only). Deposit + redeem route here once activated; keep
- * `INTENT_TRANSFER_PROGRAM_ID` for switch-back.
+ * OnRe fork of Fogo's `intent_transfer` (source-identical, `declare_id!` only).
+ * Deposit + redeem route here once activated; `INTENT_TRANSFER_PROGRAM_ID` kept
+ * for switch-back.
  */
 export const ONRE_INTENT_PROGRAM_ID = new PublicKey('inTFf5S7ZtYr8SkwGG85mjDwAyJwjqEPdH2p2nuyrL9')
 
@@ -70,10 +76,9 @@ export const FEE_DENOMINATOR_BPS = 10_000n
 export const MAX_FEE_BPS = 1_000
 
 /**
- * Slot delay for fee *increases*. Mirrors the on-chain
- * `FEE_TIMELOCK_SLOTS = 432_000` (~2 days @ 400ms slots). Authority-side
- * tooling needs this to compute the wall-clock moment a staged increase
- * becomes promotable on the next `configure` call.
+ * Slot delay for fee *increases*. Mirrors on-chain
+ * `FEE_TIMELOCK_SLOTS = 432_000` (~2 days @ 400ms slots). Lets authority
+ * tooling compute when a staged increase becomes promotable.
  */
 export const FEE_TIMELOCK_SLOTS = 432_000n
 
