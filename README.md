@@ -30,38 +30,40 @@ flowchart LR
 
 Both legs run over [Wormhole NTT](https://wormhole.com/products/native-token-transfers)
 (USDC.s ↔ USDC and ONyc ↔ ONyc). On Solana, a small **relayer** program holds
-capital only in-flight and CPIs into OnRe to swap. Each leg is the same
-three-step pipeline, driven by three permissionless relayer instructions:
+funds only while a flow is open, swaps through the configured venue, then sends
+the output back to FOGO. Each leg is the same three-step pipeline, driven by
+three permissionless relayer instructions:
 
 | Step       | Instruction | Deposit                     | Withdraw                     |
 | ---------- | ----------- | --------------------------- | ---------------------------- |
 | 1. Receive | `receive`   | claim inbound USDC from NTT | claim inbound ONyc from NTT  |
-| 2. Swap    | `swap`      | USDC → ONyc on OnRe         | ONyc → USDC on OnRe          |
+| 2. Swap    | `swap`      | USDC → ONyc                 | ONyc → USDC                  |
 | 3. Send    | `send`      | NTT-send ONyc back to FOGO  | NTT-send USDC.s back to FOGO |
 
-`receive` opens a one-shot `Flow` receipt that records the direction and
-recipient; `swap` and `send` read it, so no caller can redirect funds. Yield
+`receive` opens a one-shot `Flow` receipt. `swap` enforces the user's signed
+minimum output, and `send` returns the result to the recorded recipient. Yield
 accrues automatically — ONyc is a claim on a position whose on-chain price
 advances as OnRe's reinsurance book earns.
 
 ## Trust model
 
-The relayer is the user's trust boundary. Its program ID is canonical and its
-CPI destinations (NTT managers, OnRe) are pinned in `constants.rs`. Outbound
-recipients are read from the unforgeable NTT `ValidatedTransceiverMessage`, so
-a stolen _operator_ key cannot redirect funds. The _config authority_ can
-adjust fees (capped at **10% per leg**, with a ~2-day timelock on increases),
-rotate the fee vault, set swap slippage, and repoint the price oracle (a DoS
-at worst — swaps fail closed). The _upgrade authority_ can ship new bytecode
-and bypass every check, so it must be a multisig or finalized to `None` at
-deploy. Full detail in [`docs/architecture.md`](./docs/architecture.md).
+The relayer is the user's trust boundary. For each token pair, it pins the
+token mints, NTT managers, and allowed FOGO origin programs at initialization.
+Flow instructions are permissionless: a cranker can execute them, but cannot
+change the recipient or lower the user's signed `min_swap_out`. If no swap ever
+clears that floor, anyone can `refund` the inbound token back to FOGO after a
+timeout, so funds are never stranded.
+
+The config authority can rotate the fee vault and adjust fees, capped at
+**10% per leg** with a ~2-day timelock on increases. The upgrade authority can
+ship new bytecode and bypass every check, so it must be a multisig or finalized
+to `None` at deploy. Full detail in [`docs/architecture.md`](./docs/architecture.md).
 
 ## Program IDs
 
-First-party programs. Third-party CPI targets (OnRe, NTT managers) and token
-mints are listed in [`docs/architecture.md`](./docs/architecture.md). The
-relayer ID is the declared ID across clusters — confirm the deploy status
-on-chain before assuming any cluster is live.
+First-party programs. Third-party CPI targets, NTT managers, and token mints
+are listed in [`docs/architecture.md`](./docs/architecture.md). Confirm deploy
+status on-chain before assuming any cluster is live.
 
 | Program                  | Chain  | ID                                            |
 | ------------------------ | ------ | --------------------------------------------- |
@@ -85,13 +87,13 @@ on-chain before assuming any cluster is live.
 ```bash
 pnpm install
 
-# Build the relayer .so + SDK
-anchor build
+# Build the relayer .so (vanity program ID → --ignore-keys) + SDK
+anchor build --ignore-keys
 pnpm sdk build
 
 # Test
-anchor test          # Rust unit + LiteSVM e2e
-pnpm test            # vitest — pretest rebuilds the .so + SDK
+cargo test -p fogo-ntt-relayer --lib   # Rust unit tests
+pnpm test                              # LiteSVM e2e (pretest rebuilds .so + SDK)
 ```
 
 Toolchain is pinned: Rust 1.95.0, Anchor 1.0.2, Solana CLI 3.1.8,
