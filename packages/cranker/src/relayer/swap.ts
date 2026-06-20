@@ -191,14 +191,15 @@ export async function swap(
       return { kind: 'noop', reason: 'fee consumed entire amount — config error' }
     }
 
-    // Jupiter routing slippage tolerance (a router param) — distinct from the
-    // protocol floor, which is the user-signed `flow.min_swap_out` checked below.
+    // `slippageBps` only picks the route; Jupiter's enforced min is pinned to
+    // the user-signed floor so it never reverts a fill the on-chain check allows.
     const route = await withTimeout(
       fetchJupiterRoute({
         inputMint: assetMint,
         outputMint: baseMint,
         amount: netOnyc,
         slippageBps: DEFAULT_SLIPPAGE_TOLERANCE_BPS,
+        otherAmountThreshold: floor,
         userPublicKey: relayerAuthorityPda,
       }),
       ctx.rpcTimeoutMs,

@@ -26,10 +26,16 @@ export interface JupiterRouteParams {
   inputMint: PublicKey
   outputMint: PublicKey
   amount: bigint
-  /** Caller's outer slippage budget. The on-chain handler enforces a 0.5% absolute floor. */
+  /** Outer slippage budget for route selection only (see `otherAmountThreshold`). */
   slippageBps: number
   /** PDA that signs the Jupiter CPI on-chain (= relayer_authority). */
   userPublicKey: PublicKey
+  /**
+   * Pin Jupiter's on-chain `otherAmountThreshold` (output atomic units) to the
+   * user-signed floor. The relayer enforces the same `min_swap_out`, so a
+   * tighter Jupiter floor only causes avoidable reverts. Omit to use `slippageBps`.
+   */
+  otherAmountThreshold?: bigint
   /** Optional override (mainnet RPC defaults inside Jupiter's API). */
   fetchImpl?: typeof fetch
   onlyDirectRoutes?: boolean
@@ -80,6 +86,12 @@ export async function fetchJupiterRoute(p: JupiterRouteParams): Promise<JupiterR
     throw new Error(`Jupiter /quote returned ${quoteResp.status}: ${await quoteResp.text()}`)
   }
   const quote = await quoteResp.json() as Record<string, unknown>
+
+  // Pin Jupiter's enforced min to the user-signed floor; the on-chain
+  // `min_swap_out` is the real check, so a tighter Jupiter floor only reverts.
+  if (p.otherAmountThreshold !== undefined) {
+    quote.otherAmountThreshold = p.otherAmountThreshold.toString()
+  }
 
   const swapResp = await fetchImpl(JUP_SWAP_IX, {
     method: 'POST',
