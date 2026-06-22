@@ -38,7 +38,7 @@ const FLOW_STATUS_TAG_OFFSET = DISC + 32 //       40
 const FLOW_AMOUNT_OFFSET = DISC + 33 // 41 .. 49
 const FLOW_PAYER_OFFSET = DISC + 41 // 49 .. 81
 
-// `RelayerConfig` mint offsets (state.rs:9) — also byte-stable.
+// `PairConfig` mint offsets (state.rs:9) — also byte-stable.
 const CONFIG_USDC_MINT_OFFSET = DISC + 0 //  8 .. 40
 const CONFIG_ONYC_MINT_OFFSET = DISC + 32 // 40 .. 72
 
@@ -62,7 +62,7 @@ async function main() {
   ])
 
   if (!configInfo) {
-    throw new Error(`RelayerConfig PDA ${configPda.toBase58()} not found — wrong cluster?`)
+    throw new Error(`PairConfig PDA ${configPda.toBase58()} not found — wrong cluster?`)
   }
   const configData = Buffer.from(configInfo.data)
   const usdcMint = new PublicKey(configData.subarray(CONFIG_USDC_MINT_OFFSET, CONFIG_USDC_MINT_OFFSET + 32))

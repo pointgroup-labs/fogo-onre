@@ -1,5 +1,6 @@
 import type { AdvanceContext } from '../src/relayer/types'
 import type { WormholescanVaa } from '../src/wormholescan'
+import { NTT_ONYC_PROGRAM_ID, NTT_USDC_PROGRAM_ID, ONYC_MINT, USDC_MINT } from '@fogo-onre/sdk'
 import { describe, expect, it, vi } from 'vitest'
 import { makeEnumerator } from '../src/relayer/enumerate'
 import { silentLogger } from '../src/utils/log'
@@ -15,7 +16,15 @@ function makeFetchImpl(handler: (url: string) => unknown): typeof fetch {
 function makeCtx(abortSignal = new AbortController().signal): AdvanceContext {
   return {
     abortSignal,
-    client: { fetchInflightFlow: async () => null },
+    client: {
+      fetchInflightFlow: async () => null,
+      fetchConfig: async () => ({
+        nttBaseProgram: NTT_USDC_PROGRAM_ID,
+        nttAssetProgram: NTT_ONYC_PROGRAM_ID,
+        baseMint: USDC_MINT,
+        assetMint: ONYC_MINT,
+      }),
+    },
     connection: undefined as never,
     fogoConnection: undefined as never,
     provider: undefined as never,

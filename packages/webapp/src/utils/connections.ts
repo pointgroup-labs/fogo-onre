@@ -1,8 +1,9 @@
 'use client'
 
 import { AnchorProvider } from '@anchor-lang/core'
-import { RelayerClient } from '@fogo-onre/sdk'
+import { ONYC_MINT, RelayerClient } from '@fogo-onre/sdk'
 import { Connection, Keypair } from '@solana/web3.js'
+import { SOLANA_USDC_MINT } from '@/constants'
 
 /**
  * Single registry for every RPC `Connection` and the read-only
@@ -68,7 +69,7 @@ export function getReadOnlyRelayerClient(url: string): RelayerClient {
       makeReadOnlyWallet() as never,
       { commitment: 'confirmed' },
     )
-    client = new RelayerClient(provider)
+    client = new RelayerClient(provider, { baseMint: SOLANA_USDC_MINT, assetMint: ONYC_MINT })
     relayerClients.set(url, client)
   }
   return client

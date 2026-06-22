@@ -4,14 +4,12 @@ use anchor_lang::prelude::*;
 use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};
 
 use crate::{
-    constants::{
-        CONFIG_SEED, FOGO_WORMHOLE_CHAIN_ID, NTT_RELEASE_WORMHOLE_OUTBOUND_IX, NTT_TRANSFER_LOCK_IX, RELAYER_SEED,
-    },
+    constants::{FOGO_WORMHOLE_CHAIN_ID, NTT_RELEASE_WORMHOLE_OUTBOUND_IX, NTT_TRANSFER_LOCK_IX, RELAYER_SEED},
     cpi::{approve_ntt_session_authority, invoke_relayer_signed},
     error::RelayerError,
     events::Sent,
     ntt::{NttReleaseOutboundArgs, NttTransferArgs, derive_session_authority},
-    state::{Direction, Flow, FlowStatus, RelayerConfig},
+    state::{Direction, Flow, FlowStatus, PairConfig},
 };
 
 pub fn handler<'info>(ctx: Context<'info, Send<'info>>, transfer_lock_account_count: u8) -> Result<()> {
@@ -22,7 +20,7 @@ pub fn handler<'info>(ctx: Context<'info, Send<'info>>, transfer_lock_account_co
     require!(amount > 0, RelayerError::ZeroAmountFlow);
 
     let recipient = ctx.accounts.flow.recipient;
-    let ntt_program = crate::state::send_ntt_program(direction);
+    let ntt_program = ctx.accounts.pair_config.send_ntt_program(direction);
 
     let from_ata = match direction {
         Direction::Deposit => ctx.accounts.asset_ata.to_account_info(),
@@ -39,7 +37,7 @@ pub fn handler<'info>(ctx: Context<'info, Send<'info>>, transfer_lock_account_co
     let (session_authority, _) =
         derive_session_authority(&ntt_program, &ctx.accounts.relayer_authority.key(), &transfer_args);
 
-    let bump = ctx.accounts.relayer_config.relayer_authority_bump;
+    let bump = ctx.accounts.pair_config.relayer_authority_bump;
 
     // Session-authority preflight before the split: a minimal/malformed
     // account list then surfaces this precise error, not a split-length one.
@@ -112,19 +110,19 @@ pub struct Send<'info> {
     pub payer: Signer<'info>,
 
     #[account(
-        seeds = [CONFIG_SEED],
-        bump = relayer_config.bump,
+        seeds = [PairConfig::SEED, base_mint.key().as_ref(), asset_mint.key().as_ref()],
+        bump = pair_config.bump,
         has_one = base_mint,
         has_one = asset_mint,
     )]
-    pub relayer_config: Account<'info, RelayerConfig>,
+    pub pair_config: Box<Account<'info, PairConfig>>,
 
     /// CHECK: PDA derived from RELAYER_SEED.
-    #[account(seeds = [RELAYER_SEED], bump = relayer_config.relayer_authority_bump)]
+    #[account(seeds = [RELAYER_SEED], bump = pair_config.relayer_authority_bump)]
     pub relayer_authority: UncheckedAccount<'info>,
 
-    pub base_mint: InterfaceAccount<'info, Mint>,
-    pub asset_mint: InterfaceAccount<'info, Mint>,
+    pub base_mint: Box<InterfaceAccount<'info, Mint>>,
+    pub asset_mint: Box<InterfaceAccount<'info, Mint>>,
 
     #[account(
         mut,
@@ -132,7 +130,7 @@ pub struct Send<'info> {
         associated_token::authority = relayer_authority,
         associated_token::token_program = token_program,
     )]
-    pub base_ata: InterfaceAccount<'info, TokenAccount>,
+    pub base_ata: Box<InterfaceAccount<'info, TokenAccount>>,
 
     #[account(
         mut,
@@ -140,7 +138,7 @@ pub struct Send<'info> {
         associated_token::authority = relayer_authority,
         associated_token::token_program = token_program,
     )]
-    pub asset_ata: InterfaceAccount<'info, TokenAccount>,
+    pub asset_ata: Box<InterfaceAccount<'info, TokenAccount>>,
 
     /// CHECK: seed material only; validated transitively via the flow PDA.
     pub ntt_inbox_item: UncheckedAccount<'info>,
@@ -148,10 +146,10 @@ pub struct Send<'info> {
     #[account(
         mut,
         close = rent_destination,
-        seeds = [Flow::seed(flow.direction), ntt_inbox_item.key().as_ref()],
+        seeds = [Flow::seed(flow.direction), pair_config.key().as_ref(), ntt_inbox_item.key().as_ref()],
         bump = flow.bump,
     )]
-    pub flow: Account<'info, Flow>,
+    pub flow: Box<Account<'info, Flow>>,
 
     /// CHECK: pinned to the flow PDA's stored `payer`; receives rent refund.
     #[account(mut, address = flow.payer)]

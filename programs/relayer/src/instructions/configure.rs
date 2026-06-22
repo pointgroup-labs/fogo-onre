@@ -1,21 +1,15 @@
 use anchor_lang::prelude::*;
 use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};
 
-use crate::{
-    constants::{CONFIG_SEED, RELAYER_SEED},
-    error::RelayerError,
-    state::RelayerConfig,
-};
+use crate::{constants::RELAYER_SEED, error::RelayerError, state::PairConfig};
 
 pub fn handler(
     ctx: Context<Configure>,
     deposit_fee_bps: Option<u16>,
     withdraw_fee_bps: Option<u16>,
     new_authority: Option<Pubkey>,
-    slippage_bps: Option<u16>,
-    price_oracle: Option<Pubkey>,
 ) -> Result<()> {
-    let config = &mut ctx.accounts.relayer_config;
+    let config = &mut ctx.accounts.pair_config;
     let now = Clock::get()?.slot;
 
     // Promote ripe staged changes BEFORE merging new args, so a same-call
@@ -27,12 +21,6 @@ pub fn handler(
     }
     if let Some(proposed) = withdraw_fee_bps {
         config.propose_withdraw_fee(proposed, now)?;
-    }
-    if let Some(bps) = slippage_bps {
-        config.max_slippage_bps = bps;
-    }
-    if let Some(oracle) = price_oracle {
-        config.price_oracle = oracle;
     }
 
     if let Some(vault) = &ctx.accounts.fee_vault {
@@ -50,11 +38,10 @@ pub fn handler(
     config.validate()?;
 
     msg!(
-        "Relayer reconfigured. deposit_fee_bps: {}, withdraw_fee_bps: {}, max_slippage_bps: {}, pending_fee: {:?}, \
-         fee_vault: {}, authority: {}, pending_authority: {:?}.",
+        "Relayer reconfigured. deposit_fee_bps: {}, withdraw_fee_bps: {}, pending_fee: {:?}, fee_vault: {}, \
+         authority: {}, pending_authority: {:?}.",
         config.deposit_fee_bps,
         config.withdraw_fee_bps,
-        config.max_slippage_bps,
         config.pending_fee,
         config.fee_vault,
         config.authority,
@@ -70,17 +57,17 @@ pub struct Configure<'info> {
 
     #[account(
         mut,
-        seeds = [CONFIG_SEED],
-        bump = relayer_config.bump,
+        seeds = [PairConfig::SEED, pair_config.base_mint.as_ref(), asset_mint.key().as_ref()],
+        bump = pair_config.bump,
         has_one = authority @ RelayerError::UnauthorizedAuthority,
         has_one = asset_mint,
     )]
-    pub relayer_config: Account<'info, RelayerConfig>,
+    pub pair_config: Account<'info, PairConfig>,
 
     /// CHECK: PDA seeds enforce identity.
     #[account(
         seeds = [RELAYER_SEED],
-        bump = relayer_config.relayer_authority_bump,
+        bump = pair_config.relayer_authority_bump,
     )]
     pub relayer_authority: UncheckedAccount<'info>,
 

@@ -4,12 +4,20 @@ import type { AddressLookupTableAccount, TransactionInstruction } from '@solana/
 import type { BridgeContextProvider } from '@/lib/bridge/context'
 import type { FlowKind, PersistedFlowStatus } from '@/lib/flow-status/types'
 import {
+  applyNttTrim,
   buildBridgeNttTokensIx,
   buildBridgeOutIntentMessage,
   buildIntentVerifierIx,
+  buildMinSwapOutMemoIx,
+  computeMinSwapOut,
+  findOnreOfferPda,
   findProgramSignerPda,
-  findUserInboxAuthorityPda,
+  findUserInboxWithMinPda,
+  ONYC_DECIMALS,
+  ONYC_MINT,
   RELAYER_PROGRAM_ID,
+  USDC_DECIMALS,
+  USDC_MINT,
 } from '@fogo-onre/sdk'
 import { isEstablished, TransactionResultType, useSession } from '@fogo/sessions-sdk-react'
 import { getAssociatedTokenAddressSync } from '@solana/spl-token'
@@ -31,7 +39,7 @@ import { fetchBridgeSponsor } from '@/lib/bridge/intentBridgeShared'
 import { assertSessionActive } from '@/lib/bridge/sessionLiveness'
 import { addFlow, pendingWithdrawExists } from '@/lib/flow-status/store'
 import { useSettings } from '@/store/settings'
-import { getFogoConnection } from '@/utils/connections'
+import { getFogoConnection, getReadOnlyRelayerClient, getSolanaConnection } from '@/utils/connections'
 import { fogoTxUrl, shortSig } from '@/utils/explorers'
 
 /**
@@ -72,7 +80,7 @@ export interface SubmitArgs {
 export function useTransferMutation(options: UseTransferMutationOptions = {}) {
   const qc = useQueryClient()
   const sessionState = useSession()
-  const { fogoRpcUrl } = useSettings()
+  const { fogoRpcUrl, solanaRpcUrl, slippageBps } = useSettings()
   const { bridgeContextProvider } = options
 
   return useMutation({
@@ -116,6 +124,10 @@ export function useTransferMutation(options: UseTransferMutationOptions = {}) {
       const built = await buildIntentBridgeIxs({
         sessionState,
         amount,
+        direction: args.kind,
+        inputDecimals: args.decimals,
+        slippageBps,
+        solanaRpcUrl,
         provider: bridgeContextProvider,
       })
 
@@ -269,17 +281,32 @@ async function readDestinationBalance(
 async function buildIntentBridgeIxs(args: {
   sessionState: Extract<ReturnType<typeof useSession>, { walletPublicKey: PublicKey, payer: PublicKey }>
   amount: bigint
+  direction: FlowKind
+  inputDecimals: number
+  slippageBps: number
+  solanaRpcUrl: string
   provider: BridgeContextProvider | null | undefined
 }) {
-  const { sessionState, amount, provider } = args
+  const { sessionState, amount, direction, inputDecimals, slippageBps, solanaRpcUrl, provider } = args
   if (!provider) {
     throw new Error(
       'Bridge not configured: pass a `bridgeContextProvider` to useTransferMutation to enable submission.',
     )
   }
 
-  const [recipientAddress] = findUserInboxAuthorityPda(
+  // The user-signed swap floor. Computed against the NTT post-trim input
+  // (spec §10) and haircut by the user's slippage; the relayer re-derives
+  // the same value from this PDA and enforces it in `swap`.
+  const minDestinationAmount = await computeBridgeFloor({
+    direction,
+    amount,
+    inputDecimals,
+    slippageBps,
+    solanaRpcUrl,
+  })
+  const [recipientAddress] = findUserInboxWithMinPda(
     sessionState.walletPublicKey,
+    minDestinationAmount,
     RELAYER_PROGRAM_ID,
   )
   const outboxItemKp = Keypair.generate()
@@ -302,6 +329,10 @@ async function buildIntentBridgeIxs(args: {
       // ~700k CU empirically; the runtime default (200k * num_ixs)
       // is insufficient for the deep CPI chain.
       ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }),
+      // User-signed floor the cranker reads off this tx to bind `min_swap_out`
+      // in `receive` (untrusted; wrong → revert). Before the verifier to match
+      // the paymaster variation order.
+      buildMinSwapOutMemoIx(minDestinationAmount),
       buildIntentVerifierIx(sessionState.walletPublicKey, signature, message),
       buildBridgeNttTokensIx({
         ...ctx.topLevel,
@@ -315,4 +346,44 @@ async function buildIntentBridgeIxs(args: {
     extraSigners: [outboxItemKp],
     addressLookupTable: ctx.addressLookupTable,
   }
+}
+
+/**
+ * Compute the user-signed swap floor for either leg from the live OnRe
+ * offer + relayer config. Bases the floor on the NTT post-trim input and,
+ * for withdraw, the relayer withdraw fee (taken from the input on-chain).
+ */
+async function computeBridgeFloor(args: {
+  direction: FlowKind
+  amount: bigint
+  inputDecimals: number
+  slippageBps: number
+  solanaRpcUrl: string
+}): Promise<bigint> {
+  const { direction, amount, inputDecimals, slippageBps, solanaRpcUrl } = args
+  const connection = getSolanaConnection(solanaRpcUrl)
+  const [offerPda] = findOnreOfferPda(USDC_MINT, ONYC_MINT)
+
+  const [offerAccount, withdrawFeeBps] = await Promise.all([
+    connection.getAccountInfo(offerPda, 'confirmed'),
+    direction === 'withdraw'
+      ? getReadOnlyRelayerClient(solanaRpcUrl).fetchConfig().then(c => Number(c.withdrawFeeBps))
+      : Promise.resolve(0),
+  ])
+  if (offerAccount === null) {
+    throw new Error(`OnRe offer account ${offerPda.toBase58()} not found`)
+  }
+
+  const postTrimInAmount = applyNttTrim(amount, inputDecimals)
+  const nowUnix = BigInt(Math.floor(Date.now() / 1000))
+  return computeMinSwapOut({
+    direction,
+    postTrimInAmount,
+    offerData: offerAccount.data,
+    nowUnix,
+    baseDecimals: USDC_DECIMALS,
+    onycDecimals: ONYC_DECIMALS,
+    slippageBps,
+    withdrawFeeBps,
+  })
 }

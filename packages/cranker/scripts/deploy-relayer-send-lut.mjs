@@ -125,9 +125,9 @@ async function main() {
   const authorityPda = pda([Buffer.from('relayer')], RELAYER_PROGRAM)
   const cfgInfo = await connection.getAccountInfo(configPda)
   if (!cfgInfo) {
-    throw new Error(`RelayerConfig ${configPda.toBase58()} not found`)
+    throw new Error(`PairConfig ${configPda.toBase58()} not found`)
   }
-  // RelayerConfig layout: 8-byte disc + base_mint(32) + asset_mint(32).
+  // PairConfig layout: 8-byte disc + base_mint(32) + asset_mint(32).
   const baseMint = new PublicKey(cfgInfo.data.subarray(8, 40))
   const assetMint = new PublicKey(cfgInfo.data.subarray(40, 72))
   console.log('baseMint (USDC.s): ', baseMint.toBase58())

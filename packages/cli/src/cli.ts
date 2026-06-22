@@ -15,6 +15,8 @@ cli
   .version('0.0.1')
   .option('-u, --url <url>', 'RPC URL or cluster name [env: SOLANA_RPC_URL]', process.env.SOLANA_RPC_URL ?? 'mainnet-beta')
   .option('-k, --keypair <path>', 'Path to keypair file [env: SOLANA_KEYPAIR]')
+  .option('--base-mint <pubkey>', 'Pair base mint on Solana (default: USDC)')
+  .option('--asset-mint <pubkey>', 'Pair asset mint on Solana (default: ONyc)')
   .hook('preAction', (command, actionCommand) => {
     const opts = command.opts()
     const isReadOnly = READ_ONLY_COMMANDS.has(actionCommand.name())
@@ -22,6 +24,8 @@ cli
       url: opts.url,
       keypair: isReadOnly ? undefined : opts.keypair,
       readOnly: isReadOnly,
+      baseMint: opts.baseMint,
+      assetMint: opts.assetMint,
     })
 
     if (isReadOnly) {

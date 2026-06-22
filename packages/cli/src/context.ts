@@ -2,12 +2,13 @@ import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { AnchorProvider, Wallet } from '@anchor-lang/core'
-import { RelayerClient } from '@fogo-onre/sdk'
+import { ONYC_MINT, RelayerClient, USDC_MINT } from '@fogo-onre/sdk'
 import {
   Cluster,
   clusterApiUrl,
   Connection,
   Keypair,
+  PublicKey,
   SendTransactionError,
 } from '@solana/web3.js'
 
@@ -35,12 +36,16 @@ export function initContext(opts: {
   url?: string
   keypair?: string
   readOnly?: boolean
+  baseMint?: string
+  assetMint?: string
 }): Context {
   const connection = new Connection(resolveRpcUrl(opts.url), 'confirmed')
   const keypair = opts.readOnly ? Keypair.generate() : resolveKeypair(opts.keypair)
   const wallet = new Wallet(keypair)
   const provider = new AnchorProvider(connection, wallet, { commitment: 'confirmed' })
-  const client = new RelayerClient(provider)
+  const baseMint = opts.baseMint ? new PublicKey(opts.baseMint) : USDC_MINT
+  const assetMint = opts.assetMint ? new PublicKey(opts.assetMint) : ONYC_MINT
+  const client = new RelayerClient(provider, { baseMint, assetMint })
   ctx = { connection, keypair, provider, client }
   return ctx
 }

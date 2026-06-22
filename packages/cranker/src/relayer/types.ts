@@ -1,5 +1,5 @@
 import type { AnchorProvider } from '@anchor-lang/core'
-import type { RelayerClient } from '@fogo-onre/sdk'
+import type { RecoveredWalletAndMinOut, RelayerClient } from '@fogo-onre/sdk'
 import type { Connection, Keypair, PublicKey, TransactionInstruction } from '@solana/web3.js'
 import type { Metrics } from '../metrics'
 import type { Logger } from '../utils/log'
@@ -41,14 +41,14 @@ export type AdvanceContext = {
   log: Logger
   abortSignal: AbortSignal
   /**
-   * Cross-scan cache: FOGO source-tx signature → user wallet (Solana
-   * pubkey of the depositor). The VAA carries only a PDA recipient and a
-   * setter-PDA sender — neither is invertible to the user wallet — so
-   * `claim_usdc` resolves it by reading the original FOGO tx's
-   * `bridge_ntt_tokens` source ATA owner. Two RPCs per first sighting,
-   * zero on subsequent scans. Owned by the daemon (one Map per process).
+   * Cross-scan cache: FOGO source-tx signature → recovered `{ userWallet,
+   * minSwapOut }`. The VAA carries only a PDA recipient and a setter-PDA
+   * sender — neither invertible — so `receive` recovers the wallet from the
+   * `bridge_ntt_tokens` source-ATA owner and the floor from the tx's
+   * `onre:mso:<n>` memo. Two RPCs per first sighting, zero on
+   * subsequent scans. Owned by the daemon (one Map per process).
    */
-  userWalletCache: Map<string, PublicKey>
+  userWalletCache: Map<string, RecoveredWalletAndMinOut>
 }
 
 export type PlannedTx = {

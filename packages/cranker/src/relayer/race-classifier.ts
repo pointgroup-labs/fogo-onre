@@ -13,6 +13,9 @@
  */
 
 const RACE_TABLE: Record<number, string> = {
+  // Relayer FlowStatusMismatch (ordinal 4 in error.rs): the happy-path swap
+  // advanced the flow past Received before our refund landed (TOCTOU).
+  6004: 'lost race — swap advanced the flow before refund landed (FlowStatusMismatch, code 6004)',
   // Relayer InsufficientInboxBalance (ordinal 22 in error.rs): claim_usdc
   // raced against a prior claim_usdc + swap_usdc_to_onyc cycle that drained
   // user_inbox_ata.

@@ -44,7 +44,7 @@ pub enum RelayerError {
     #[msg("Destination token account does not match the ATA consumed by the NTT release CPI")]
     RecipientAtaMismatch,
 
-    #[msg("fee_vault must not alias the relayer's ONyc operating ATA")]
+    #[msg("fee_vault must not alias the relayer's asset ATA")]
     FeeVaultAliasesUserAta,
 
     #[msg("No pending authority — nothing to accept")]
@@ -77,46 +77,13 @@ pub enum RelayerError {
     #[msg("Proposed pending_authority equals the current authority — self-rotate is rejected")]
     PendingAuthorityIsCurrent,
 
-    #[msg("No active OnRe pricing vector for the current clock")]
-    OnreNoActiveVector,
-
-    #[msg("Overflow in OnRe NAV computation")]
-    OnreNavOverflow,
-
-    #[msg("OnRe Offer account data is shorter than the pinned layout")]
-    OnreOfferTooShort,
-
-    #[msg("OnRe Offer token_in_mint does not match relayer_config.base_mint")]
-    OnreOfferTokenInMintMismatch,
-
-    #[msg("OnRe Offer token_out_mint does not match relayer_config.asset_mint")]
-    OnreOfferTokenOutMintMismatch,
-
-    #[msg(
-        "onre_offer account owner is not the OnRe program — handler refuses to read a foreign account as a pricing \
-         oracle"
-    )]
-    OnreOfferOwnerMismatch,
-
-    #[msg("onre_offer address does not match the deposit Offer PDA derived from (usdc_mint, onyc_mint)")]
-    OnreOfferAddressMismatch,
-
-    #[msg("MAX_SLIPPAGE_BPS is misconfigured (> 10_000) — refusing to compute a zero floor")]
-    OnreInvalidSlippageBps,
-
-    #[msg("Configured slippage_bps exceeds MAX_SLIPPAGE_BPS ceiling")]
-    SlippageBpsTooHigh,
-
     #[msg("Relayer ATA authority/delegate/close_authority was mutated by the swap CPI")]
     AtaAuthorityTampered,
-
-    #[msg("price_oracle account does not match relayer_config.price_oracle (or it is unset)")]
-    BadPriceOracle,
 
     #[msg("swap consumed an input amount different from the flow amount")]
     InputConsumedMismatch,
 
-    #[msg("swap output fell below the NAV-anchored slippage floor")]
+    #[msg("swap output fell below the user-signed min_swap_out floor")]
     OutputBelowFloor,
 
     #[msg("a swap account aliases relayer custody (fee_vault/config/flow or a relayer_authority-owned token account)")]
@@ -130,4 +97,28 @@ pub enum RelayerError {
 
     #[msg("recv_mint does not match the direction-selected config mint")]
     BadReceiveMint,
+
+    #[msg("refund attempted before received_slot + REFUND_TIMEOUT_SLOTS")]
+    RefundTooEarly,
+
+    #[msg("min_swap_out must be > 0 — a zero floor would leave the swap unprotected")]
+    ZeroMinSwapOut,
+
+    #[msg("pair_config PDA does not match the pair-derived address")]
+    BadConfig,
+
+    #[msg("arithmetic overflow")]
+    ArithmeticOverflow,
+
+    #[msg("only the relayer admin may create pairs")]
+    UnauthorizedAdmin,
+
+    #[msg("no pending admin to accept")]
+    NoPendingAdmin,
+
+    #[msg("signer does not match the pending admin")]
+    PendingAdminMismatch,
+
+    #[msg("proposed admin equals the current admin")]
+    PendingAdminIsCurrent,
 }

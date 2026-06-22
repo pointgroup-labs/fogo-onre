@@ -71,7 +71,7 @@ describe('classifyMissingFlow', () => {
     ;(ctx.metrics as unknown as { flowUnsweptObserved: { inc: () => void } }).flowUnsweptObserved = {
       inc: () => { unsweptIncCalls++ },
     }
-    expect(await classifyMissingFlow(ctx, 'withdraw', inboxItem)).toBeNull()
+    expect(await classifyMissingFlow(ctx, 'withdraw', ONYC_MINT, inboxItem)).toBeNull()
     expect(unsweptIncCalls).toBe(1)
   })
 
@@ -85,12 +85,12 @@ describe('classifyMissingFlow', () => {
       }
       return null
     })
-    expect(await classifyMissingFlow(ctx, 'withdraw', inboxItem)).toBe('Closed')
+    expect(await classifyMissingFlow(ctx, 'withdraw', ONYC_MINT, inboxItem)).toBe('Closed')
   })
 
   it('returns Pending (null) when the inbox-item does not exist yet', async () => {
     const ctx = makeCtx(() => null)
-    expect(await classifyMissingFlow(ctx, 'withdraw', inboxItem)).toBeNull()
+    expect(await classifyMissingFlow(ctx, 'withdraw', ONYC_MINT, inboxItem)).toBeNull()
   })
 
   it('returns Pending (null) on a transient inbox-item RPC failure', async () => {
@@ -98,6 +98,6 @@ describe('classifyMissingFlow', () => {
       connection: { getAccountInfo: async () => { throw new Error('rpc blip') } },
       log: silentLogger(),
     } as unknown as AdvanceContext
-    expect(await classifyMissingFlow(ctx, 'withdraw', inboxItem)).toBeNull()
+    expect(await classifyMissingFlow(ctx, 'withdraw', ONYC_MINT, inboxItem)).toBeNull()
   })
 })

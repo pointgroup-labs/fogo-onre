@@ -2,23 +2,71 @@
  * Program IDL in camelCase format in order to be used in JS/TS.
  *
  * Note that this is only a type helper and is not the actual IDL. The original
- * IDL can be found at `target/idl/fogo_onre_relayer.json`.
+ * IDL can be found at `target/idl/fogo_ntt_relayer.json`.
  */
-export type FogoOnreRelayer = {
+export type FogoNttRelayer = {
   "address": "onrenRKgX54qtWeK3cuaTBE71xx7dWMXn82ubH61vAp",
   "metadata": {
-    "name": "fogoOnreRelayer",
-    "version": "0.1.4",
+    "name": "fogoNttRelayer",
+    "version": "0.3.0",
     "spec": "0.1.0",
-    "description": "Fogo OnRe relayer — stateless PDA-custody bridge between OnRe and Wormhole NTT on Solana",
+    "description": "Cross-chain Wormhole NTT relayer with stateless PDA custody",
     "repository": "https://github.com/pointgroup-labs/fogo-onre"
   },
   "docs": [
-    "Cross-chain relayer: USDC.s on FOGO ↔ ONyc on Solana, both legs over",
-    "Wormhole NTT. Lets FOGO users hold OnRe's ONyc yield exposure without",
-    "leaving FOGO."
+    "Cross-chain relayer for a configured base/asset token pair over Wormhole",
+    "NTT. User-facing flows are permissionless; governance is config-gated."
   ],
   "instructions": [
+    {
+      "name": "acceptAdmin",
+      "docs": [
+        "The pending admin claims the global admin role (step 2)."
+      ],
+      "discriminator": [
+        112,
+        42,
+        45,
+        90,
+        116,
+        181,
+        13,
+        170
+      ],
+      "accounts": [
+        {
+          "name": "pendingAdmin",
+          "signer": true
+        },
+        {
+          "name": "globalConfig",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  108,
+                  111,
+                  98,
+                  97,
+                  108,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": []
+    },
     {
       "name": "acceptAuthority",
       "docs": [
@@ -42,7 +90,7 @@ export type FogoOnreRelayer = {
           "signer": true
         },
         {
-          "name": "relayerConfig",
+          "name": "pairConfig",
           "writable": true,
           "pda": {
             "seeds": [
@@ -64,9 +112,73 @@ export type FogoOnreRelayer = {
                   105,
                   103
                 ]
+              },
+              {
+                "kind": "account",
+                "path": "pair_config.base_mint",
+                "account": "pairConfig"
+              },
+              {
+                "kind": "account",
+                "path": "pair_config.asset_mint",
+                "account": "pairConfig"
               }
             ]
           }
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "bootstrap",
+      "docs": [
+        "One-time deploy bootstrap: create the global config + set the admin."
+      ],
+      "discriminator": [
+        101,
+        108,
+        31,
+        241,
+        5,
+        211,
+        182,
+        72
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "globalConfig",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  108,
+                  111,
+                  98,
+                  97,
+                  108,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "systemProgram",
+          "address": "11111111111111111111111111111111"
         }
       ],
       "args": []
@@ -76,9 +188,7 @@ export type FogoOnreRelayer = {
       "docs": [
         "Authority-only. `None` args leave fields unchanged. Fee decreases",
         "apply instantly; increases stage for `FEE_TIMELOCK_SLOTS` (~2 days)",
-        "then auto-promote on the next `configure` after the window.",
-        "`slippage_bps` (capped at `MAX_SLIPPAGE_BPS` via `validate`) applies",
-        "immediately to both swap legs' NAV floor."
+        "then auto-promote on the next `configure` after the window."
       ],
       "discriminator": [
         245,
@@ -95,11 +205,11 @@ export type FogoOnreRelayer = {
           "name": "authority",
           "signer": true,
           "relations": [
-            "relayerConfig"
+            "pairConfig"
           ]
         },
         {
-          "name": "relayerConfig",
+          "name": "pairConfig",
           "writable": true,
           "pda": {
             "seeds": [
@@ -121,6 +231,15 @@ export type FogoOnreRelayer = {
                   105,
                   103
                 ]
+              },
+              {
+                "kind": "account",
+                "path": "pair_config.base_mint",
+                "account": "pairConfig"
+              },
+              {
+                "kind": "account",
+                "path": "assetMint"
               }
             ]
           }
@@ -147,7 +266,7 @@ export type FogoOnreRelayer = {
         {
           "name": "assetMint",
           "relations": [
-            "relayerConfig"
+            "pairConfig"
           ]
         },
         {
@@ -235,25 +354,14 @@ export type FogoOnreRelayer = {
           "type": {
             "option": "pubkey"
           }
-        },
-        {
-          "name": "slippageBps",
-          "type": {
-            "option": "u16"
-          }
-        },
-        {
-          "name": "priceOracle",
-          "type": {
-            "option": "pubkey"
-          }
         }
       ]
     },
     {
       "name": "initialize",
       "docs": [
-        "One-time setup: config PDA + relayer-authority-owned ATAs."
+        "Create a pair's config PDA + relayer-owned ATAs. Admin-gated. NTT",
+        "program IDs are init-only safety pins."
       ],
       "discriminator": [
         175,
@@ -272,7 +380,35 @@ export type FogoOnreRelayer = {
           "signer": true
         },
         {
-          "name": "relayerConfig",
+          "name": "globalConfig",
+          "docs": [
+            "Admin gate: only `global_config.admin` may create pairs."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  108,
+                  111,
+                  98,
+                  97,
+                  108,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "pairConfig",
           "writable": true,
           "pda": {
             "seeds": [
@@ -294,6 +430,14 @@ export type FogoOnreRelayer = {
                   105,
                   103
                 ]
+              },
+              {
+                "kind": "account",
+                "path": "baseMint"
+              },
+              {
+                "kind": "account",
+                "path": "assetMint"
               }
             ]
           }
@@ -440,7 +584,7 @@ export type FogoOnreRelayer = {
         {
           "name": "feeVault",
           "docs": [
-            "Forbid `fee_vault == onyc_ata` to prevent self-transfer no-ops",
+            "Forbid `fee_vault == asset_ata` to prevent self-transfer no-ops",
             "that would commingle user funds with fees."
           ]
         },
@@ -464,14 +608,31 @@ export type FogoOnreRelayer = {
         {
           "name": "withdrawFeeBps",
           "type": "u16"
+        },
+        {
+          "name": "nttBaseProgram",
+          "type": "pubkey"
+        },
+        {
+          "name": "nttAssetProgram",
+          "type": "pubkey"
+        },
+        {
+          "name": "intentPrograms",
+          "type": {
+            "array": [
+              "pubkey",
+              2
+            ]
+          }
         }
       ]
     },
     {
       "name": "receive",
       "docs": [
-        "Redeem an inbound NTT VAA (deposit: base/USDC, withdraw: asset/ONyc),",
-        "create the `Flow` receipt. Direction selects the NTT manager + flow seed."
+        "Redeem an inbound NTT VAA and create the `Flow` receipt. Direction",
+        "selects the token side, NTT manager, and flow seed."
       ],
       "discriminator": [
         86,
@@ -490,30 +651,11 @@ export type FogoOnreRelayer = {
           "signer": true
         },
         {
-          "name": "relayerConfig",
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  114,
-                  101,
-                  108,
-                  97,
-                  121,
-                  101,
-                  114,
-                  95,
-                  99,
-                  111,
-                  110,
-                  102,
-                  105,
-                  103
-                ]
-              }
-            ]
-          }
+          "name": "pairConfig",
+          "docs": [
+            "Pair-bound via an in-handler self-assert (only `recv_mint` is present",
+            "here, so the config PDA can't be seed-checked in the Accounts struct)."
+          ]
         },
         {
           "name": "relayerAuthority",
@@ -606,29 +748,10 @@ export type FogoOnreRelayer = {
         },
         {
           "name": "userInboxAuthority",
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  117,
-                  115,
-                  101,
-                  114,
-                  95,
-                  105,
-                  110,
-                  98,
-                  111,
-                  120
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "userWallet"
-              }
-            ]
-          }
+          "docs": [
+            "`[USER_INBOX_SEED, user_wallet, min_swap_out]`;",
+            "owns and signs sweeps from user_inbox_ata."
+          ]
         },
         {
           "name": "userInboxAta",
@@ -720,27 +843,28 @@ export type FogoOnreRelayer = {
         {
           "name": "redeemAccountsLen",
           "type": "u8"
+        },
+        {
+          "name": "minSwapOut",
+          "type": "u64"
         }
       ]
     },
     {
-      "name": "send",
+      "name": "refund",
       "docs": [
-        "Route-agnostic outbound send. Routes on `flow.direction`: deposit",
-        "pushes asset (ONyc) out, withdraw pushes base (USDC) out, each via NTT",
-        "`transfer_lock` + atomic `release_wormhole_outbound`. Replaces",
-        "`lock_onyc` and `send_usdc_to_user`. `transfer_lock_account_count`",
-        "splits `remaining_accounts` between the two NTT CPIs."
+        "Permissionless timeout refund. For a stale `Received` flow, sends the",
+        "original token back to `flow.recipient` via NTT, then closes the flow."
       ],
       "discriminator": [
-        102,
+        2,
+        96,
+        183,
         251,
-        20,
-        187,
-        65,
-        75,
-        12,
-        69
+        63,
+        208,
+        46,
+        46
       ],
       "accounts": [
         {
@@ -749,7 +873,7 @@ export type FogoOnreRelayer = {
           "signer": true
         },
         {
-          "name": "relayerConfig",
+          "name": "pairConfig",
           "pda": {
             "seeds": [
               {
@@ -770,6 +894,14 @@ export type FogoOnreRelayer = {
                   105,
                   103
                 ]
+              },
+              {
+                "kind": "account",
+                "path": "baseMint"
+              },
+              {
+                "kind": "account",
+                "path": "assetMint"
               }
             ]
           }
@@ -796,13 +928,13 @@ export type FogoOnreRelayer = {
         {
           "name": "baseMint",
           "relations": [
-            "relayerConfig"
+            "pairConfig"
           ]
         },
         {
           "name": "assetMint",
           "relations": [
-            "relayerConfig"
+            "pairConfig"
           ]
         },
         {
@@ -942,26 +1074,32 @@ export type FogoOnreRelayer = {
       ]
     },
     {
-      "name": "swap",
+      "name": "send",
       "docs": [
-        "Permissionless, route-agnostic swap. Routes on `flow.direction`:",
-        "deposit swaps base→asset (fee from the asset output), withdraw swaps",
-        "asset→base (fee from the asset input). Replaces `swap_usdc_to_onyc`",
-        "and `swap_onyc_to_usdc`."
+        "Route-agnostic outbound send. Routes on `flow.direction`: deposit",
+        "pushes asset out, withdraw pushes base out, each via NTT `transfer_lock`",
+        "+ atomic `release_wormhole_outbound`.",
+        "`transfer_lock_account_count` splits `remaining_accounts` between the",
+        "two NTT CPIs."
       ],
       "discriminator": [
-        248,
-        198,
-        158,
-        145,
-        225,
-        117,
-        135,
-        200
+        102,
+        251,
+        20,
+        187,
+        65,
+        75,
+        12,
+        69
       ],
       "accounts": [
         {
-          "name": "relayerConfig",
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "pairConfig",
           "pda": {
             "seeds": [
               {
@@ -982,6 +1120,290 @@ export type FogoOnreRelayer = {
                   105,
                   103
                 ]
+              },
+              {
+                "kind": "account",
+                "path": "baseMint"
+              },
+              {
+                "kind": "account",
+                "path": "assetMint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "relayerAuthority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  108,
+                  97,
+                  121,
+                  101,
+                  114
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "baseMint",
+          "relations": [
+            "pairConfig"
+          ]
+        },
+        {
+          "name": "assetMint",
+          "relations": [
+            "pairConfig"
+          ]
+        },
+        {
+          "name": "baseAta",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "relayerAuthority"
+              },
+              {
+                "kind": "account",
+                "path": "tokenProgram"
+              },
+              {
+                "kind": "account",
+                "path": "baseMint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "assetAta",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "relayerAuthority"
+              },
+              {
+                "kind": "account",
+                "path": "tokenProgram"
+              },
+              {
+                "kind": "account",
+                "path": "assetMint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "nttInboxItem"
+        },
+        {
+          "name": "flow",
+          "writable": true
+        },
+        {
+          "name": "rentDestination",
+          "writable": true
+        },
+        {
+          "name": "tokenProgram"
+        }
+      ],
+      "args": [
+        {
+          "name": "transferLockAccountCount",
+          "type": "u8"
+        }
+      ]
+    },
+    {
+      "name": "setAdmin",
+      "docs": [
+        "Propose a new global admin (step 1 of two-step rotation)."
+      ],
+      "discriminator": [
+        251,
+        163,
+        0,
+        52,
+        91,
+        194,
+        187,
+        92
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "globalConfig"
+          ]
+        },
+        {
+          "name": "globalConfig",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  108,
+                  111,
+                  98,
+                  97,
+                  108,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "newAdmin",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "swap",
+      "docs": [
+        "Permissionless, route-agnostic swap. Routes on `flow.direction`:",
+        "deposit swaps base→asset (fee from the asset output), withdraw swaps",
+        "asset→base (fee from the asset input)."
+      ],
+      "discriminator": [
+        248,
+        198,
+        158,
+        145,
+        225,
+        117,
+        135,
+        200
+      ],
+      "accounts": [
+        {
+          "name": "pairConfig",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  108,
+                  97,
+                  121,
+                  101,
+                  114,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "baseMint"
+              },
+              {
+                "kind": "account",
+                "path": "assetMint"
               }
             ]
           }
@@ -1011,13 +1433,13 @@ export type FogoOnreRelayer = {
         {
           "name": "baseMint",
           "relations": [
-            "relayerConfig"
+            "pairConfig"
           ]
         },
         {
           "name": "assetMint",
           "relations": [
-            "relayerConfig"
+            "pairConfig"
           ]
         },
         {
@@ -1137,11 +1559,11 @@ export type FogoOnreRelayer = {
         {
           "name": "feeVault",
           "docs": [
-            "Fee destination — always denominated in the asset (ONyc) token."
+            "Fee destination — always denominated in the asset token."
           ],
           "writable": true,
           "relations": [
-            "relayerConfig"
+            "pairConfig"
           ]
         },
         {
@@ -1152,21 +1574,15 @@ export type FogoOnreRelayer = {
           "writable": true
         },
         {
-          "name": "onreOffer",
-          "docs": [
-            "it as the OnRe Offer PDA via read_offer_nav_price."
-          ]
-        },
-        {
           "name": "swapProgram",
           "docs": [
-            "not program identity."
+            "delegation, not program identity."
           ]
         },
         {
           "name": "swapDelegate",
           "docs": [
-            "`relayer_authority` as a sentinel for owner-signed routers (OnRe)."
+            "`relayer_authority` as a sentinel for owner-signed routers."
           ]
         },
         {
@@ -1196,16 +1612,29 @@ export type FogoOnreRelayer = {
       ]
     },
     {
-      "name": "relayerConfig",
+      "name": "globalConfig",
       "discriminator": [
-        116,
-        239,
-        42,
-        132,
-        218,
-        154,
-        194,
-        20
+        149,
+        8,
+        156,
+        202,
+        160,
+        252,
+        176,
+        217
+      ]
+    },
+    {
+      "name": "pairConfig",
+      "discriminator": [
+        119,
+        167,
+        13,
+        129,
+        136,
+        228,
+        151,
+        77
       ]
     }
   ],
@@ -1221,6 +1650,19 @@ export type FogoOnreRelayer = {
         171,
         20,
         177
+      ]
+    },
+    {
+      "name": "refunded",
+      "discriminator": [
+        35,
+        103,
+        149,
+        246,
+        196,
+        123,
+        221,
+        99
       ]
     },
     {
@@ -1324,7 +1766,7 @@ export type FogoOnreRelayer = {
     {
       "code": 6014,
       "name": "feeVaultAliasesUserAta",
-      "msg": "fee_vault must not alias the relayer's ONyc operating ATA"
+      "msg": "fee_vault must not alias the relayer's asset ATA"
     },
     {
       "code": 6015,
@@ -1354,7 +1796,7 @@ export type FogoOnreRelayer = {
     {
       "code": 6020,
       "name": "unexpectedFogoSender",
-      "msg": "NTT VAA's NttManagerMessage.sender is not the intent_transfer setter PDA — deposit must originate via intent_transfer"
+      "msg": "NTT VAA's NttManagerMessage.sender is not the intent_transfer setter PDA — deposit must originate via \\\n         intent_transfer"
     },
     {
       "code": 6021,
@@ -1373,88 +1815,78 @@ export type FogoOnreRelayer = {
     },
     {
       "code": 6024,
-      "name": "onreNoActiveVector",
-      "msg": "No active OnRe pricing vector for the current clock"
-    },
-    {
-      "code": 6025,
-      "name": "onreNavOverflow",
-      "msg": "Overflow in OnRe NAV computation"
-    },
-    {
-      "code": 6026,
-      "name": "onreOfferTooShort",
-      "msg": "OnRe Offer account data is shorter than the pinned layout"
-    },
-    {
-      "code": 6027,
-      "name": "onreOfferTokenInMintMismatch",
-      "msg": "OnRe Offer token_in_mint does not match relayer_config.usdc_mint"
-    },
-    {
-      "code": 6028,
-      "name": "onreOfferTokenOutMintMismatch",
-      "msg": "OnRe Offer token_out_mint does not match relayer_config.onyc_mint"
-    },
-    {
-      "code": 6029,
-      "name": "onreOfferOwnerMismatch",
-      "msg": "onre_offer account owner is not the OnRe program — handler refuses to read a foreign account as a pricing oracle"
-    },
-    {
-      "code": 6030,
-      "name": "onreOfferAddressMismatch",
-      "msg": "onre_offer address does not match the deposit Offer PDA derived from (usdc_mint, onyc_mint)"
-    },
-    {
-      "code": 6031,
-      "name": "onreInvalidSlippageBps",
-      "msg": "MAX_SLIPPAGE_BPS is misconfigured (> 10_000) — refusing to compute a zero floor"
-    },
-    {
-      "code": 6032,
-      "name": "slippageBpsTooHigh",
-      "msg": "Configured slippage_bps exceeds MAX_SLIPPAGE_BPS ceiling"
-    },
-    {
-      "code": 6033,
       "name": "ataAuthorityTampered",
       "msg": "Relayer ATA authority/delegate/close_authority was mutated by the swap CPI"
     },
     {
-      "code": 6034,
-      "name": "badPriceOracle",
-      "msg": "price_oracle account does not match relayer_config.price_oracle (or it is unset)"
-    },
-    {
-      "code": 6035,
+      "code": 6025,
       "name": "inputConsumedMismatch",
       "msg": "swap consumed an input amount different from the flow amount"
     },
     {
-      "code": 6036,
+      "code": 6026,
       "name": "outputBelowFloor",
-      "msg": "swap output fell below the NAV-anchored slippage floor"
+      "msg": "swap output fell below the user-signed min_swap_out floor"
     },
     {
-      "code": 6037,
+      "code": 6027,
       "name": "swapAccountNotAllowed",
       "msg": "a swap account aliases relayer custody (fee_vault/config/flow or a relayer_authority-owned token account)"
     },
     {
-      "code": 6038,
+      "code": 6028,
       "name": "relayerAuthorityTampered",
       "msg": "swap CPI drained, reassigned, or reallocated the relayer_authority PDA"
     },
     {
-      "code": 6039,
+      "code": 6029,
       "name": "badNttProgram",
       "msg": "ntt_program / transceiver owner does not match the direction-selected NTT manager"
     },
     {
-      "code": 6040,
+      "code": 6030,
       "name": "badReceiveMint",
       "msg": "recv_mint does not match the direction-selected config mint"
+    },
+    {
+      "code": 6031,
+      "name": "refundTooEarly",
+      "msg": "refund attempted before received_slot + REFUND_TIMEOUT_SLOTS"
+    },
+    {
+      "code": 6032,
+      "name": "zeroMinSwapOut",
+      "msg": "min_swap_out must be > 0 — a zero floor would leave the swap unprotected"
+    },
+    {
+      "code": 6033,
+      "name": "badConfig",
+      "msg": "pair_config PDA does not match the pair-derived address"
+    },
+    {
+      "code": 6034,
+      "name": "arithmeticOverflow",
+      "msg": "arithmetic overflow"
+    },
+    {
+      "code": 6035,
+      "name": "unauthorizedAdmin",
+      "msg": "only the relayer admin may create pairs"
+    },
+    {
+      "code": 6036,
+      "name": "noPendingAdmin",
+      "msg": "no pending admin to accept"
+    },
+    {
+      "code": 6037,
+      "name": "pendingAdminMismatch",
+      "msg": "signer does not match the pending admin"
+    },
+    {
+      "code": 6038,
+      "name": "pendingAdminIsCurrent",
+      "msg": "proposed admin equals the current admin"
     }
   ],
   "types": [
@@ -1521,6 +1953,21 @@ export type FogoOnreRelayer = {
                 "name": "direction"
               }
             }
+          },
+          {
+            "name": "minSwapOut",
+            "docs": [
+              "User-signed swap floor (output-token atomic units), bound via the",
+              "min-bearing inbox PDA. `swap` enforces `out_received >= min_swap_out`."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "receivedSlot",
+            "docs": [
+              "`Clock::slot` at receive; `refund` timeout anchor."
+            ],
+            "type": "u64"
           }
         ]
       }
@@ -1535,6 +1982,144 @@ export type FogoOnreRelayer = {
           },
           {
             "name": "swapped"
+          }
+        ]
+      }
+    },
+    {
+      "name": "globalConfig",
+      "docs": [
+        "Global singleton (PDA `[GlobalConfig::SEED]`)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "admin",
+            "type": "pubkey"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "reserved",
+            "type": {
+              "array": [
+                "u8",
+                64
+              ]
+            }
+          },
+          {
+            "name": "pendingAdmin",
+            "docs": [
+              "Two-step rotation target: `set_admin` proposes, `accept_admin` promotes."
+            ],
+            "type": {
+              "option": "pubkey"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "pairConfig",
+      "docs": [
+        "Config for one token pair (PDA `[PairConfig::SEED, base_mint, asset_mint]`).",
+        "`authority` only gates governance; user flows are permissionless."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "baseMint",
+            "type": "pubkey"
+          },
+          {
+            "name": "assetMint",
+            "type": "pubkey"
+          },
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "feeVault",
+            "type": "pubkey"
+          },
+          {
+            "name": "nttBaseProgram",
+            "type": "pubkey"
+          },
+          {
+            "name": "nttAssetProgram",
+            "type": "pubkey"
+          },
+          {
+            "name": "intentPrograms",
+            "docs": [
+              "Programs allowed to originate inbound VAAs. `receive` derives each",
+              "entry's setter PDA and matches the VAA sender; both slots are equally",
+              "authoritative (no primary/fallback), changeable only by a fresh init."
+            ],
+            "type": {
+              "array": [
+                "pubkey",
+                2
+              ]
+            }
+          },
+          {
+            "name": "depositFeeBps",
+            "type": "u16"
+          },
+          {
+            "name": "withdrawFeeBps",
+            "type": "u16"
+          },
+          {
+            "name": "relayerAuthorityBump",
+            "type": "u8"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "reserved",
+            "docs": [
+              "Headroom for future fixed-size fields without another migration."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                64
+              ]
+            }
+          },
+          {
+            "name": "pendingAuthority",
+            "docs": [
+              "Promoted to `authority` by `accept_authority` (two-step handoff)."
+            ],
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "pendingFee",
+            "docs": [
+              "Staged fee *increase*, auto-promoted on next `configure` once",
+              "`ready_slot` elapses. Decreases bypass this."
+            ],
+            "type": {
+              "option": {
+                "defined": {
+                  "name": "pendingFee"
+                }
+              }
+            }
           }
         ]
       }
@@ -1599,102 +2184,33 @@ export type FogoOnreRelayer = {
       }
     },
     {
-      "name": "relayerConfig",
-      "docs": [
-        "`authority` gates governance only; flow instructions are permissionless.",
-        "",
-        "Layout discipline: all fixed-size fields (including `max_slippage_bps` and the",
-        "`reserved` block) come before the two variable-length `Option`s, which stay",
-        "last. Future additive fields are carved out of `reserved` — same total size,",
-        "so they need no realloc and no migration (old zero bytes read as the new",
-        "field's default)."
-      ],
+      "name": "refunded",
       "type": {
         "kind": "struct",
         "fields": [
           {
-            "name": "baseMint",
+            "name": "flow",
             "type": "pubkey"
           },
           {
-            "name": "assetMint",
+            "name": "nttInboxItem",
             "type": "pubkey"
           },
           {
-            "name": "authority",
+            "name": "recipient",
             "type": "pubkey"
           },
           {
-            "name": "feeVault",
-            "type": "pubkey"
-          },
-          {
-            "name": "depositFeeBps",
-            "type": "u16"
-          },
-          {
-            "name": "withdrawFeeBps",
-            "type": "u16"
-          },
-          {
-            "name": "maxSlippageBps",
-            "docs": [
-              "Authority-tunable NAV slippage tolerance applied on both swap legs.",
-              "Hard-capped at `MAX_SLIPPAGE_BPS` by `validate`."
-            ],
-            "type": "u16"
-          },
-          {
-            "name": "relayerAuthorityBump",
-            "type": "u8"
-          },
-          {
-            "name": "bump",
-            "type": "u8"
-          },
-          {
-            "name": "priceOracle",
-            "docs": [
-              "Config-pinned OnRe `Offer` PDA — the swap value-floor oracle.",
-              "Zeroed in legacy accounts ⇒ `Pubkey::default()` ⇒ fail-closed",
-              "(`BadPriceOracle`) until `configure` sets it."
-            ],
-            "type": "pubkey"
-          },
-          {
-            "name": "reserved",
-            "docs": [
-              "Headroom for future fixed-size fields without another migration."
-            ],
+            "name": "direction",
             "type": {
-              "array": [
-                "u8",
-                96
-              ]
-            }
-          },
-          {
-            "name": "pendingAuthority",
-            "docs": [
-              "Promoted to `authority` by `accept_authority` (two-step handoff)."
-            ],
-            "type": {
-              "option": "pubkey"
-            }
-          },
-          {
-            "name": "pendingFee",
-            "docs": [
-              "Staged fee *increase*, auto-promoted on next `configure` once",
-              "`ready_slot` elapses. Decreases bypass this."
-            ],
-            "type": {
-              "option": {
-                "defined": {
-                  "name": "pendingFee"
-                }
+              "defined": {
+                "name": "direction"
               }
             }
+          },
+          {
+            "name": "amount",
+            "type": "u64"
           }
         ]
       }
@@ -1770,55 +2286,6 @@ export type FogoOnreRelayer = {
           }
         ]
       }
-    }
-  ],
-  "constants": [
-    {
-      "name": "intentTransferProgramId",
-      "docs": [
-        "SECURITY-CRITICAL CROSS-PROGRAM PIN (deposit flow trust chain):",
-        "1. webapp signs an intent → recipient = per-user inbox PDA on Solana",
-        "2. FOGO `intent_transfer.bridge_ntt_tokens` bridges via NTT;",
-        "the from-ATA owner is the singleton `[INTENT_TRANSFER_SETTER_SEED]`",
-        "PDA under `INTENT_TRANSFER_PROGRAM_ID`",
-        "3. that PDA surfaces as `NttManagerMessage.sender` on the VAA",
-        "4. `receive` requires `sender == intent_transfer setter PDA`,",
-        "rejecting any direct (non-intent) NTT bridge to the same recipient",
-        "",
-        "If `intent_transfer` rotates its setter seed OR redeploys at a new program",
-        "ID, this relayer must redeploy in lockstep. DO NOT make these",
-        "runtime-rotatable via `RelayerConfig` — a stolen authority key could",
-        "otherwise redirect the entire deposit flow."
-      ],
-      "type": "pubkey",
-      "value": "Xfry4dW9m42ncAqm8LyEnyS5V6xu5DSJTMRQLiGkARD"
-    },
-    {
-      "name": "nttOnycProgramId",
-      "type": "pubkey",
-      "value": "nttpna5vXW7BN2Aa4AfTbkCncJWTEoBsnWvjS87Xgsd"
-    },
-    {
-      "name": "nttUsdcProgramId",
-      "type": "pubkey",
-      "value": "nttu74CdAmsErx5daJVCQNoDZujswFrskMzonoZSdGk"
-    },
-    {
-      "name": "onreIntentProgramId",
-      "docs": [
-        "SECURITY-CRITICAL CROSS-PROGRAM PIN — second member of the permanent",
-        "{OnRe, Fogo} setter allowlist. This is the OnRe fork of Fogo's",
-        "`intent_transfer` (same source, `declare_id!` only). Compile-time",
-        "constant by design: a runtime-rotatable pin would let a stolen",
-        "authority redirect deposit/redeem flow (see the Fogo pin doc above)."
-      ],
-      "type": "pubkey",
-      "value": "inTFf5S7ZtYr8SkwGG85mjDwAyJwjqEPdH2p2nuyrL9"
-    },
-    {
-      "name": "onreProgramId",
-      "type": "pubkey",
-      "value": "onreuGhHHgVzMWSkj2oQDLDtvvGvoepBPkqyaubFcwe"
     }
   ]
 };

@@ -10,12 +10,12 @@ import { useSettings } from '@/store/settings'
 import { getReadOnlyRelayerClient } from '@/utils/connections'
 
 /**
- * Source of truth for the current `RelayerConfig` snapshot the UI quotes
+ * Source of truth for the current `PairConfig` snapshot the UI quotes
  * against.
  *
  * Live data path:
  *   - `depositFeeBps` / `withdrawFeeBps`: read from on-chain
- *     `RelayerConfig` via `RelayerClient.fetchConfig()` (Solana mainnet,
+ *     `PairConfig` via `RelayerClient.fetchConfig()` (Solana mainnet,
  *     u16 → JS number). Fetched via `useSuspenseQuery`; failure bubbles
  *     to the nearest `<ErrorBoundary>` rather than living as a state field.
  *   - `onycPrice` / `price.priceScale`: read from the OnRe Offer account

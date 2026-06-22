@@ -5,7 +5,7 @@ import { isEstablished, useSession } from '@fogo/sessions-sdk-react'
 import { useIsRestoring } from '@tanstack/react-query'
 import { ArrowDownLeft, ArrowUpRight, Check, ChevronDown, ChevronRight, ChevronUp, HelpCircle, Inbox, Loader2 } from 'lucide-react'
 import { useRouter } from 'next/navigation'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -27,14 +27,14 @@ import { UNCONFIRMED_AFTER_MS } from '@/lib/bridgeHistory/displaySla'
  */
 const COLLAPSED_ROWS = 5
 
+/** Stable no-op subscribe for the hydration-gate `useSyncExternalStore`. */
+const NOOP_SUBSCRIBE = () => () => {}
+
 export default function BridgeHistory() {
-  // Same hydration pattern as PendingTxList: defer the restoring branch
-  // to a post-mount render so the first client paint matches the SSR
+  // Hydration gate (idiomatic useSyncExternalStore form): false on the server
+  // + first client render, true after — first client paint matches the SSR
   // empty render.
-  const [mounted, setMounted] = useState(false)
-  useEffect(() => {
-    setMounted(true)
-  }, [])
+  const mounted = useSyncExternalStore(NOOP_SUBSCRIBE, () => true, () => false)
   const restoring = useIsRestoring()
 
   // 60s ticker drives relative-time labels in every row from a single

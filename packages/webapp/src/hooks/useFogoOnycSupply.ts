@@ -19,7 +19,7 @@ import { getFogoConnection } from '@/utils/connections'
  * the caller (ProtocolStats) renders "—" rather than a misleading zero.
  *
  * Why a non-suspense query: the ProtocolStats card uses Suspense for the
- * RelayerConfig fetch, but layering a second suspense boundary on top of
+ * PairConfig fetch, but layering a second suspense boundary on top of
  * a slower FOGO RPC would freeze the whole strip until TVL resolved.
  * Falling through to "—" lets APY/NAV render at the same time and TVL
  * pop in when ready.

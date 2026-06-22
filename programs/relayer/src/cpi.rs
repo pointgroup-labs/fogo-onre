@@ -16,12 +16,9 @@ pub const SPL_TOKEN_APPROVE_IX_TAG: u8 = 4;
 pub const SPL_TOKEN_REVOKE_IX_TAG: u8 = 5;
 
 /// Invoke an external program signed by the relayer authority PDA.
-///
-/// `authority = Some(info)`: the PDA must appear in `remaining_accounts`;
-/// helper forces `is_signer = true` on its slot, errors if absent.
-/// `authority = None`: passthrough — flags forwarded as-is. Used for CPIs
-/// that don't reserve a signer slot for the relayer authority (e.g. NTT
-/// `release_wormhole_outbound`).
+/// `Some(info)`: PDA must appear in `remaining_accounts`; its slot is forced
+/// `is_signer`, errors if absent. `None`: passthrough for CPIs with no relayer
+/// signer slot (e.g. NTT `release_wormhole_outbound`).
 pub fn invoke_relayer_signed<'info, A: AnchorSerialize>(
     program_id: Pubkey,
     discriminator: &[u8],
@@ -126,12 +123,9 @@ pub fn approve_ntt_session_authority<'info>(
     Ok(())
 }
 
-/// PDA-signed SPL `Approve` granting `delegate` permission to spend exactly
-/// `amount` from `source_ata`. Used by the unified `swap` handler to bound a
-/// third-party swap program's reach: the swap CPI fires under plain `invoke` (no
-/// PDA-signer propagation), and SPL auto-clears the delegation when the
-/// approved amount hits zero — so as long as the swap consumes exactly
-/// `amount`, no explicit `Revoke` is needed.
+/// PDA-signed SPL `Approve` bounding `delegate`'s reach to exactly `amount`
+/// from `source_ata`. SPL auto-clears the delegation at zero, so no explicit
+/// `Revoke` is needed when the swap consumes exactly `amount`.
 #[allow(clippy::too_many_arguments)]
 pub fn approve_swap_delegate<'info>(
     token_program: &AccountInfo<'info>,
@@ -167,9 +161,9 @@ pub fn approve_swap_delegate<'info>(
     Ok(())
 }
 
-/// Clear any delegate on a relayer-owned ATA (PDA-signed). Idempotent: an
-/// account with no delegate stays `None`. Run before the swap CPI so a stale
-/// pre-existing approval can't DoS the post-CPI pristine-ATA assert.
+/// Clear any delegate on a relayer-owned ATA (PDA-signed, idempotent). Run
+/// before the swap CPI so a stale approval can't DoS the post-CPI
+/// pristine-ATA assert.
 pub fn revoke_relayer_delegate<'info>(
     token_program: &AccountInfo<'info>,
     source_ata: &AccountInfo<'info>,

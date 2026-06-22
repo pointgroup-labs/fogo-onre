@@ -1,5 +1,6 @@
 'use client'
 
+import { DEFAULT_SLIPPAGE_TOLERANCE_BPS } from '@fogo-onre/sdk'
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
@@ -28,11 +29,20 @@ function resolveSolanaRpcDefault(): string {
 }
 const SOLANA_RPC_DEFAULT = resolveSolanaRpcDefault()
 
+/**
+ * UI bound on the user-set swap-floor tolerance (50%). A too-tight value
+ * just reverts on-chain (fail-safe); this cap stops fat-finger 100%+ entries.
+ */
+export const MAX_SLIPPAGE_TOLERANCE_BPS = 5_000
+
 export interface SettingsState {
   fogoRpcUrl: string | null
   solanaRpcUrl: string | null
+  /** Swap-floor tolerance in bps; `null` falls through to the SDK default. */
+  slippageBps: number | null
   setFogoRpcUrl: (url: string | null) => void
   setSolanaRpcUrl: (url: string | null) => void
+  setSlippageBps: (bps: number | null) => void
 }
 
 const STORAGE_KEY = 'fogo-onre.settings.v1'
@@ -49,19 +59,34 @@ function normalize(url: string | null): string | null {
   return trimmed === '' ? null : trimmed
 }
 
+/** Clamp to `[0, MAX_SLIPPAGE_TOLERANCE_BPS]`; non-finite/empty → `null` (default). */
+function normalizeSlippage(bps: number | null): number | null {
+  if (bps === null || !Number.isFinite(bps)) {
+    return null
+  }
+  const rounded = Math.round(bps)
+  if (rounded < 0) {
+    return 0
+  }
+  return rounded > MAX_SLIPPAGE_TOLERANCE_BPS ? MAX_SLIPPAGE_TOLERANCE_BPS : rounded
+}
+
 export const useSettingsStore = create<SettingsState>()(
   persist(
     set => ({
       fogoRpcUrl: null,
       solanaRpcUrl: null,
+      slippageBps: null,
       setFogoRpcUrl: url => set({ fogoRpcUrl: normalize(url) }),
       setSolanaRpcUrl: url => set({ solanaRpcUrl: normalize(url) }),
+      setSlippageBps: bps => set({ slippageBps: normalizeSlippage(bps) }),
     }),
     {
       name: STORAGE_KEY,
       partialize: state => ({
         fogoRpcUrl: state.fogoRpcUrl,
         solanaRpcUrl: state.solanaRpcUrl,
+        slippageBps: state.slippageBps,
       }),
     },
   ),
@@ -72,6 +97,8 @@ export interface ResolvedSettings {
   fogoRpcUrl: string
   /** Effective Solana RPC: user override → env → JPool. */
   solanaRpcUrl: string
+  /** Effective swap-floor tolerance: user override → SDK default. */
+  slippageBps: number
   /**
    * Env/hardcoded default — what the user gets when they pick "Default"
    * in the drawer. The drawer surfaces this in the preset label.
@@ -79,6 +106,8 @@ export interface ResolvedSettings {
   fogoRpcDefault: string
   /** Env/hardcoded default. */
   solanaRpcDefault: string
+  /** SDK default slippage — the drawer surfaces it as the placeholder. */
+  slippageDefault: number
 }
 
 /**
@@ -90,11 +119,14 @@ export interface ResolvedSettings {
 export function useSettings(): ResolvedSettings {
   const fogoOverride = useSettingsStore(s => s.fogoRpcUrl)
   const solanaOverride = useSettingsStore(s => s.solanaRpcUrl)
+  const slippageOverride = useSettingsStore(s => s.slippageBps)
   return {
     fogoRpcUrl: fogoOverride ?? FOGO_RPC_DEFAULT,
     solanaRpcUrl: solanaOverride ?? SOLANA_RPC_DEFAULT,
+    slippageBps: slippageOverride ?? DEFAULT_SLIPPAGE_TOLERANCE_BPS,
     fogoRpcDefault: FOGO_RPC_DEFAULT,
     solanaRpcDefault: SOLANA_RPC_DEFAULT,
+    slippageDefault: DEFAULT_SLIPPAGE_TOLERANCE_BPS,
   }
 }
 
@@ -104,7 +136,9 @@ export function getSettings(): ResolvedSettings {
   return {
     fogoRpcUrl: s.fogoRpcUrl ?? FOGO_RPC_DEFAULT,
     solanaRpcUrl: s.solanaRpcUrl ?? SOLANA_RPC_DEFAULT,
+    slippageBps: s.slippageBps ?? DEFAULT_SLIPPAGE_TOLERANCE_BPS,
     fogoRpcDefault: FOGO_RPC_DEFAULT,
     solanaRpcDefault: SOLANA_RPC_DEFAULT,
+    slippageDefault: DEFAULT_SLIPPAGE_TOLERANCE_BPS,
   }
 }

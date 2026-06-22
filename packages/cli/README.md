@@ -33,16 +33,27 @@ Rebuild whenever you edit CLI or SDK sources.
 
 ### `relayer show`
 
-Read-only. Dumps `RelayerConfig` and the relayer authority PDA. No keypair required.
+Read-only. Dumps the `GlobalConfig` admin singleton, the `PairConfig`, and
+the relayer authority PDA. No keypair required.
 
 ```bash
 fogo-onre relayer show
 ```
 
+### `relayer bootstrap`
+
+One-time creation of the `GlobalConfig` admin singleton. Must run before
+`initialize`. **Dry-run by default**; pass `--confirm` to broadcast.
+
+```bash
+fogo-onre relayer bootstrap --confirm
+```
+
 ### `relayer initialize`
 
-One-time creation of `RelayerConfig` + relayer-owned ATAs. **Dry-run by
-default**; pass `--confirm` to broadcast.
+Per-pair creation of a `PairConfig` + relayer-owned ATAs. Admin-gated —
+requires `bootstrap` first. **Dry-run by default**; pass `--confirm` to
+broadcast.
 
 Optional flags with sensible defaults:
 
@@ -70,9 +81,20 @@ spl-token --url mainnet-beta create-account oNyCm1QsAatj3ckaEwZjtAPWvstPn3Zm5MAY
 
 …or pass `--fee-vault <existing-onyc-account>`.
 
+### `relayer set-admin` / `relayer accept-admin`
+
+Two-step global admin rotation. The current admin nominates a successor with
+`set-admin`; the nominee claims it with `accept-admin`. Dry-run by default;
+pass `--confirm` to broadcast.
+
+```bash
+fogo-onre relayer set-admin --new-admin <pubkey> --confirm
+fogo-onre relayer accept-admin --confirm
+```
+
 ### `relayer configure`
 
-Authority-only mutation of `RelayerConfig`. Dry-run by default.
+Authority-only mutation of `PairConfig`. Dry-run by default.
 
 ```bash
 # Rotate fee_vault

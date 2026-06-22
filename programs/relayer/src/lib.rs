@@ -8,7 +8,6 @@ pub mod error;
 pub mod events;
 pub mod instructions;
 pub mod ntt;
-pub mod onre;
 pub mod state;
 
 use instructions::*;
@@ -17,31 +16,74 @@ use crate::state::Direction;
 
 declare_id!("onrenRKgX54qtWeK3cuaTBE71xx7dWMXn82ubH61vAp");
 
-/// Cross-chain relayer: USDC.s on FOGO ↔ ONyc on Solana, both legs over
-/// Wormhole NTT. Lets FOGO users hold OnRe's ONyc yield exposure without
-/// leaving FOGO.
+#[cfg(not(feature = "no-entrypoint"))]
+pub mod security {
+    use solana_security_txt::security_txt;
+    security_txt! {
+        name: "FogoOnre",
+        project_url: "https://github.com/pointgroup-labs/fogo-onre",
+        contacts: "email:info@pointgroup.one",
+        policy: "https://github.com/pointgroup-labs/fogo-onre/blob/main/SECURITY.md",
+        preferred_languages: "en",
+        source_code: "https://github.com/pointgroup-labs/fogo-onre"
+    }
+}
+
+/// Cross-chain relayer for a configured base/asset token pair over Wormhole
+/// NTT. User-facing flows are permissionless; governance is config-gated.
 #[program]
-pub mod fogo_onre_relayer {
+pub mod fogo_ntt_relayer {
     use super::*;
 
-    /// One-time setup: config PDA + relayer-authority-owned ATAs.
-    pub fn initialize(ctx: Context<Initialize>, deposit_fee_bps: u16, withdraw_fee_bps: u16) -> Result<()> {
-        initialize::handler(ctx, deposit_fee_bps, withdraw_fee_bps)
+    /// One-time deploy bootstrap: create the global config + set the admin.
+    pub fn bootstrap(ctx: Context<Bootstrap>) -> Result<()> {
+        bootstrap::handler(ctx)
     }
 
-    /// Redeem an inbound NTT VAA (deposit: base/USDC, withdraw: asset/ONyc),
-    /// create the `Flow` receipt. Direction selects the NTT manager + flow seed.
+    /// Create a pair's config PDA + relayer-owned ATAs. Admin-gated. NTT
+    /// program IDs are init-only safety pins.
+    pub fn initialize(
+        ctx: Context<Initialize>,
+        deposit_fee_bps: u16,
+        withdraw_fee_bps: u16,
+        ntt_base_program: Pubkey,
+        ntt_asset_program: Pubkey,
+        intent_programs: [Pubkey; 2],
+    ) -> Result<()> {
+        initialize::handler(
+            ctx,
+            deposit_fee_bps,
+            withdraw_fee_bps,
+            ntt_base_program,
+            ntt_asset_program,
+            intent_programs,
+        )
+    }
+
+    /// Propose a new global admin (step 1 of two-step rotation).
+    pub fn set_admin(ctx: Context<SetAdmin>, new_admin: Pubkey) -> Result<()> {
+        admin::set_admin(ctx, new_admin)
+    }
+
+    /// The pending admin claims the global admin role (step 2).
+    pub fn accept_admin(ctx: Context<AcceptAdmin>) -> Result<()> {
+        admin::accept_admin(ctx)
+    }
+
+    /// Redeem an inbound NTT VAA and create the `Flow` receipt. Direction
+    /// selects the token side, NTT manager, and flow seed.
     pub fn receive<'info>(
         ctx: Context<'info, Receive<'info>>,
         direction: Direction,
         redeem_accounts_len: u8,
+        min_swap_out: u64,
     ) -> Result<()> {
-        instructions::receive::handler(ctx, direction, redeem_accounts_len)
+        instructions::receive::handler(ctx, direction, redeem_accounts_len, min_swap_out)
     }
 
     /// Route-agnostic outbound send. Routes on `flow.direction`: deposit
-    /// pushes asset (ONyc) out, withdraw pushes base (USDC) out, each via NTT
-    /// `transfer_lock` + atomic `release_wormhole_outbound`.
+    /// pushes asset out, withdraw pushes base out, each via NTT `transfer_lock`
+    /// + atomic `release_wormhole_outbound`.
     /// `transfer_lock_account_count` splits `remaining_accounts` between the
     /// two NTT CPIs.
     pub fn send<'info>(ctx: Context<'info, Send<'info>>, transfer_lock_account_count: u8) -> Result<()> {
@@ -55,20 +97,22 @@ pub mod fogo_onre_relayer {
         instructions::swap::handler(ctx, swap_ix_data)
     }
 
+    /// Permissionless timeout refund. For a stale `Received` flow, sends the
+    /// original token back to `flow.recipient` via NTT, then closes the flow.
+    pub fn refund<'info>(ctx: Context<'info, Refund<'info>>, transfer_lock_account_count: u8) -> Result<()> {
+        instructions::refund::handler(ctx, transfer_lock_account_count)
+    }
+
     /// Authority-only. `None` args leave fields unchanged. Fee decreases
     /// apply instantly; increases stage for `FEE_TIMELOCK_SLOTS` (~2 days)
     /// then auto-promote on the next `configure` after the window.
-    /// `slippage_bps` (capped at `MAX_SLIPPAGE_BPS` via `validate`) applies
-    /// immediately to both swap legs' NAV floor.
     pub fn configure(
         ctx: Context<Configure>,
         deposit_fee_bps: Option<u16>,
         withdraw_fee_bps: Option<u16>,
         new_authority: Option<Pubkey>,
-        slippage_bps: Option<u16>,
-        price_oracle: Option<Pubkey>,
     ) -> Result<()> {
-        configure::handler(ctx, deposit_fee_bps, withdraw_fee_bps, new_authority, slippage_bps, price_oracle)
+        configure::handler(ctx, deposit_fee_bps, withdraw_fee_bps, new_authority)
     }
 
     /// Two-step rotation, step 2. Signer must equal `pending_authority`;

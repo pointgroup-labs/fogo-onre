@@ -50,7 +50,7 @@ test: ## test: Full suite (rebuilds via pretest)
 	pnpm test
 
 test-rust: ## test: Rust unit tests only (no rebuild)
-	cargo test --lib -p fogo-onre-relayer
+	cargo test --lib -p fogo-ntt-relayer
 
 test-ts: ## test: TS tests only, no rebuild (assumes 'make build' already ran)
 	pnpm exec vitest run

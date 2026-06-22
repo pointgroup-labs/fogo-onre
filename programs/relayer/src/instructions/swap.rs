@@ -11,37 +11,32 @@ use anchor_lang::{
 use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};
 
 use crate::{
-    constants::{CONFIG_SEED, RELAYER_SEED},
+    constants::RELAYER_SEED,
     cpi::{approve_swap_delegate, relayer_signed_transfer_checked, revoke_relayer_delegate},
     error::RelayerError,
     events::Swapped,
-    onre::{apply_slippage_floor, oracle_expected_out, read_offer_nav_price},
-    state::{Direction, Flow, FlowStatus, RelayerConfig},
+    state::{Direction, Flow, FlowStatus, PairConfig},
 };
 
 /// Routes on `flow.direction`: deposit base→asset (fee from asset OUTPUT),
 /// withdraw asset→base (fee from asset INPUT). Fee is always asset-denominated;
-/// the output floor is the config-pinned OnRe NAV minus `max_slippage_bps`.
+/// the output floor is the user-signed `flow.min_swap_out` (no protocol band).
 pub fn handler<'info>(ctx: Context<'info, Swap<'info>>, swap_ix_data: Vec<u8>) -> Result<()> {
-    let now_unix = u64::try_from(Clock::get()?.unix_timestamp).map_err(|_| error!(RelayerError::OnreNavOverflow))?;
-
     let flow_key = ctx.accounts.flow.key();
     let direction = ctx.accounts.flow.direction;
     require!(ctx.accounts.flow.status == FlowStatus::Received, RelayerError::FlowStatusMismatch);
 
-    let cfg = &ctx.accounts.relayer_config;
-    require!(cfg.price_oracle != Pubkey::default(), RelayerError::BadPriceOracle);
-    require_keys_eq!(ctx.accounts.onre_offer.key(), cfg.price_oracle, RelayerError::BadPriceOracle);
+    let cfg = &ctx.accounts.pair_config;
 
-    // Defense-in-depth: re-entry is already blocked by the forbidden
-    // relayer_config; forbidding a self-CPI swap_program makes it explicit.
+    // Re-entry is already blocked via the forbidden relayer_config; forbidding
+    // a self-CPI swap_program makes it explicit.
     require_keys_neq!(ctx.accounts.swap_program.key(), crate::ID, RelayerError::SwapAccountNotAllowed);
 
     let base_ata_key = ctx.accounts.base_ata.key();
     let asset_ata_key = ctx.accounts.asset_ata.key();
     let auth_key = ctx.accounts.relayer_authority.key();
 
-    let forbidden = [ctx.accounts.fee_vault.key(), ctx.accounts.relayer_config.key(), flow_key];
+    let forbidden = [ctx.accounts.fee_vault.key(), ctx.accounts.pair_config.key(), flow_key];
 
     for acc in ctx.remaining_accounts.iter() {
         require!(!forbidden.contains(acc.key), RelayerError::SwapAccountNotAllowed);
@@ -55,8 +50,10 @@ pub fn handler<'info>(ctx: Context<'info, Swap<'info>>, swap_ix_data: Vec<u8>) -
 
     let authority_bump = cfg.relayer_authority_bump;
     let asset_decimals = ctx.accounts.asset_mint.decimals;
-    let base_decimals = ctx.accounts.base_mint.decimals;
     let gross_in = ctx.accounts.flow.amount;
+
+    // User-signed floor (output-token atomic units); enforced post-CPI.
+    let floor = ctx.accounts.flow.min_swap_out;
 
     require!(gross_in > 0, RelayerError::ZeroAmountFlow);
 
@@ -90,25 +87,13 @@ pub fn handler<'info>(ctx: Context<'info, Swap<'info>>, swap_ix_data: Vec<u8>) -
         (net, fee)
     };
 
-    let floor = {
-        let price = read_offer_nav_price(
-            &ctx.accounts.onre_offer.to_account_info(),
-            &cfg.base_mint,
-            &cfg.asset_mint,
-            now_unix,
-        )?;
-        let gross_expected = oracle_expected_out(price, swap_in, direction, base_decimals, asset_decimals)?;
-        apply_slippage_floor(gross_expected, cfg.max_slippage_bps)?
-    };
-
     ctx.accounts.base_ata.reload()?;
     ctx.accounts.asset_ata.reload()?;
     let (in_before, out_before) = in_out(deposit, ctx.accounts.base_ata.amount, ctx.accounts.asset_ata.amount);
     require!(in_before >= swap_in, RelayerError::ZeroAmountFlow);
 
     // Clear any pre-existing delegate before the swap so stale residue can't
-    // DoS the post-CPI pristine-ATA assert. A delegate the CPI introduces
-    // afterward is still rejected by that (unchanged) strict assert.
+    // DoS the post-CPI pristine-ATA assert (which still rejects CPI-added ones).
     let token_program_info = ctx.accounts.token_program.to_account_info();
     let relayer_authority_info = ctx.accounts.relayer_authority.to_account_info();
     revoke_relayer_delegate(
@@ -137,8 +122,8 @@ pub fn handler<'info>(ctx: Context<'info, Swap<'info>>, swap_ix_data: Vec<u8>) -
         )?;
     }
 
-    // relayer_authority signs the swap CPI; snapshot its lamports/owner/data
-    // to assert (post-CPI) the router didn't drain or reassign the PDA.
+    // Snapshot the signing PDA's lamports/owner/data to assert post-CPI the
+    // router didn't drain or reassign it.
     let auth_info = ctx.accounts.relayer_authority.to_account_info();
     let auth_lamports_pre = auth_info.lamports();
     let auth_owner_pre = *auth_info.owner;
@@ -174,7 +159,7 @@ pub fn handler<'info>(ctx: Context<'info, Swap<'info>>, swap_ix_data: Vec<u8>) -
     assert_ata_untampered(&ctx.accounts.asset_ata, &auth_key)?;
 
     let (net_out, fee) = if deposit {
-        let (net, fee) = ctx.accounts.relayer_config.apply_deposit_fee(out_received)?;
+        let (net, fee) = ctx.accounts.pair_config.apply_deposit_fee(out_received)?;
         skim_fee(fee)?;
         (net, fee)
     } else {
@@ -219,17 +204,17 @@ fn assert_ata_untampered(ata: &InterfaceAccount<'_, TokenAccount>, expected_owne
 #[derive(Accounts)]
 pub struct Swap<'info> {
     #[account(
-        seeds = [CONFIG_SEED],
-        bump = relayer_config.bump,
+        seeds = [PairConfig::SEED, base_mint.key().as_ref(), asset_mint.key().as_ref()],
+        bump = pair_config.bump,
         has_one = base_mint,
         has_one = asset_mint,
         has_one = fee_vault,
     )]
-    pub relayer_config: Box<Account<'info, RelayerConfig>>,
+    pub pair_config: Box<Account<'info, PairConfig>>,
 
     /// CHECK: PDA seeds enforce identity; signs the Approve, fee transfer,
     /// and swap CPI. Reach bounded by the post-CPI ATA assertions.
-    #[account(seeds = [RELAYER_SEED], bump = relayer_config.relayer_authority_bump)]
+    #[account(seeds = [RELAYER_SEED], bump = pair_config.relayer_authority_bump)]
     pub relayer_authority: UncheckedAccount<'info>,
 
     pub base_mint: Box<InterfaceAccount<'info, Mint>>,
@@ -251,7 +236,7 @@ pub struct Swap<'info> {
     )]
     pub asset_ata: Box<InterfaceAccount<'info, TokenAccount>>,
 
-    /// Fee destination — always denominated in the asset (ONyc) token.
+    /// Fee destination — always denominated in the asset token.
     #[account(mut, token::mint = asset_mint, token::token_program = token_program)]
     pub fee_vault: Box<InterfaceAccount<'info, TokenAccount>>,
 
@@ -260,21 +245,17 @@ pub struct Swap<'info> {
 
     #[account(
         mut,
-        seeds = [Flow::seed(flow.direction), ntt_inbox_item.key().as_ref()],
+        seeds = [Flow::seed(flow.direction), pair_config.key().as_ref(), ntt_inbox_item.key().as_ref()],
         bump = flow.bump,
     )]
     pub flow: Box<Account<'info, Flow>>,
 
-    /// CHECK: handler pins this to relayer_config.price_oracle and validates
-    /// it as the OnRe Offer PDA via read_offer_nav_price.
-    pub onre_offer: UncheckedAccount<'info>,
-
-    /// CHECK: router-agnostic. Safety from the NAV floor + bounded delegation,
-    /// not program identity.
+    /// CHECK: router-agnostic. Safety comes from the signed floor and bounded
+    /// delegation, not program identity.
     pub swap_program: UncheckedAccount<'info>,
 
-    /// CHECK: SPL delegate the router spends from in_ata. Pass
-    /// `relayer_authority` as a sentinel for owner-signed routers (OnRe).
+    /// CHECK: SPL delegate the router spends from `in_ata`. Pass
+    /// `relayer_authority` as a sentinel for owner-signed routers.
     pub swap_delegate: UncheckedAccount<'info>,
 
     pub token_program: Interface<'info, TokenInterface>,

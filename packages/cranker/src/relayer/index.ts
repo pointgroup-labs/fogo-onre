@@ -1,4 +1,6 @@
 export { type EnumerateOptions, makeEnumerator } from './enumerate'
+export { refund, refundDue, type RefundInput } from './refund'
+export { type RefundScanOptions, scanAndRefund } from './refund-scan'
 export {
   type AdvanceFns,
   type EnumerateFlowsFn,

@@ -75,7 +75,7 @@ USER cranker
 ENV NODE_ENV=production
 EXPOSE 9090
 
-# --start-period covers cold-start config validation + RelayerConfig
+# --start-period covers cold-start config validation + PairConfig
 # fetch (~5–30s on a healthy paid RPC). Healthcheck hits /healthz which
 # returns 503 when heartbeat is stale. Uses Node directly to avoid an
 # extra apt dependency (wget/curl).

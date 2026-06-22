@@ -30,3 +30,12 @@ pub struct Sent {
     pub direction: Direction,
     pub amount: u64,
 }
+
+#[event]
+pub struct Refunded {
+    pub flow: Pubkey,
+    pub ntt_inbox_item: Pubkey,
+    pub recipient: Pubkey,
+    pub direction: Direction,
+    pub amount: u64,
+}

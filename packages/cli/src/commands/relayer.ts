@@ -1,4 +1,4 @@
-import { MAX_FEE_BPS, MAX_SLIPPAGE_BPS, ONYC_DECIMALS, ONYC_MINT, RELAYER_PROGRAM_ID, USDC_DECIMALS, USDC_MINT } from '@fogo-onre/sdk'
+import { INTENT_TRANSFER_PROGRAM_ID, MAX_FEE_BPS, ONRE_INTENT_PROGRAM_ID, ONYC_DECIMALS, RELAYER_PROGRAM_ID, USDC_DECIMALS } from '@fogo-onre/sdk'
 import { AccountLayout, getAssociatedTokenAddressSync, getMint, TOKEN_PROGRAM_ID } from '@solana/spl-token'
 import { PublicKey } from '@solana/web3.js'
 import chalk from 'chalk'
@@ -10,41 +10,89 @@ export function relayerCommands(): Command {
 
   relayer
     .command('show')
-    .description('Show on-chain RelayerConfig + relayer authority PDA')
+    .description('Show on-chain GlobalConfig + PairConfig + relayer authority PDA')
     .action(async () => {
       const { connection, client } = useContext()
 
       console.log(chalk.cyan('Relayer'))
-      console.log(chalk.dim(`  programId:    ${RELAYER_PROGRAM_ID.toBase58()}`))
-      console.log(chalk.dim(`  configPda:    ${client.configPda.toBase58()}`))
-      console.log(chalk.dim(`  authorityPda: ${client.authorityPda.toBase58()}`))
+      console.log(chalk.dim(`  programId:       ${RELAYER_PROGRAM_ID.toBase58()}`))
+      console.log(chalk.dim(`  globalConfigPda: ${client.globalConfigPda.toBase58()}`))
+      console.log(chalk.dim(`  configPda:       ${client.configPda.toBase58()}`))
+      console.log(chalk.dim(`  authorityPda:    ${client.authorityPda.toBase58()}`))
 
-      const acct = await connection.getAccountInfo(client.configPda)
-      if (!acct) {
-        console.log(chalk.yellow('\nRelayerConfig not found — relayer is not initialized'))
+      const globalAcct = await connection.getAccountInfo(client.globalConfigPda)
+      if (!globalAcct) {
+        console.log(chalk.yellow('\nGlobalConfig not found — run `relayer bootstrap` first'))
+      } else {
+        const g = await client.program.account.globalConfig.fetch(client.globalConfigPda)
+        console.log(chalk.cyan('\nGlobalConfig'))
+        console.log(chalk.dim(`  admin:        ${g.admin.toBase58()}`))
+        console.log(chalk.dim(`  pendingAdmin: ${g.pendingAdmin?.toBase58() ?? '<none>'}`))
+      }
+
+      const pairAcct = await connection.getAccountInfo(client.configPda)
+      if (!pairAcct) {
+        console.log(chalk.yellow('\nPairConfig not found — this pair is not initialized'))
         return
       }
       const config = await client.fetchConfig()
-      console.log(chalk.cyan('\nRelayerConfig'))
+      console.log(chalk.cyan('\nPairConfig'))
       console.log(chalk.dim(`  authority:        ${config.authority.toBase58()}`))
       console.log(chalk.dim(`  pendingAuthority: ${config.pendingAuthority?.toBase58() ?? '<none>'}`))
       console.log(chalk.dim(`  baseMint:         ${config.baseMint.toBase58()}`))
       console.log(chalk.dim(`  assetMint:        ${config.assetMint.toBase58()}`))
       console.log(chalk.dim(`  feeVault:         ${config.feeVault.toBase58()}`))
+      console.log(chalk.dim(`  nttBaseProgram:   ${config.nttBaseProgram.toBase58()}`))
+      console.log(chalk.dim(`  nttAssetProgram:  ${config.nttAssetProgram.toBase58()}`))
+      console.log(chalk.dim(`  intentPrograms:   [${config.intentPrograms[0].toBase58()}, ${config.intentPrograms[1].toBase58()}]`))
       console.log(chalk.dim(`  depositFeeBps:    ${config.depositFeeBps}`))
       console.log(chalk.dim(`  withdrawFeeBps:   ${config.withdrawFeeBps}`))
-      console.log(chalk.dim(`  maxSlippageBps:   ${config.maxSlippageBps}  (cap ${MAX_SLIPPAGE_BPS})`))
+    })
+
+  relayer
+    .command('bootstrap')
+    .description('One-time global init: create the admin-gated GlobalConfig singleton')
+    .option('--admin <pubkey>', 'Admin pubkey allowed to create pairs (default: signer)')
+    .option('--confirm', 'Actually broadcast the transaction (default: dry-run)')
+    .action(async (opts: { admin?: string, confirm?: boolean }) => {
+      const { connection, keypair, client } = useContext()
+
+      const admin = opts.admin ? new PublicKey(opts.admin) : keypair.publicKey
+
+      const programAcct = await connection.getAccountInfo(RELAYER_PROGRAM_ID)
+      if (!programAcct?.executable) {
+        throw new Error(`relayer program ${RELAYER_PROGRAM_ID.toBase58()} not found or not executable on ${connection.rpcEndpoint}`)
+      }
+      const existing = await connection.getAccountInfo(client.globalConfigPda)
+      if (existing) {
+        throw new Error(`GlobalConfig already exists at ${client.globalConfigPda.toBase58()}`)
+      }
+
+      console.log(chalk.cyan('Initialize plan'))
+      console.log(chalk.dim(`  globalConfigPda: ${client.globalConfigPda.toBase58()}  (will be created)`))
+      console.log(chalk.dim(`  admin:            ${admin.toBase58()}`))
+
+      if (!opts.confirm) {
+        console.log()
+        console.log(chalk.yellow('dry-run only. Re-run with --confirm to broadcast.'))
+        return
+      }
+
+      console.log()
+      const sig = await runTx(() => client.bootstrap({ admin }).rpc())
+      console.log(chalk.green('GlobalConfig initialized'))
+      console.log(chalk.dim(`  tx: ${sig}`))
     })
 
   relayer
     .command('initialize')
-    .description('One-time initialize: create RelayerConfig + relayer-owned ATAs')
-    .option('--usdc-mint <pubkey>', `USDC mint on Solana (default: ${USDC_MINT.toBase58()})`)
-    .option('--onyc-mint <pubkey>', `ONyc mint on Solana (default: ${ONYC_MINT.toBase58()})`)
+    .description('Create a pair PairConfig + relayer-owned ATAs (admin-only)')
+    .option('--usdc-mint <pubkey>', 'Pair base mint on Solana (default: --base-mint)')
+    .option('--onyc-mint <pubkey>', 'Pair asset mint on Solana (default: --asset-mint)')
     .option('--fee-vault <pubkey>', 'External ONyc token account for protocol fees (default: signer\'s ONyc ATA)')
     .requiredOption('--deposit-fee-bps <bps>', 'Deposit fee in basis points')
     .requiredOption('--withdraw-fee-bps <bps>', 'Withdraw fee in basis points')
-    .option('--authority <pubkey>', 'Authority pubkey to write into RelayerConfig (default: signer)')
+    .option('--intent-programs <pubkeys>', 'Comma-separated pair of inbound VAA originators (default: [intent_transfer, onre_fork])')
     .option('--confirm', 'Actually broadcast the transaction (default: dry-run)')
     .action(async (opts: {
       usdcMint?: string
@@ -52,19 +100,20 @@ export function relayerCommands(): Command {
       feeVault?: string
       depositFeeBps: string
       withdrawFeeBps: string
-      authority?: string
+      intentPrograms?: string
       confirm?: boolean
     }) => {
       const { connection, keypair, client } = useContext()
 
-      const usdcMint = opts.usdcMint ? new PublicKey(opts.usdcMint) : USDC_MINT
-      const onycMint = opts.onycMint ? new PublicKey(opts.onycMint) : ONYC_MINT
+      const usdcMint = opts.usdcMint ? new PublicKey(opts.usdcMint) : client.baseMint
+      const onycMint = opts.onycMint ? new PublicKey(opts.onycMint) : client.assetMint
       const feeVault = opts.feeVault
         ? new PublicKey(opts.feeVault)
         : getAssociatedTokenAddressSync(onycMint, keypair.publicKey)
       const depositFeeBps = Number(opts.depositFeeBps)
       const withdrawFeeBps = Number(opts.withdrawFeeBps)
-      const authority = opts.authority ? new PublicKey(opts.authority) : keypair.publicKey
+      const authority = keypair.publicKey
+      const intentPrograms = parseIntentPrograms(opts.intentPrograms)
 
       // Pre-flight 1: program deployed.
       const programAcct = await connection.getAccountInfo(RELAYER_PROGRAM_ID)
@@ -77,10 +126,10 @@ export function relayerCommands(): Command {
         throw new Error(`account at ${RELAYER_PROGRAM_ID.toBase58()} is not executable`)
       }
 
-      // Pre-flight 2: RelayerConfig must NOT exist.
+      // Pre-flight 2: PairConfig must NOT exist.
       const existing = await connection.getAccountInfo(client.configPda)
       if (existing) {
-        throw new Error(`RelayerConfig already exists at ${client.configPda.toBase58()}`)
+        throw new Error(`PairConfig already exists at ${client.configPda.toBase58()}`)
       }
 
       // Pre-flight 3: mints exist with expected decimals.
@@ -136,6 +185,7 @@ export function relayerCommands(): Command {
       console.log(chalk.dim(`  feeVault:         ${feeVault.toBase58()}  (owner=${fvOwner.toBase58()})`))
       console.log(chalk.dim(`  depositFeeBps:    ${depositFeeBps}`))
       console.log(chalk.dim(`  withdrawFeeBps:   ${withdrawFeeBps}`))
+      console.log(chalk.dim(`  intentPrograms:   [${intentPrograms[0].toBase58()}, ${intentPrograms[1].toBase58()}]`))
 
       if (!opts.confirm) {
         console.log()
@@ -153,21 +203,21 @@ export function relayerCommands(): Command {
             feeVault,
             depositFeeBps,
             withdrawFeeBps,
+            intentPrograms,
           })
           .rpc(),
       )
 
-      console.log(chalk.green('Relayer initialized'))
+      console.log(chalk.green('Pair initialized'))
       console.log(chalk.dim(`  tx: ${sig}`))
     })
 
   relayer
     .command('configure')
-    .description('Update mutable RelayerConfig fields (authority-only)')
+    .description('Update mutable GlobalConfig fields (authority-only)')
     .option('--fee-vault <pubkey>', 'New ONyc fee vault (must hold ONyc, not be relayer ATA)')
     .option('--deposit-fee-bps <bps>', 'New deposit fee bps (subject to timelock for increases)')
     .option('--withdraw-fee-bps <bps>', 'New withdraw fee bps (subject to timelock for increases)')
-    .option('--max-slippage-bps <bps>', `New NAV slippage floor + Jupiter quote slippage, bps [0, ${MAX_SLIPPAGE_BPS}] (no timelock)`)
     .option('--new-authority <pubkey>', 'Set pendingAuthority (claimed via accept-authority)')
     .option('--clear-pending-authority', 'Cancel a pending authority handover')
     .option('--confirm', 'Actually broadcast the transaction (default: dry-run)')
@@ -175,7 +225,6 @@ export function relayerCommands(): Command {
       feeVault?: string
       depositFeeBps?: string
       withdrawFeeBps?: string
-      maxSlippageBps?: string
       newAuthority?: string
       clearPendingAuthority?: boolean
       confirm?: boolean
@@ -192,7 +241,6 @@ export function relayerCommands(): Command {
       const feeVault = opts.feeVault ? new PublicKey(opts.feeVault) : undefined
       const depositFeeBps = opts.depositFeeBps !== undefined ? Number(opts.depositFeeBps) : undefined
       const withdrawFeeBps = opts.withdrawFeeBps !== undefined ? Number(opts.withdrawFeeBps) : undefined
-      const maxSlippageBps = opts.maxSlippageBps !== undefined ? Number(opts.maxSlippageBps) : undefined
       const newAuthority = opts.clearPendingAuthority
         ? null
         : opts.newAuthority
@@ -208,18 +256,13 @@ export function relayerCommands(): Command {
           throw new Error(`${name} = ${bps} out of range [0, ${MAX_FEE_BPS}]`)
         }
       }
-      if (maxSlippageBps !== undefined && (!Number.isInteger(maxSlippageBps) || maxSlippageBps < 0 || maxSlippageBps > MAX_SLIPPAGE_BPS)) {
-        throw new Error(`max-slippage-bps = ${maxSlippageBps} out of range [0, ${MAX_SLIPPAGE_BPS}]`)
-      }
-
       const noChange
         = feeVault === undefined
           && depositFeeBps === undefined
           && withdrawFeeBps === undefined
-          && maxSlippageBps === undefined
           && newAuthority === undefined
       if (noChange) {
-        throw new Error('no fields to update — pass at least one --fee-vault / --*-fee-bps / --max-slippage-bps / --new-authority / --clear-pending-authority')
+        throw new Error('no fields to update — pass at least one --fee-vault / --*-fee-bps / --new-authority / --clear-pending-authority')
       }
 
       console.log(chalk.cyan('Configure plan'))
@@ -232,9 +275,6 @@ export function relayerCommands(): Command {
       }
       if (withdrawFeeBps !== undefined) {
         console.log(chalk.dim(`  withdrawFeeBps:  ${config.withdrawFeeBps} → ${withdrawFeeBps}`))
-      }
-      if (maxSlippageBps !== undefined) {
-        console.log(chalk.dim(`  maxSlippageBps:  ${config.maxSlippageBps} → ${maxSlippageBps}`))
       }
       if (newAuthority === null) {
         console.log(chalk.dim(`  pendingAuthority: <cleared>`))
@@ -254,7 +294,6 @@ export function relayerCommands(): Command {
           feeVault: feeVault ?? undefined,
           depositFeeBps: depositFeeBps ?? null,
           withdrawFeeBps: withdrawFeeBps ?? null,
-          maxSlippageBps: maxSlippageBps ?? null,
           newAuthority: newAuthority ?? null,
         })
         return builder.rpc()
@@ -264,5 +303,85 @@ export function relayerCommands(): Command {
       console.log(chalk.dim(`  tx: ${sig}`))
     })
 
+  relayer
+    .command('set-admin')
+    .description('Propose a new GlobalConfig admin (step 1 of two-step rotation, admin-only)')
+    .requiredOption('--new-admin <pubkey>', 'Pubkey to stage as pending admin')
+    .option('--confirm', 'Actually broadcast the transaction (default: dry-run)')
+    .action(async (opts: { newAdmin: string, confirm?: boolean }) => {
+      const { keypair, client } = useContext()
+
+      const newAdmin = new PublicKey(opts.newAdmin)
+      const config = await client.program.account.globalConfig.fetch(client.globalConfigPda)
+      if (!config.admin.equals(keypair.publicKey)) {
+        throw new Error(
+          `signer ${keypair.publicKey.toBase58()} is not the current admin (${config.admin.toBase58()})`,
+        )
+      }
+      if (newAdmin.equals(config.admin)) {
+        throw new Error('--new-admin equals the current admin — self-rotate is rejected')
+      }
+
+      console.log(chalk.cyan('Set-admin plan'))
+      console.log(chalk.dim(`  signer (current admin): ${keypair.publicKey.toBase58()}`))
+      console.log(chalk.dim(`  pendingAdmin:           ${newAdmin.toBase58()}  (must call accept-admin from this key)`))
+
+      if (!opts.confirm) {
+        console.log()
+        console.log(chalk.yellow('dry-run only. Re-run with --confirm to broadcast.'))
+        return
+      }
+
+      console.log()
+      const sig = await runTx(() => client.setAdmin({ newAdmin }).rpc())
+      console.log(chalk.green('Pending admin staged'))
+      console.log(chalk.dim(`  tx: ${sig}`))
+    })
+
+  relayer
+    .command('accept-admin')
+    .description('Claim the GlobalConfig admin role (step 2, must be signed by the pending admin)')
+    .option('--confirm', 'Actually broadcast the transaction (default: dry-run)')
+    .action(async (opts: { confirm?: boolean }) => {
+      const { keypair, client } = useContext()
+
+      const config = await client.program.account.globalConfig.fetch(client.globalConfigPda)
+      if (!config.pendingAdmin) {
+        throw new Error('no pending admin to accept')
+      }
+      if (!config.pendingAdmin.equals(keypair.publicKey)) {
+        throw new Error(
+          `signer ${keypair.publicKey.toBase58()} is not the pending admin (${config.pendingAdmin.toBase58()})`,
+        )
+      }
+
+      console.log(chalk.cyan('Accept-admin plan'))
+      console.log(chalk.dim(`  current admin: ${config.admin.toBase58()}`))
+      console.log(chalk.dim(`  signer (pending admin): ${keypair.publicKey.toBase58()}  (becomes admin)`))
+
+      if (!opts.confirm) {
+        console.log()
+        console.log(chalk.yellow('dry-run only. Re-run with --confirm to broadcast.'))
+        return
+      }
+
+      console.log()
+      const sig = await runTx(() => client.acceptAdmin().rpc())
+      console.log(chalk.green('Admin role accepted'))
+      console.log(chalk.dim(`  tx: ${sig}`))
+    })
+
   return relayer
+}
+
+/** Parse a comma-separated pair of pubkeys; defaults to the OnRe originators. */
+function parseIntentPrograms(raw?: string): [PublicKey, PublicKey] {
+  if (!raw) {
+    return [INTENT_TRANSFER_PROGRAM_ID, ONRE_INTENT_PROGRAM_ID]
+  }
+  const parts = raw.split(',').map(s => s.trim()).filter(Boolean)
+  if (parts.length !== 2) {
+    throw new Error(`--intent-programs expects exactly 2 comma-separated pubkeys, got ${parts.length}`)
+  }
+  return [new PublicKey(parts[0]), new PublicKey(parts[1])]
 }

@@ -1,46 +1,53 @@
 use anchor_lang::prelude::*;
 
 use crate::{
-    constants::{
-        CONFIG_SEED, FEE_TIMELOCK_SLOTS, FLOW_INBOUND_SEED, FLOW_OUTBOUND_SEED, MAX_FEE_BPS, MAX_SLIPPAGE_BPS,
-        NTT_ASSET_PROGRAM, NTT_BASE_PROGRAM,
-    },
+    constants::{FEE_TIMELOCK_SLOTS, MAX_FEE_BPS},
     error::RelayerError,
 };
 
-/// `authority` gates governance only; flow instructions are permissionless.
-///
-/// Layout discipline: all fixed-size fields (including `max_slippage_bps` and the
-/// `reserved` block) come before the two variable-length `Option`s, which stay
-/// last. Future additive fields are carved out of `reserved` — same total size,
-/// so they need no realloc and no migration (old zero bytes read as the new
-/// field's default).
+/// Global singleton (PDA `[GlobalConfig::SEED]`).
 #[account]
 #[derive(InitSpace)]
-pub struct RelayerConfig {
+pub struct GlobalConfig {
+    pub admin: Pubkey,
+    pub bump: u8,
+    pub reserved: [u8; 64],
+
+    /// Two-step rotation target: `set_admin` proposes, `accept_admin` promotes.
+    pub pending_admin: Option<Pubkey>,
+}
+
+impl GlobalConfig {
+    pub const SEED: &'static [u8] = b"global_config";
+}
+
+/// Config for one token pair (PDA `[PairConfig::SEED, base_mint, asset_mint]`).
+/// `authority` only gates governance; user flows are permissionless.
+#[account]
+#[derive(InitSpace)]
+pub struct PairConfig {
     pub base_mint: Pubkey,
     pub asset_mint: Pubkey,
 
     pub authority: Pubkey,
     pub fee_vault: Pubkey,
 
+    pub ntt_base_program: Pubkey,
+    pub ntt_asset_program: Pubkey,
+
+    /// Programs allowed to originate inbound VAAs. `receive` derives each
+    /// entry's setter PDA and matches the VAA sender; both slots are equally
+    /// authoritative (no primary/fallback), changeable only by a fresh init.
+    pub intent_programs: [Pubkey; 2],
+
     pub deposit_fee_bps: u16,
     pub withdraw_fee_bps: u16,
-
-    /// Authority-tunable NAV slippage tolerance applied on both swap legs.
-    /// Hard-capped at `MAX_SLIPPAGE_BPS` by `validate`.
-    pub max_slippage_bps: u16,
 
     pub relayer_authority_bump: u8,
     pub bump: u8,
 
-    /// Config-pinned OnRe `Offer` PDA — the swap value-floor oracle.
-    /// Zeroed in legacy accounts ⇒ `Pubkey::default()` ⇒ fail-closed
-    /// (`BadPriceOracle`) until `configure` sets it.
-    pub price_oracle: Pubkey,
-
     /// Headroom for future fixed-size fields without another migration.
-    pub reserved: [u8; 96],
+    pub reserved: [u8; 64],
 
     /// Promoted to `authority` by `accept_authority` (two-step handoff).
     pub pending_authority: Option<Pubkey>,
@@ -66,13 +73,12 @@ impl PendingFee {
     }
 }
 
-impl RelayerConfig {
-    pub const SEEDS: &'static [u8] = CONFIG_SEED;
+impl PairConfig {
+    pub const SEED: &'static [u8] = b"relayer_config";
 
     pub fn validate(&self) -> Result<()> {
         require!(self.deposit_fee_bps <= MAX_FEE_BPS, RelayerError::FeeBpsTooHigh);
         require!(self.withdraw_fee_bps <= MAX_FEE_BPS, RelayerError::FeeBpsTooHigh);
-        require!(self.max_slippage_bps <= MAX_SLIPPAGE_BPS, RelayerError::SlippageBpsTooHigh);
         if let Some(p) = &self.pending_fee {
             require!(!p.is_empty(), RelayerError::EmptyPendingFee);
             if let Some(bps) = p.deposit_fee_bps {
@@ -178,19 +184,22 @@ pub enum Direction {
     Withdraw,
 }
 
-/// NTT manager for the token a `receive` leg pulls in.
-pub fn receive_ntt_program(direction: Direction) -> Pubkey {
-    match direction {
-        Direction::Deposit => NTT_BASE_PROGRAM,
-        Direction::Withdraw => NTT_ASSET_PROGRAM,
+impl PairConfig {
+    /// NTT manager for the token a `receive` (and `refund`) leg pulls in /
+    /// returns. Init-pinned, so handlers validate the CPI target against this.
+    pub fn receive_ntt_program(&self, direction: Direction) -> Pubkey {
+        match direction {
+            Direction::Deposit => self.ntt_base_program,
+            Direction::Withdraw => self.ntt_asset_program,
+        }
     }
-}
 
-/// NTT manager for the token a `send` leg pushes out.
-pub fn send_ntt_program(direction: Direction) -> Pubkey {
-    match direction {
-        Direction::Deposit => NTT_ASSET_PROGRAM,
-        Direction::Withdraw => NTT_BASE_PROGRAM,
+    /// NTT manager for the token a `send` leg pushes out. Init-pinned.
+    pub fn send_ntt_program(&self, direction: Direction) -> Pubkey {
+        match direction {
+            Direction::Deposit => self.ntt_asset_program,
+            Direction::Withdraw => self.ntt_base_program,
+        }
     }
 }
 
@@ -215,15 +224,25 @@ pub struct Flow {
     /// `Direction::Deposit` or `Direction::Withdraw`. Persisted at receive,
     /// read by `swap`/`send` to select fee side and NTT manager.
     pub direction: Direction,
+
+    /// User-signed swap floor (output-token atomic units), bound via the
+    /// min-bearing inbox PDA. `swap` enforces `out_received >= min_swap_out`.
+    pub min_swap_out: u64,
+
+    /// `Clock::slot` at receive; `refund` timeout anchor.
+    pub received_slot: u64,
 }
 
 impl Flow {
+    pub const INBOUND_SEED: &'static [u8] = b"inflight";
+    pub const OUTBOUND_SEED: &'static [u8] = b"outflight";
+
     /// Seed prefix for a flow PDA, selected by direction. Deposit flows live
     /// under the inbound namespace, withdraw flows under the outbound one.
     pub fn seed(direction: Direction) -> &'static [u8] {
         match direction {
-            Direction::Deposit => FLOW_INBOUND_SEED,
-            Direction::Withdraw => FLOW_OUTBOUND_SEED,
+            Direction::Deposit => Self::INBOUND_SEED,
+            Direction::Withdraw => Self::OUTBOUND_SEED,
         }
     }
 }

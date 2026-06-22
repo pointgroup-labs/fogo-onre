@@ -9,6 +9,11 @@ version = "v1"
 name = "OnReBridge"
 max_gas_spend = 15000
 
+# SPL Memo carrying the user-signed swap floor (onre:mso:<n>).
+[[domains.tx_variations.instructions]]
+program = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr"
+required = true
+
 # Ed25519 sigverify of the user-signed intent message, preceding the bridge ix.
 [[domains.tx_variations.instructions]]
 program = "Ed25519SigVerify111111111111111111111111111"

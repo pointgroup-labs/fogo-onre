@@ -1,20 +1,9 @@
 /**
- * One-shot wake primitive that survives signals fired before `wait()` is
- * armed. Replaces the `EventEmitter`-based daemon wake-up channel, which
- * silently dropped any `emit('wake')` that landed before the daemon's
- * `once(emitter, 'wake')` listener was attached.
- *
- * Semantics: `signal()` sets a sticky flag and resolves any pending
- * `wait()`. `wait()` consumes the flag (clears it before returning) so the
- * next `wait()` call blocks again. Multiple `signal()` calls between two
- * `wait()` calls coalesce to a single wake — the daemon doesn't care
- * how many progress events fired during a scan, only that *at least one*
- * did.
- *
- * Single-consumer by design. The daemon is the only `wait()` caller; the
- * scanners are the only `signal()` callers. If a second consumer is ever
- * needed, we'd swap to a broadcast queue, but the current shape is
- * intentionally simpler than EventEmitter.
+ * Sticky one-shot wake primitive: `signal()` sets a flag and resolves any
+ * pending `wait()`; `wait()` consumes it. A signal fired before `wait()` is
+ * armed survives (unlike the prior EventEmitter), and multiple signals between
+ * two waits coalesce to one wake. Single-consumer by design (daemon waits,
+ * scanners signal).
  */
 export class WakeFlag {
   private flagged = false

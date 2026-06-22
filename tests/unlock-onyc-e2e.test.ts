@@ -27,7 +27,7 @@ import {
   findInboxItemPda,
   findOutflightFlowPda,
   findTokenAuthorityPda,
-  findUserInboxAuthorityPda,
+  findUserInboxWithMinPda,
   FOGO_WORMHOLE_CHAIN_ID,
   NTT_ONYC_PROGRAM_ID,
   RelayerClient,
@@ -73,22 +73,26 @@ describe('receive (withdraw) e2e (NTT redeem + release_inbound_unlock, Locking m
   let peerPda: PublicKey
 
   const CUSTODY_BALANCE = 10_000_000n // 10 ONyc in custody
+  const WITHDRAW_MIN = 4_000_000n // user-signed USDC floor, committed in the inbox PDA
   const onreSetter = intentSetterBytes(ONRE_INTENT_PROGRAM_ID)
 
   beforeEach(async () => {
     svm = createSvm()
     authority = Keypair.generate()
     const provider = createProvider(svm, authority)
-    client = new RelayerClient(provider as any)
 
-    ;[relayerAuthorityPda] = findAuthorityPda(client.program.programId)
     ;[nttTokenAuthorityPda] = findTokenAuthorityPda(NTT_ONYC_PROGRAM_ID)
 
     baseMint = createMint(svm, authority, 6)
     assetMint = createMintWithAuthority(svm, authority, nttTokenAuthorityPda, 6)
 
+    client = new RelayerClient(provider as any, { baseMint: baseMint.publicKey, assetMint: assetMint.publicKey })
+
+    ;[relayerAuthorityPda] = findAuthorityPda(client.program.programId)
+
     const feeVault = createAta(svm, authority, assetMint.publicKey, authority.publicKey)
 
+    await client.bootstrap().rpc()
     await client
       .initialize({
         authority: authority.publicKey,
@@ -184,7 +188,7 @@ describe('receive (withdraw) e2e (NTT redeem + release_inbound_unlock, Locking m
   it('releases ONyc to the per-user inbox, sweeps to custody, binds userWallet', async () => {
     const amount = 1_000_000n // 1 ONyc
     const userWallet = Keypair.generate()
-    const [userInboxAuthority] = findUserInboxAuthorityPda(userWallet.publicKey, client.program.programId)
+    const [userInboxAuthority] = findUserInboxWithMinPda(userWallet.publicKey, WITHDRAW_MIN, client.program.programId)
     // Release lands in the per-user inbox ATA; the sweep moves it to custody.
     createAta(svm, authority, assetMint.publicKey, userInboxAuthority)
 
@@ -201,6 +205,7 @@ describe('receive (withdraw) e2e (NTT redeem + release_inbound_unlock, Locking m
           direction: { withdraw: {} },
           userWallet: userWallet.publicKey,
           recvMint: assetMint.publicKey,
+          minSwapOut: WITHDRAW_MIN,
           nttInboxItem: inboxItemPda,
           nttTransceiverMessage: validatedMsgPda,
           ntt: {
@@ -218,7 +223,7 @@ describe('receive (withdraw) e2e (NTT redeem + release_inbound_unlock, Locking m
 
     // Outflight flow exists with fogo_sender = userWallet (NOT the setter)
     // and the gross amount swept from NTT custody.
-    const [outflightPda] = findOutflightFlowPda(inboxItemPda, client.program.programId)
+    const [outflightPda] = findOutflightFlowPda(client.configPda, inboxItemPda, client.program.programId)
     const flowAcct = svm.getAccount(outflightPda)
     expect(flowAcct).not.toBeNull()
     const flowData = new Uint8Array(flowAcct!.data)
@@ -240,7 +245,7 @@ describe('receive (withdraw) e2e (NTT redeem + release_inbound_unlock, Locking m
   it('accepts the Fogo setter (allowlist member 1)', async () => {
     const amount = 1_000_000n
     const userWallet = Keypair.generate()
-    const [userInboxAuthority] = findUserInboxAuthorityPda(userWallet.publicKey, client.program.programId)
+    const [userInboxAuthority] = findUserInboxWithMinPda(userWallet.publicKey, WITHDRAW_MIN, client.program.programId)
     createAta(svm, authority, assetMint.publicKey, userInboxAuthority)
 
     const { inboxItemPda, validatedMsgPda } = stageRedeemMessage(
@@ -255,6 +260,7 @@ describe('receive (withdraw) e2e (NTT redeem + release_inbound_unlock, Locking m
         direction: { withdraw: {} },
         userWallet: userWallet.publicKey,
         recvMint: assetMint.publicKey,
+        minSwapOut: WITHDRAW_MIN,
         nttInboxItem: inboxItemPda,
         nttTransceiverMessage: validatedMsgPda,
         ntt: { transceiverAddress: NTT_ONYC_PROGRAM_ID },
@@ -269,7 +275,7 @@ describe('receive (withdraw) e2e (NTT redeem + release_inbound_unlock, Locking m
   it('setter pin: rejects a non-setter VTM sender', async () => {
     const amount = 1_000_000n
     const userWallet = Keypair.generate()
-    const [userInboxAuthority] = findUserInboxAuthorityPda(userWallet.publicKey, client.program.programId)
+    const [userInboxAuthority] = findUserInboxWithMinPda(userWallet.publicKey, WITHDRAW_MIN, client.program.programId)
     createAta(svm, authority, assetMint.publicKey, userInboxAuthority)
 
     // Stranger sender (a direct, non-intent NTT bridge to the same inbox).
@@ -286,6 +292,7 @@ describe('receive (withdraw) e2e (NTT redeem + release_inbound_unlock, Locking m
           direction: { withdraw: {} },
           userWallet: userWallet.publicKey,
           recvMint: assetMint.publicKey,
+          minSwapOut: WITHDRAW_MIN,
           nttInboxItem: inboxItemPda,
           nttTransceiverMessage: validatedMsgPda,
           ntt: { transceiverAddress: NTT_ONYC_PROGRAM_ID },

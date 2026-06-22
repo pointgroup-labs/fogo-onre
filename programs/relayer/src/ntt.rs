@@ -124,9 +124,8 @@ pub fn validate_ntt_redeem_release_accounts<'info>(
     );
     require!(redeem_accs[REDEEM_IDX_INBOX_ITEM].key() == expected_inbox_item, RelayerError::InboxItemMismatch);
 
-    // Pin inbound origin to FOGO. Without this, a future non-FOGO peer
-    // registration would let foreign-chain VAAs create Flow PDAs that
-    // outbound legs blindly bridge back to FOGO.
+    // Pin inbound origin to FOGO; else a future non-FOGO peer lets foreign
+    // VAAs create Flow PDAs that outbound legs bridge back to FOGO.
     let (expected_peer, _) = derive_ntt_peer(ntt_program, FOGO_WORMHOLE_CHAIN_ID);
     let (expected_inbox_rl, _) = derive_ntt_inbox_rate_limit(ntt_program, FOGO_WORMHOLE_CHAIN_ID);
     require_keys_eq!(redeem_accs[REDEEM_IDX_PEER].key(), expected_peer, RelayerError::WrongOriginChain);
@@ -148,18 +147,9 @@ const INBOX_ITEM_SEED: &[u8] = b"inbox_item";
 const NTT_WIRE_PREFIX: [u8; 4] = [0x99, b'N', b'T', b'T'];
 
 /// Re-derive the `InboxItem` PDA from `ValidatedTransceiverMessage` bytes,
-/// matching the seed and hash NTT itself uses inside `redeem`:
-/// `pda = find_program_address([b"inbox_item", keccak256(from_chain_BE ||
-/// NttManagerMessage_wire)], ntt_program)`. Wire encoding differs from
-/// on-disk Borsh: integers are big-endian, `NttManagerMessage` adds a
-/// `payload_len: u16 BE`, `NativeTokenTransfer` carries a `0x99 N T T`
-/// prefix.
-///
-/// SECURITY-CRITICAL on the `receive` skip path: when
-/// `inbox_item.release_status == Released` we bypass the NTT redeem CPI
-/// and lose its seed-validation linking VTM ↔ InboxItem. Re-deriving here
-/// reproduces exactly what redeem's Anchor seed constraint would have
-/// enforced — without it, a cranker could pair a real intent_transfer VTM
+/// reproducing redeem's seed+hash (wire encoding is big-endian, unlike the
+/// on-disk Borsh). On the `receive` skip path (`Released`) the redeem CPI's
+/// seed check never runs; deriving here stops a cranker pairing a real VTM
 /// with an unrelated already-released InboxItem.
 pub fn derive_inbox_item_pda_from_vtm(program_id: &Pubkey, vtm_data: &[u8]) -> Result<(Pubkey, u8)> {
     require!(vtm_data.len() >= TRANSCEIVER_MESSAGE_TOTAL_LEN, crate::error::RelayerError::InvalidTransceiverMessage);
@@ -224,12 +214,9 @@ pub fn derive_inbox_item_pda_from_vtm(program_id: &Pubkey, vtm_data: &[u8]) -> R
 /// `sha256("account:InboxItem")[..8]` formula does NOT match.
 pub const INBOX_ITEM_DISC: [u8; 8] = [0xED, 0x8D, 0xCC, 0x67, 0xBB, 0x7A, 0x39, 0x5C];
 
-/// Vendored NTT v1 `InboxItem` body. We deserialize via plain borsh + manual
-/// disc strip rather than Anchor `#[account]` because the standard
+/// Vendored NTT v1 `InboxItem` body, deserialized via plain borsh + manual
+/// disc strip (not Anchor `#[account]`) because the standard
 /// `sha256("account:InboxItem")[..8]` discriminator does NOT match upstream.
-/// Drift detection: borsh fails on layout drift, disc check fails on
-/// discriminator drift, sha256 binary pin in `pinBinaryFixtures()` resolves
-/// which.
 #[derive(AnchorDeserialize, AnchorSerialize, Clone)]
 pub struct InboxItem {
     pub init: bool,

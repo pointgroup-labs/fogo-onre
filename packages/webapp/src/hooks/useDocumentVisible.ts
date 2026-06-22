@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useSyncExternalStore } from 'react'
 
 /**
  * `true` when the document is visible (foreground tab). Lets polling
@@ -8,18 +8,18 @@ import { useEffect, useState } from 'react'
  * RPCs rate-limit aggressively, and a backgrounded tab still draining
  * quota is the kind of thing that gets a deployment blocked.
  *
- * SSR-safe: returns `true` during the server render so initial state
- * doesn't differ between the server and client trees.
+ * SSR-safe via `useSyncExternalStore`: the server snapshot is `true`, so
+ * the initial client tree matches the server render.
  */
 export function useDocumentVisible(): boolean {
-  const [visible, setVisible] = useState(true)
+  return useSyncExternalStore(subscribeVisibility, visibilitySnapshot, () => true)
+}
 
-  useEffect(() => {
-    const update = () => setVisible(document.visibilityState === 'visible')
-    update()
-    document.addEventListener('visibilitychange', update)
-    return () => document.removeEventListener('visibilitychange', update)
-  }, [])
+function subscribeVisibility(onChange: () => void): () => void {
+  document.addEventListener('visibilitychange', onChange)
+  return () => document.removeEventListener('visibilitychange', onChange)
+}
 
-  return visible
+function visibilitySnapshot(): boolean {
+  return document.visibilityState === 'visible'
 }

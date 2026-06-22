@@ -7,8 +7,6 @@ import {
   findRegisteredTransceiverPda,
   findSessionAuthorityPda,
   FOGO_WORMHOLE_CHAIN_ID,
-  NTT_ONYC_PROGRAM_ID,
-  NTT_USDC_PROGRAM_ID,
   nttTransferArgsHash,
   resolveNttVaa,
 } from '@fogo-onre/sdk'
@@ -50,10 +48,26 @@ export async function send(
 ): Promise<AdvanceResult> {
   const { connection, keypair, client, metrics } = ctx
   const isDeposit = input.direction === 'deposit'
-  const inboundNttProgram = isDeposit ? NTT_USDC_PROGRAM_ID : NTT_ONYC_PROGRAM_ID
-  const outboundManager = isDeposit ? NTT_ONYC_PROGRAM_ID : NTT_USDC_PROGRAM_ID
 
   try {
+    // Fetch the pair config first so NTT managers come from it, not constants.
+    const cfg = await client.fetchConfig()
+    const nttBaseProgram = cfg.nttBaseProgram as PublicKey
+    const nttAssetProgram = cfg.nttAssetProgram as PublicKey
+    // Inbound (the inbox VAA's manager): deposit pulled in base, withdraw asset.
+    const inboundNttProgram = isDeposit ? nttBaseProgram : nttAssetProgram
+    // Outbound (push back to FOGO): deposit pushes asset, withdraw base.
+    const outboundManager = isDeposit ? nttAssetProgram : nttBaseProgram
+    const outboundMint = (isDeposit ? cfg.assetMint : cfg.baseMint) as PublicKey
+
+    if (isDeposit && nttAssetProgram.equals(nttBaseProgram)) {
+      return {
+        kind: 'noop',
+        severity: 'config',
+        reason: 'asset NTT manager not deployed (cfg.nttAssetProgram == cfg.nttBaseProgram placeholder)',
+      }
+    }
+
     const vaaBytes = await fetchVaaBytes({
       fogoTx: input.fogoTx,
       vaaHex: input.vaaHex,
@@ -72,14 +86,6 @@ export async function send(
     const flowStatus = describeStatus(flow.status)
     if (flowStatus !== 'Swapped') {
       return { kind: 'noop', reason: `Flow status is ${flowStatus}, expected Swapped` }
-    }
-
-    if (isDeposit && NTT_ONYC_PROGRAM_ID.equals(NTT_USDC_PROGRAM_ID)) {
-      return {
-        kind: 'noop',
-        severity: 'config',
-        reason: 'ONyc NTT manager not deployed (NTT_ONYC_PROGRAM_ID == NTT_USDC_PROGRAM_ID placeholder)',
-      }
     }
 
     // FOGO peer must be registered on the outbound NTT manager — the only
@@ -105,9 +111,6 @@ export async function send(
         reason: `registered_transceiver PDA not initialized on outbound NTT manager (${registeredTransceiverPda.toBase58()})`,
       }
     }
-
-    const cfg = await client.fetchConfig()
-    const outboundMint = (isDeposit ? cfg.assetMint : cfg.baseMint) as PublicKey
 
     const flowRecipient = flow.recipient.toBytes()
     const flowAmount = BigInt(flow.amount.toString())
@@ -165,6 +168,8 @@ export async function send(
         direction: isDeposit ? { deposit: {} } : { withdraw: {} },
         baseMint: cfg.baseMint as PublicKey,
         assetMint: cfg.assetMint as PublicKey,
+        nttBaseProgram,
+        nttAssetProgram,
         nttInboxItem: resolved.nttInboxItem,
         // On-chain `address = flow.payer` constraint — close-target MUST
         // equal the original receive payer, who may not be us.
@@ -229,7 +234,7 @@ export async function send(
  * 7 PDA-derived accounts the on-chain `send` handler needs from positions
  * [4], [5], [6], [7], [8], [9], [14] of the resulting account list.
  */
-async function deriveReleaseAccounts(
+export async function deriveReleaseAccounts(
   connection: Connection,
   mint: PublicKey,
   manager: PublicKey,

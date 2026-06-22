@@ -16,13 +16,13 @@ resolution = true
 skip-lint = false
 
 [programs.localnet]
-fogo_onre_relayer = "onrenRKgX54qtWeK3cuaTBE71xx7dWMXn82ubH61vAp"
+fogo_ntt_relayer = "onrenRKgX54qtWeK3cuaTBE71xx7dWMXn82ubH61vAp"
 
 [programs.devnet]
-fogo_onre_relayer = "onrenRKgX54qtWeK3cuaTBE71xx7dWMXn82ubH61vAp"
+fogo_ntt_relayer = "onrenRKgX54qtWeK3cuaTBE71xx7dWMXn82ubH61vAp"
 
 [programs.mainnet]
-fogo_onre_relayer = "onrenRKgX54qtWeK3cuaTBE71xx7dWMXn82ubH61vAp"
+fogo_ntt_relayer = "onrenRKgX54qtWeK3cuaTBE71xx7dWMXn82ubH61vAp"
 
 [provider]
 cluster = "localnet"

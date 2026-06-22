@@ -39,7 +39,7 @@ jobs:
 
       # `--lib` skips the Anchor IDL build pipeline.
       - name: Unit tests
-        run: cargo test -p fogo-onre-relayer --lib
+        run: cargo test -p fogo-ntt-relayer --lib
 
   intent-fork:
     name: intent-fork (audit-carryover source-diff gate)
@@ -81,7 +81,7 @@ jobs:
         run: pnpm lint
 
       # The LiteSVM suite loads exactly one build artifact —
-      # `target/deploy/fogo_onre_relayer.so`. The committed IDL + generated
+      # `target/deploy/fogo_ntt_relayer.so`. The committed IDL + generated
       # types (`packages/sdk/src/{idl,types}`) mean nothing else consumes
       # `anchor build` output, so cache the .so and skip the ~5-min SBF
       # compile (plus the Solana + Anchor toolchain install) whenever the
@@ -92,7 +92,7 @@ jobs:
         id: relayer-so
         uses: actions/cache@v4
         with:
-          path: target/deploy/fogo_onre_relayer.so
+          path: target/deploy/fogo_ntt_relayer.so
           key: relayer-so-${{ hashFiles('programs/relayer/**', 'Cargo.lock', 'Cargo.toml', 'Anchor.toml', 'rust-toolchain.toml') }}
 
       # Everything down to `Build relayer .so` is the cold-build path only;

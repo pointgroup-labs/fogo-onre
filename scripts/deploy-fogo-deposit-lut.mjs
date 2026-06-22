@@ -44,7 +44,7 @@ if (!KEYPAIR_PATH) {
 // contents so our union LUT is a strict superset.
 const BRIDGING_LUT = new PublicKey('7hmMz3nZDnPJfksLuPotKmUBAFDneM2D9wWg3R1VcKSv')
 
-// The seven static keys that escape compression today when fee_token=wFOGO.
+// The static keys that escape compression today when fee_token=wFOGO.
 // Decoded from a failing bridge tx (1339 wire bytes, 15 static keys).
 const EXTRA_KEYS = [
   'ComputeBudget111111111111111111111111111111',
@@ -54,6 +54,10 @@ const EXTRA_KEYS = [
   '3X8ZFAB2fjcGSujH6YCxYBXY6p4vDVCpmCci9s9reCLs',
   '3yBs2G4pEw6YoLA16kJ2Gcs4VWkjYMNXHw5dJ8nErXH2',
   '6dM4TqWyWJsbx7obrdLcviBkTafD5E8av61zfU6jq57X',
+  // OnRe fork (deposit bridge program) + SPL Memo (min_swap_out floor) — both
+  // ride inline in every deposit tx; LUT them to stay under the 1232 B limit.
+  'inTFf5S7ZtYr8SkwGG85mjDwAyJwjqEPdH2p2nuyrL9',
+  'MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr',
 ].map(k => new PublicKey(k))
 
 // AddressLookupTableProgram.extendLookupTable caps at ~30 keys per ix

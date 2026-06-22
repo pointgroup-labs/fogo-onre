@@ -5,7 +5,7 @@
  * drive the committed `evil_router` (modes 0–3) plus hand-crafted forbidden
  * accounts to prove each value-floor and custody guard fires with its own
  * error: the pre-CPI custody-exclusion loop (SwapAccountNotAllowed), the
- * exact-consume check (InputConsumedMismatch), the NAV floor
+ * exact-consume check (InputConsumedMismatch), the signed-floor guard
  * (OutputBelowFloor), the post-CPI ATA assertion (AtaAuthorityTampered), and
  * the relayer-authority lamports/owner/data guard (RelayerAuthorityTampered).
  */
@@ -30,8 +30,6 @@ import {
   createProvider,
   createSvm,
   createTokenAccount,
-  loadAndPatchOnreOffer,
-  setConfigPriceOracle,
 } from './utils'
 
 const ROUTER_ID = new PublicKey('8uyMF1riG7YSjvPrJcd5VbRaDCnYeqWyPe6HzMevn4bT')
@@ -48,7 +46,6 @@ describe('swap negatives (malicious router + custody guards)', () => {
   let assetMint: Keypair
   let relayerAuthorityPda: PublicKey
   let feeVault: PublicKey
-  let offerPda: PublicKey
   let poolAuthority: PublicKey
   let assetAta: PublicKey
   let baseAta: PublicKey
@@ -61,7 +58,8 @@ describe('swap negatives (malicious router + custody guards)', () => {
   const withdrawFeeBps = 100
   const feeOnyc = (grossOnyc * BigInt(withdrawFeeBps)) / 10_000n // 5_000
   const netOnyc = grossOnyc - feeOnyc // 495_000
-  const outUsdc = 5_000_000n // comfortably above the NAV floor
+  const outUsdc = 5_000_000n // comfortably above the signed floor
+  const MIN_USDC_FLOOR = 100_000n // flow.min_swap_out for the seeded flow
 
   // honest router ix data: [mode][in_amount LE][out_amount LE]
   const ixData = (mode: number, inAmount: bigint, outAmount: bigint): Buffer => {
@@ -95,7 +93,6 @@ describe('swap negatives (malicious router + custody guards)', () => {
         assetMint: assetMint.publicKey,
         feeVault,
         nttInboxItem,
-        onreOffer: offerPda,
         swapProgram: args.swapProgram,
         swapDelegate: relayerAuthorityPda,
         swapIxData: args.swapIxData,
@@ -110,15 +107,17 @@ describe('swap negatives (malicious router + custody guards)', () => {
 
     authority = Keypair.generate()
     const provider = createProvider(svm, authority)
-    client = new RelayerClient(provider as any)
+
+    baseMint = createMint(svm, authority, 6)
+    assetMint = createMint(svm, authority, 6)
+    client = new RelayerClient(provider as any, { baseMint: baseMint.publicKey, assetMint: assetMint.publicKey })
 
     ;[relayerAuthorityPda] = findAuthorityPda(client.program.programId)
     ;[poolAuthority] = PublicKey.findProgramAddressSync([POOL_AUTH_SEED], ROUTER_ID)
 
-    baseMint = createMint(svm, authority, 6)
-    assetMint = createMint(svm, authority, 6)
     feeVault = createAta(svm, authority, assetMint.publicKey, authority.publicKey)
 
+    await client.bootstrap().rpc()
     await client
       .initialize({
         authority: authority.publicKey,
@@ -131,9 +130,6 @@ describe('swap negatives (malicious router + custody guards)', () => {
       .rpc()
 
     svm.airdrop(relayerAuthorityPda, BigInt(5e9))
-
-    offerPda = loadAndPatchOnreOffer(svm, baseMint.publicKey, assetMint.publicKey)
-    setConfigPriceOracle(svm, client.configPda, offerPda)
 
     assetAta = getAssociatedTokenAddressSync(assetMint.publicKey, relayerAuthorityPda, true)
     baseAta = getAssociatedTokenAddressSync(baseMint.publicKey, relayerAuthorityPda, true)
@@ -149,7 +145,7 @@ describe('swap negatives (malicious router + custody guards)', () => {
 
     nttInboxItem = Keypair.generate().publicKey
     let flowBump: number
-    ;[outflightFlowPda, flowBump] = findOutflightFlowPda(nttInboxItem, client.program.programId)
+    ;[outflightFlowPda, flowBump] = findOutflightFlowPda(client.configPda, nttInboxItem, client.program.programId)
     const flowData = await client.program.coder.accounts.encode('flow', {
       recipient: new PublicKey(new Uint8Array(32).fill(7)),
       status: { received: {} },
@@ -157,6 +153,10 @@ describe('swap negatives (malicious router + custody guards)', () => {
       payer: authority.publicKey,
       bump: flowBump,
       direction: { withdraw: {} },
+      // User-signed floor: the honest out (outUsdc) clears it; the signed-floor
+      // negative (out = 1) falls below and must revert.
+      minSwapOut: new BN(MIN_USDC_FLOOR.toString()),
+      receivedSlot: new BN(0),
     })
     svm.setAccount(outflightFlowPda, {
       executable: false,
@@ -279,8 +279,8 @@ describe('swap negatives (malicious router + custody guards)', () => {
     })
   })
 
-  describe('step 4 — NAV floor guard', () => {
-    it('rejects output below the floor (out = 1)', async () => {
+  describe('step 4 — signed-floor guard', () => {
+    it('rejects output below flow.min_swap_out (out = 1)', async () => {
       await expect(runSwap({
         swapProgram: ROUTER_ID,
         swapIxData: ixData(0, netOnyc, 1n),
