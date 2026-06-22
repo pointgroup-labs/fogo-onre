@@ -72,8 +72,9 @@ describe('withdraw swap e2e (asset→base via local router)', () => {
   })
 
   it('skims fee in ONyc, swaps net to USDC, flips flow to Swapped', async () => {
+    await client.initialize().rpc()
     await client
-      .initialize({
+      .initializePair({
         authority: authority.publicKey,
         baseMint: baseMint.publicKey,
         assetMint: assetMint.publicKey,

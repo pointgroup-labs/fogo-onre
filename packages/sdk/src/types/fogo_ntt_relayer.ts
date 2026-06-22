@@ -8,7 +8,7 @@ export type FogoNttRelayer = {
   "address": "onrenRKgX54qtWeK3cuaTBE71xx7dWMXn82ubH61vAp",
   "metadata": {
     "name": "fogoNttRelayer",
-    "version": "0.2.0",
+    "version": "0.3.0",
     "spec": "0.1.0",
     "description": "Cross-chain Wormhole NTT relayer with stateless PDA custody",
     "repository": "https://github.com/pointgroup-labs/fogo-onre"
@@ -257,8 +257,8 @@ export type FogoNttRelayer = {
     {
       "name": "initialize",
       "docs": [
-        "One-time setup for the config PDA and relayer-owned ATAs. NTT program",
-        "IDs are init-only safety pins."
+        "Create the global config that gates pair creation. The signer becomes",
+        "the admin (singleton, created once at deploy)."
       ],
       "discriminator": [
         175,
@@ -272,9 +272,94 @@ export type FogoNttRelayer = {
       ],
       "accounts": [
         {
+          "name": "admin",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "relayerConfig",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  108,
+                  97,
+                  121,
+                  101,
+                  114,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "systemProgram",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "initializePair",
+      "docs": [
+        "Create a pair's config PDA + relayer-owned ATAs. Admin-gated. NTT",
+        "program IDs are init-only safety pins."
+      ],
+      "discriminator": [
+        177,
+        114,
+        226,
+        34,
+        186,
+        150,
+        5,
+        245
+      ],
+      "accounts": [
+        {
           "name": "authority",
           "writable": true,
           "signer": true
+        },
+        {
+          "name": "relayerConfig",
+          "docs": [
+            "Admin gate: only `relayer_config.admin` may create pairs."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  108,
+                  97,
+                  121,
+                  101,
+                  114,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
         },
         {
           "name": "pairConfig",
@@ -453,7 +538,7 @@ export type FogoNttRelayer = {
         {
           "name": "feeVault",
           "docs": [
-            "Forbid `fee_vault == onyc_ata` to prevent self-transfer no-ops",
+            "Forbid `fee_vault == asset_ata` to prevent self-transfer no-ops",
             "that would commingle user funds with fees."
           ]
         },
@@ -1435,6 +1520,19 @@ export type FogoNttRelayer = {
         151,
         77
       ]
+    },
+    {
+      "name": "relayerConfig",
+      "discriminator": [
+        116,
+        239,
+        42,
+        132,
+        218,
+        154,
+        194,
+        20
+      ]
     }
   ],
   "events": [
@@ -1666,6 +1764,11 @@ export type FogoNttRelayer = {
       "code": 6034,
       "name": "arithmeticOverflow",
       "msg": "arithmetic overflow"
+    },
+    {
+      "code": 6035,
+      "name": "unauthorizedAdmin",
+      "msg": "only the relayer admin may create pairs"
     }
   ],
   "types": [
@@ -1955,6 +2058,39 @@ export type FogoNttRelayer = {
           {
             "name": "amount",
             "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "relayerConfig",
+      "docs": [
+        "Global singleton (PDA `[RelayerConfig::SEED]`) that gates pair creation.",
+        "Same seed bytes as `PairConfig` but no mint seeds, so the bare-seed PDA",
+        "never collides with a `[SEED, base, asset]` pair PDA."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "admin",
+            "docs": [
+              "Only key allowed to call `initialize_pair`."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "reserved",
+            "type": {
+              "array": [
+                "u8",
+                64
+              ]
+            }
           }
         ]
       }

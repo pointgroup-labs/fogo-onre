@@ -23,6 +23,11 @@ export function findConfigPda(
   )
 }
 
+/** Global config singleton PDA `[CONFIG_SEED]` — the admin gate for pair creation. */
+export function findRelayerConfigPda(programId: PublicKey = RELAYER_PROGRAM_ID) {
+  return PublicKey.findProgramAddressSync([CONFIG_SEED], programId)
+}
+
 export function findAuthorityPda(programId: PublicKey = RELAYER_PROGRAM_ID) {
   return PublicKey.findProgramAddressSync([RELAYER_SEED], programId)
 }

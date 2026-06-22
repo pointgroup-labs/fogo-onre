@@ -53,12 +53,13 @@ describe('relayer', () => {
     assetMint = createMint(svm, authority, 6)
     client = new RelayerClient(provider as any, { baseMint: baseMint.publicKey, assetMint: assetMint.publicKey })
     feeVault = createAta(svm, authority, assetMint.publicKey, authority.publicKey)
+    await client.initialize().rpc()
   })
 
   describe('initialize', () => {
     it('creates config PDA and stores parameters', async () => {
       await client
-        .initialize({
+        .initializePair({
           authority: authority.publicKey,
           baseMint: baseMint.publicKey,
           assetMint: assetMint.publicKey,
@@ -82,7 +83,7 @@ describe('relayer', () => {
       await expectError(
         () =>
           client
-            .initialize({
+            .initializePair({
               authority: authority.publicKey,
               baseMint: baseMint.publicKey,
               assetMint: assetMint.publicKey,
@@ -99,7 +100,7 @@ describe('relayer', () => {
       // First init uses distinctive fees (25/75) so a later read proves the
       // second call never overwrote config.
       await client
-        .initialize({
+        .initializePair({
           authority: authority.publicKey,
           baseMint: baseMint.publicKey,
           assetMint: assetMint.publicKey,
@@ -112,7 +113,7 @@ describe('relayer', () => {
       let caught: any
       try {
         await client
-          .initialize({
+          .initializePair({
             authority: authority.publicKey,
             baseMint: baseMint.publicKey,
             assetMint: assetMint.publicKey,
@@ -147,7 +148,7 @@ describe('relayer', () => {
 
     it('allows zero and max valid fees', async () => {
       await client
-        .initialize({
+        .initializePair({
           authority: authority.publicKey,
           baseMint: baseMint.publicKey,
           assetMint: assetMint.publicKey,
@@ -166,7 +167,7 @@ describe('relayer', () => {
       // Defaults to the canonical USDC/ONyc managers; these are set once at
       // init and `configure` has no path to change them.
       await client
-        .initialize({
+        .initializePair({
           authority: authority.publicKey,
           baseMint: baseMint.publicKey,
           assetMint: assetMint.publicKey,
@@ -185,7 +186,7 @@ describe('relayer', () => {
   describe('configure', () => {
     beforeEach(async () => {
       await client
-        .initialize({
+        .initializePair({
           authority: authority.publicKey,
           baseMint: baseMint.publicKey,
           assetMint: assetMint.publicKey,
@@ -420,7 +421,7 @@ describe('relayer', () => {
     it('initialize → configure', async () => {
       // 1. Initialize with default fees + external fee vault
       await client
-        .initialize({
+        .initializePair({
           authority: authority.publicKey,
           baseMint: baseMint.publicKey,
           assetMint: assetMint.publicKey,
@@ -464,7 +465,7 @@ describe('relayer', () => {
 
     beforeEach(async () => {
       await client
-        .initialize({
+        .initializePair({
           authority: authority.publicKey,
           baseMint: baseMint.publicKey,
           assetMint: assetMint.publicKey,
@@ -996,7 +997,7 @@ describe('relayer', () => {
 
     beforeEach(async () => {
       await client
-        .initialize({
+        .initializePair({
           authority: authority.publicKey,
           baseMint: baseMint.publicKey,
           assetMint: assetMint.publicKey,

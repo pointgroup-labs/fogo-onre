@@ -74,8 +74,9 @@ describe('receive binds user-signed min_swap_out (deposit)', () => {
 
     feeVault = createAta(svm, authority, assetMint.publicKey, authority.publicKey)
 
+    await client.initialize().rpc()
     await client
-      .initialize({
+      .initializePair({
         authority: authority.publicKey,
         baseMint: baseMint.publicKey,
         assetMint: assetMint.publicKey,

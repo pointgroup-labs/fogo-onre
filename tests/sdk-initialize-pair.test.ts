@@ -1,5 +1,5 @@
 /**
- * `RelayerClient.initialize` must derive the config PDA from the mints it
+ * `RelayerClient.initializePair` must derive the config PDA from the mints it
  * actually uses. Regression for the review blocker where it took
  * `baseMint`/`assetMint` params but pinned `pairConfig` to the
  * constructor-bound `this.configPda` — an override pair then produced an
@@ -20,14 +20,14 @@ function makeClient(pair: { baseMint: Keypair, assetMint: Keypair }) {
   return { provider, client }
 }
 
-describe('initialize — config PDA tracks the pair used', () => {
+describe('initializePair — config PDA tracks the pair used', () => {
   it('derives pairConfig from an override pair, not the constructor pair', async () => {
     const pairA = { baseMint: Keypair.generate(), assetMint: Keypair.generate() }
     const pairB = { baseMint: Keypair.generate(), assetMint: Keypair.generate() }
     const { provider, client } = makeClient(pairA)
 
     const keys = await client
-      .initialize({
+      .initializePair({
         authority: provider.wallet.publicKey,
         baseMint: pairB.baseMint.publicKey,
         assetMint: pairB.assetMint.publicKey,
@@ -47,7 +47,7 @@ describe('initialize — config PDA tracks the pair used', () => {
     const { provider, client } = makeClient(pairA)
 
     const keys = await client
-      .initialize({
+      .initializePair({
         authority: provider.wallet.publicKey,
         feeVault: Keypair.generate().publicKey,
         depositFeeBps: 0,

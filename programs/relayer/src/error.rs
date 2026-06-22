@@ -109,4 +109,7 @@ pub enum RelayerError {
 
     #[msg("arithmetic overflow")]
     ArithmeticOverflow,
+
+    #[msg("only the relayer admin may create pairs")]
+    UnauthorizedAdmin,
 }

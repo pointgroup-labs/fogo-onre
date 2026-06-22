@@ -35,17 +35,23 @@ pub mod security {
 pub mod fogo_ntt_relayer {
     use super::*;
 
-    /// One-time setup for the config PDA and relayer-owned ATAs. NTT program
-    /// IDs are init-only safety pins.
-    pub fn initialize(
-        ctx: Context<Initialize>,
+    /// Create the global config that gates pair creation. The signer becomes
+    /// the admin (singleton, created once at deploy).
+    pub fn initialize(ctx: Context<Initialize>) -> Result<()> {
+        initialize::handler(ctx)
+    }
+
+    /// Create a pair's config PDA + relayer-owned ATAs. Admin-gated. NTT
+    /// program IDs are init-only safety pins.
+    pub fn initialize_pair(
+        ctx: Context<InitializePair>,
         deposit_fee_bps: u16,
         withdraw_fee_bps: u16,
         ntt_base_program: Pubkey,
         ntt_asset_program: Pubkey,
         intent_programs: [Pubkey; 2],
     ) -> Result<()> {
-        initialize::handler(
+        initialize_pair::handler(
             ctx,
             deposit_fee_bps,
             withdraw_fee_bps,

@@ -30,6 +30,7 @@ import {
   findConfigPda,
   findInflightFlowPda,
   findOutflightFlowPda,
+  findRelayerConfigPda,
   findUserInboxWithMinPda,
 } from './pda'
 
@@ -46,6 +47,7 @@ export class RelayerClient {
   readonly baseMint: PublicKey
   readonly assetMint: PublicKey
   readonly configPda: PublicKey
+  readonly relayerConfigPda: PublicKey
   readonly authorityPda: PublicKey
 
   /**
@@ -58,15 +60,34 @@ export class RelayerClient {
     this.baseMint = pair.baseMint
     this.assetMint = pair.assetMint
     ;[this.configPda] = findConfigPda(pair.baseMint, pair.assetMint, this.program.programId)
+    ;[this.relayerConfigPda] = findRelayerConfigPda(this.program.programId)
     ;[this.authorityPda] = findAuthorityPda(this.program.programId)
   }
 
   /**
-   * One-time setup: create config PDA + relayer-authority-owned ATAs.
-   * `feeVault` must hold the asset mint and must not alias the relayer asset
-   * ATA. The relayer enforces both.
+   * Create the global config singleton. `admin` (defaults to the provider
+   * wallet) becomes the only key allowed to call `initializePair`. Run once.
    */
-  initialize(params: {
+  initialize(params: { admin?: PublicKey } = {}) {
+    const admin = params.admin ?? this.providerPublicKey()
+    if (!admin) {
+      throw new Error('initialize: no admin provided and provider has no wallet')
+    }
+    return this.program.methods
+      .initialize()
+      .accountsPartial({
+        admin,
+        relayerConfig: this.relayerConfigPda,
+        systemProgram: SystemProgram.programId,
+      })
+  }
+
+  /**
+   * Create a pair's config PDA + relayer-authority-owned ATAs. Admin-gated:
+   * `authority` must equal the global config admin. `feeVault` must hold the
+   * asset mint and must not alias the relayer asset ATA.
+   */
+  initializePair(params: {
     authority: PublicKey
     baseMint?: PublicKey
     assetMint?: PublicKey
@@ -86,7 +107,7 @@ export class RelayerClient {
     // constructor's `this.configPda`, which would mismatch the on-chain seeds.
     const [configPda] = findConfigPda(baseMint, assetMint, this.program.programId)
     return this.program.methods
-      .initialize(
+      .initializePair(
         params.depositFeeBps,
         params.withdrawFeeBps,
         params.nttBaseProgram ?? NTT_USDC_PROGRAM_ID,
@@ -95,6 +116,7 @@ export class RelayerClient {
       )
       .accountsPartial({
         authority: params.authority,
+        relayerConfig: this.relayerConfigPda,
         pairConfig: configPda,
         relayerAuthority: this.authorityPda,
         baseMint,

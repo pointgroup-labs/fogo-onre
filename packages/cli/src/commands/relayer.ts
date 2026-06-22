@@ -40,7 +40,42 @@ export function relayerCommands(): Command {
 
   relayer
     .command('initialize')
-    .description('One-time initialize: create RelayerConfig + relayer-owned ATAs')
+    .description('One-time global init: create the admin-gated RelayerConfig singleton')
+    .option('--admin <pubkey>', 'Admin pubkey allowed to create pairs (default: signer)')
+    .option('--confirm', 'Actually broadcast the transaction (default: dry-run)')
+    .action(async (opts: { admin?: string, confirm?: boolean }) => {
+      const { connection, keypair, client } = useContext()
+
+      const admin = opts.admin ? new PublicKey(opts.admin) : keypair.publicKey
+
+      const programAcct = await connection.getAccountInfo(RELAYER_PROGRAM_ID)
+      if (!programAcct?.executable) {
+        throw new Error(`relayer program ${RELAYER_PROGRAM_ID.toBase58()} not found or not executable on ${connection.rpcEndpoint}`)
+      }
+      const existing = await connection.getAccountInfo(client.relayerConfigPda)
+      if (existing) {
+        throw new Error(`RelayerConfig already exists at ${client.relayerConfigPda.toBase58()}`)
+      }
+
+      console.log(chalk.cyan('Initialize plan'))
+      console.log(chalk.dim(`  relayerConfigPda: ${client.relayerConfigPda.toBase58()}  (will be created)`))
+      console.log(chalk.dim(`  admin:            ${admin.toBase58()}`))
+
+      if (!opts.confirm) {
+        console.log()
+        console.log(chalk.yellow('dry-run only. Re-run with --confirm to broadcast.'))
+        return
+      }
+
+      console.log()
+      const sig = await runTx(() => client.initialize({ admin }).rpc())
+      console.log(chalk.green('RelayerConfig initialized'))
+      console.log(chalk.dim(`  tx: ${sig}`))
+    })
+
+  relayer
+    .command('initialize-pair')
+    .description('Create a pair PairConfig + relayer-owned ATAs (admin-only)')
     .option('--usdc-mint <pubkey>', 'Pair base mint on Solana (default: --base-mint)')
     .option('--onyc-mint <pubkey>', 'Pair asset mint on Solana (default: --asset-mint)')
     .option('--fee-vault <pubkey>', 'External ONyc token account for protocol fees (default: signer\'s ONyc ATA)')
@@ -82,10 +117,10 @@ export function relayerCommands(): Command {
         throw new Error(`account at ${RELAYER_PROGRAM_ID.toBase58()} is not executable`)
       }
 
-      // Pre-flight 2: RelayerConfig must NOT exist.
+      // Pre-flight 2: PairConfig must NOT exist.
       const existing = await connection.getAccountInfo(client.configPda)
       if (existing) {
-        throw new Error(`RelayerConfig already exists at ${client.configPda.toBase58()}`)
+        throw new Error(`PairConfig already exists at ${client.configPda.toBase58()}`)
       }
 
       // Pre-flight 3: mints exist with expected decimals.
@@ -152,7 +187,7 @@ export function relayerCommands(): Command {
       console.log()
       const sig = await runTx(() =>
         client
-          .initialize({
+          .initializePair({
             authority,
             baseMint: usdcMint,
             assetMint: onycMint,
@@ -164,7 +199,7 @@ export function relayerCommands(): Command {
           .rpc(),
       )
 
-      console.log(chalk.green('Relayer initialized'))
+      console.log(chalk.green('Pair initialized'))
       console.log(chalk.dim(`  tx: ${sig}`))
     })
 
