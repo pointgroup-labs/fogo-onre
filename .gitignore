@@ -58,7 +58,18 @@ tmp
 # Static-export output (`output: 'export'` in next.config.ts)
 **/out/
 
+# Secrets — anywhere in the tree. Covers operator keypairs, the
+# docker-compose `./secrets/` mount, and any .env file under deploy/.
+# Never commit these: a leaked keypair is the relayer authority, a leaked
+# RPC api-key is a billable resource, and cranker.env usually has both.
 /deploy/**/*.env
+/deploy/**/secrets/
+**/*keypair*.json
+**/*.key
+.keypair.json
+# Solana CLI default wallet name — operators copy it into the tree by accident.
+/id.json
+/deploy/**/id.json
 
 # Cranker runtime state — per-instance Wormholescan watermarks. Generated
 # at the path set by `CHECKPOINT_PATH` (defaults to ./cranker-checkpoint.json).

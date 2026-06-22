@@ -63,6 +63,12 @@ test-only: ## test: Run a single test by name (T=...)
 	@test -n "$$T" || { echo "Usage: make test-only T='test name'" >&2; exit 1; }
 	pnpm exec vitest run -t "$$T"
 
+# Regenerate deploy/cranker/cranker.env.example from the configSchema in
+# packages/cranker/src/config.ts. The check (no UPDATE) runs as part of the
+# test suite — this target is the "fmt" half of the fmt/fmt-check pair.
+gen-env: ## codegen: Regenerate cranker.env.example from configSchema
+	UPDATE=1 pnpm exec vitest run cranker-env-sync
+
 lint: ## quality: ESLint + clippy (fails on warnings)
 	pnpm lint
 	cargo clippy --workspace --all-targets -- -D warnings

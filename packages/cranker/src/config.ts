@@ -17,95 +17,68 @@ const DEFAULT_SOLANA_ONYC_EMITTER_HEX = DEFAULT_ONYC_EMITTER_HEX
 // `NTT_USDC_PROGRAM_ID` constant.
 const DEFAULT_SOLANA_USDC_EMITTER_HEX = DEFAULT_USDC_EMITTER_HEX
 
-const schema = z.object({
+/**
+ * Cranker runtime config schema. THIS IS THE SINGLE SOURCE OF TRUTH.
+ *
+ * `deploy/cranker/cranker.env.example` is generated from this schema by
+ * `tests/cranker-env-sync.test.ts` (run `make gen-env` to regenerate).
+ * Each field's `.describe()` text becomes the operator-facing comment in the
+ * generated example, so doc drift fails CI by construction.
+ *
+ * Conventions:
+ * - `.describe()` is operator-facing prose. Keep it to 1–3 lines, explain
+ *   why* the default is what it is, and call out boot-breaking failure
+ *   modes (RPC rejection, tx-overflow, silent fund stranding).
+ * - Defaults are safe for mainnet steady-state; operators should only need
+ *   to override under incident or fork conditions.
+ * - The generator groups fields by position here, top-to-bottom, so keep
+ *   required fields first — the example reads as a setup checklist.
+ */
+export const configSchema = z.object({
   SOLANA_RPC_URL: z.string().url().refine(
     u => !u.includes('api.mainnet-beta.solana.com'),
     { message: 'public mainnet-beta RPC disabled getProgramAccounts; use a paid RPC (Helius/QuickNode/Triton)' },
-  ),
-  SOLANA_WS_URL: z.string().url(),
-  FOGO_RPC_URL: z.string().url(),
-  KEYPAIR_PATH: z.string().min(1),
-  WORMHOLESCAN_URL: z.string().url().default('https://api.wormholescan.io'),
-  WORMHOLESCAN_PAGE_SIZE: z.coerce.number().int().min(1).max(200).default(50),
-  WORMHOLESCAN_MAX_PAGES: z.coerce.number().int().min(1).max(20).default(2),
-  /**
-   * Backstop scan depth: a periodic enumeration that ignores the watermark,
-   * catching flows the incremental scan stranded — VAAs that arrived during
-   * downtime (watermark fast-forwarded past them) or orphan Flow PDAs from a
-   * failed post-watermark dispatch. 50×50 ≈ several days of mainnet volume.
-   */
-  WORMHOLESCAN_BACKSTOP_MAX_PAGES: z.coerce.number().int().min(1).max(200).default(50),
-  /** Period between backstop sweeps. 0 disables. Default 5 minutes. */
-  BACKSTOP_INTERVAL_MS: z.coerce.number().int().min(0).default(300_000),
-  /**
-   * Period between refund sweeps: NTT-sends the original token back for
-   * `Received` flows past `REFUND_TIMEOUT_SLOTS`. 0 disables (default: opt in
-   * until the NTT send-back manager wiring is verified). Suggested ~15min.
-   */
-  REFUND_INTERVAL_MS: z.coerce.number().int().min(0).default(0),
-  /** Refund-side concurrency budget — separate so it can't starve normal advances. */
-  MAX_CONCURRENT_REFUNDS: z.coerce.number().int().min(1).max(32).default(2),
-  /** FOGO Wormhole chain ID (source chain for VAA polling). Defaults to SDK constant. */
-  FOGO_WORMHOLE_CHAIN_ID: z.coerce.number().int().min(1).default(FOGO_WORMHOLE_CHAIN_ID),
-  /** Hex emitter (32 bytes, no 0x) for the FOGO USDC NTT manager. Defaults to PDA derived from SDK's NTT_USDC_PROGRAM_ID. */
-  FOGO_USDC_EMITTER_HEX: z.string().regex(/^[0-9a-f]{64}$/i).default(DEFAULT_USDC_EMITTER_HEX),
-  /** Hex emitter for the FOGO ONyc NTT manager. Defaults to PDA derived from SDK's NTT_ONYC_PROGRAM_ID. */
-  FOGO_ONYC_EMITTER_HEX: z.string().regex(/^[0-9a-f]{64}$/i).default(DEFAULT_ONYC_EMITTER_HEX),
-  /** Hex emitter for the Solana ONyc NTT manager — outbound bridge source. Defaults to the NTT_ONYC_PROGRAM_ID PDA. */
-  SOLANA_ONYC_EMITTER_HEX: z.string().regex(/^[0-9a-f]{64}$/i).default(DEFAULT_SOLANA_ONYC_EMITTER_HEX),
-  /**
-   * Hex emitter for the Solana USDC.s NTT manager — source for the
-   * redeem-completion leg. Defaults to the SDK's `NTT_USDC_PROGRAM_ID` PDA.
-   */
-  SOLANA_USDC_EMITTER_HEX: z.string().regex(/^[0-9a-f]{64}$/i).default(DEFAULT_SOLANA_USDC_EMITTER_HEX),
-  /** Set to "false" to disable the Solana → FOGO ONyc bridge pipeline (e.g. during incident triage). */
-  BRIDGE_PIPELINE_ENABLED: z.enum(['true', 'false']).default('true'),
-  /** Bridge-side concurrency budget — separate from MAX_CONCURRENT_ADVANCES so a Wormholescan backfill can't starve normal Flow advances. */
-  BRIDGE_MAX_CONCURRENT: z.coerce.number().int().min(1).max(32).default(4),
-  METRICS_PORT: z.coerce.number().int().min(1).max(65535).default(9090),
-  SCAN_INTERVAL_MS: z.coerce.number().int().min(1000).default(30_000),
-  SCAN_MAX_BACKOFF_MS: z.coerce.number().int().min(1000).default(300_000),
-  SHUTDOWN_DEADLINE_MS: z.coerce.number().int().min(1000).default(8000),
-  BALANCE_POLL_INTERVAL_MS: z.coerce.number().int().min(5000).default(60_000),
-  RPC_TIMEOUT_MS: z.coerce.number().int().min(1000).default(15_000),
-  /**
-   * Budget for one `enumerateFlows` call. Separate from `RPC_TIMEOUT_MS`
-   * because a fresh checkpoint-less process backfills the full page window
-   * (50–100 round-trips) and 15s isn't enough.
-   */
-  ENUMERATE_TIMEOUT_MS: z.coerce.number().int().min(5000).default(90_000),
-  /**
-   * Per-transaction confirmation budget. The 30s floor is sized for the
-   * `core.postVaa` multi-tx sequence (several `verify_signatures` + one
-   * `post_vaa`); anything lower aborts mid-sequence and silently bricks
-   * withdraw flows under congestion.
-   */
-  TX_CONFIRM_TIMEOUT_MS: z.coerce.number().int().min(30_000).default(90_000),
-  WORMHOLESCAN_TIMEOUT_MS: z.coerce.number().int().min(1000).default(10_000),
-  HEARTBEAT_STALE_MS: z.coerce.number().int().min(30_000).default(120_000),
-  MAX_CONCURRENT_ADVANCES: z.coerce.number().int().min(1).max(32).default(4),
-  /**
-   * Priority fee (µ-lamports/CU) prepended to every Solana tx. Without a
-   * non-zero value mainnet leaders deprioritize the tx and the blockhash
-   * expires before inclusion. Default 10_000 clears a moderately congested
-   * mainnet; bump to 50_000+ during incidents (takes effect next scan).
-   */
-  SOLANA_PRIORITY_FEE_MICROLAMPORTS: z.coerce.number().int().min(0).default(10_000),
-  /**
-   * Address Lookup Table compressing the `send` leg's stable NTT/Wormhole
-   * accounts — required for the outbound tx to fit the 1232-byte limit (else
-   * the v0 message inlines every account and overflows). Defaults to the live
-   * mainnet send-leg LUT so a forgotten env var can't brick sends.
-   */
-  SEND_LOOKUP_TABLE: z.string().min(32).default('9aF7QN6HTtfQ6Wvo2UMFeTuHyaBxidMHhbTbN16Bwuyk'),
-  /**
-   * On-disk checkpoint file (per-emitter watermarks). Empty string disables
-   * persistence (in-memory watermarks still apply per process). On-chain
-   * idempotency makes a lost checkpoint a one-time backfill, never a missed
-   * dispatch.
-   */
-  CHECKPOINT_PATH: z.string().default('./cranker-checkpoint.json'),
-  LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
+  ).describe('Paid Solana mainnet RPC. PUBLIC mainnet-beta is REJECTED at boot because it disables getProgramAccounts which the scanner requires. Helius / QuickNode / Triton are known-good.'),
+  SOLANA_WS_URL: z.string().url().describe('Solana WebSocket endpoint for live VAA delivery. Same provider as SOLANA_RPC_URL; a dead socket falls back to the (slower) Wormholescan poll and trips CrankerWebSocketDead.'),
+  FOGO_RPC_URL: z.string().url().describe('FOGO RPC. The same cranker keypair pays bridge-redeem fees on FOGO; if this is unreachable, Solana → FOGO ONyc redeems stall and the FOGO balance poll goes stale.'),
+  KEYPAIR_PATH: z.string().min(1).describe('Cranker signing keypair (Solana JSON-array secret-key format). Under the bundled docker-compose this MUST be /secrets/cranker-keypair.json — the host file ./secrets/cranker-keypair.json is mounted read-only at that path. MUST NOT equal PairConfig.authority: the cranker is grief-only, and co-locating with the authority gives a stolen host fee + redemption-cancel powers. Boot aborts if the invariant is violated.'),
+
+  WORMHOLESCAN_URL: z.string().url().default('https://api.wormholescan.io').describe('Wormholescan API base. The public hosted endpoint is fine for production; override only if you run a private instance.'),
+  WORMHOLESCAN_PAGE_SIZE: z.coerce.number().int().min(1).max(200).default(50).describe('Pagination size for the VAA-listing call. Higher = fewer round-trips, lower = smaller per-call response.'),
+  WORMHOLESCAN_MAX_PAGES: z.coerce.number().int().min(1).max(20).default(2).describe('Max pages per incremental scan. Raise temporarily after a long outage to backfill the queue; steady-state needs only 1–2.'),
+  WORMHOLESCAN_BACKSTOP_MAX_PAGES: z.coerce.number().int().min(1).max(200).default(50).describe('Backstop scan depth: a periodic enumeration that ignores the watermark, catching flows the incremental scan stranded — VAAs that arrived during downtime (watermark fast-forwarded past them) or orphan Flow PDAs from a failed post-watermark dispatch. 50×50 ≈ several days of mainnet volume.'),
+  BACKSTOP_INTERVAL_MS: z.coerce.number().int().min(0).default(300_000).describe('Period between backstop sweeps. 0 disables. Default 5 minutes.'),
+
+  REFUND_INTERVAL_MS: z.coerce.number().int().min(0).default(0).describe('Period between refund sweeps: NTT-sends the original token back for Received flows past REFUND_TIMEOUT_SLOTS. 0 disables (default: opt in until the NTT send-back manager wiring is verified). Suggested ~15min once enabled.'),
+  MAX_CONCURRENT_REFUNDS: z.coerce.number().int().min(1).max(32).default(2).describe('Refund-side concurrency budget — separate so refunds cannot starve normal advances.'),
+
+  FOGO_WORMHOLE_CHAIN_ID: z.coerce.number().int().min(1).default(FOGO_WORMHOLE_CHAIN_ID).describe('FOGO Wormhole chain ID (source chain for VAA polling). Defaults to the SDK constant (51 = FOGO mainnet). Override only when pointing at a different source chain.'),
+  FOGO_USDC_EMITTER_HEX: z.string().regex(/^[0-9a-f]{64}$/i).default(DEFAULT_USDC_EMITTER_HEX).describe('32-byte hex (no 0x prefix) emitter of the FOGO USDC.s NTT manager. Defaults to the ["emitter"] PDA derived from the SDK NTT_USDC_PROGRAM_ID. Override only when pointing at a redeployed manager.'),
+  FOGO_ONYC_EMITTER_HEX: z.string().regex(/^[0-9a-f]{64}$/i).default(DEFAULT_ONYC_EMITTER_HEX).describe('32-byte hex emitter of the FOGO ONyc NTT manager. Defaults to the SDK PDA; override for a redeployed manager.'),
+  SOLANA_ONYC_EMITTER_HEX: z.string().regex(/^[0-9a-f]{64}$/i).default(DEFAULT_SOLANA_ONYC_EMITTER_HEX).describe('32-byte hex emitter of the Solana ONyc NTT manager — outbound bridge source. Same bytecode on both chains, so defaults to the same SDK PDA.'),
+  SOLANA_USDC_EMITTER_HEX: z.string().regex(/^[0-9a-f]{64}$/i).default(DEFAULT_SOLANA_USDC_EMITTER_HEX).describe('32-byte hex emitter of the Solana USDC.s NTT manager — source for the redeem-completion leg. Defaults to the SDK NTT_USDC_PROGRAM_ID PDA.'),
+  BRIDGE_PIPELINE_ENABLED: z.enum(['true', 'false']).default('true').describe('Set to "false" to disable the Solana → FOGO ONyc bridge pipeline (e.g. during incident triage). Flow advances continue independently.'),
+  BRIDGE_MAX_CONCURRENT: z.coerce.number().int().min(1).max(32).default(4).describe('Bridge-side concurrency budget — separate from MAX_CONCURRENT_ADVANCES so a Wormholescan backfill cannot starve normal Flow advances.'),
+
+  METRICS_PORT: z.coerce.number().int().min(1).max(65535).default(9090).describe('Network port for /metrics and /healthz. Bound 0.0.0.0 inside the container; compose binds 127.0.0.1 on the host so Tailscale-only operators see it but the public internet does not.'),
+
+  SCAN_INTERVAL_MS: z.coerce.number().int().min(1000).default(30_000).describe('Base interval between scan iterations (success path). Backoff multiplies this on consecutive errors up to SCAN_MAX_BACKOFF_MS.'),
+  SCAN_MAX_BACKOFF_MS: z.coerce.number().int().min(1000).default(300_000).describe('Cap on exponential backoff after consecutive scan errors. Backoff is SCAN_INTERVAL_MS * 2^errors, clamped here. 5 minutes is a sane default for a flapping RPC.'),
+  SHUTDOWN_DEADLINE_MS: z.coerce.number().int().min(1000).default(8000).describe('How long the daemon waits for an in-flight scan to drain on SIGTERM before abandoning it. Must be < Docker stop_grace_period (30s) so we do not lose to SIGKILL mid-cleanup.'),
+  BALANCE_POLL_INTERVAL_MS: z.coerce.number().int().min(5000).default(60_000).describe('How often to poll the cranker SOL/FOGO balance (powers the LowSol / LowFogo / BalancePollStale alerts).'),
+
+  RPC_TIMEOUT_MS: z.coerce.number().int().min(1000).default(15_000).describe('Per-RPC-call timeout. Caps any single getProgramAccounts / getMultipleAccounts so a stuck RPC cannot pin a worker forever.'),
+  ENUMERATE_TIMEOUT_MS: z.coerce.number().int().min(5000).default(90_000).describe('Budget for one enumerateFlows call. Separate from RPC_TIMEOUT_MS because a fresh checkpoint-less process backfills the full page window (50–100 round-trips) and 15s is not enough.'),
+  TX_CONFIRM_TIMEOUT_MS: z.coerce.number().int().min(30_000).default(90_000).describe('Per-transaction confirmation budget. The 30s floor is sized for the core.postVaa multi-tx sequence (several verify_signatures + one post_vaa); anything lower aborts mid-sequence and silently bricks withdraw flows under congestion.'),
+  WORMHOLESCAN_TIMEOUT_MS: z.coerce.number().int().min(1000).default(10_000).describe('Per-Wormholescan-call timeout.'),
+  HEARTBEAT_STALE_MS: z.coerce.number().int().min(30_000).default(120_000).describe('Heartbeat-staleness threshold for the self-kill watchdog. If the scan loop fails to stamp the heartbeat for this long, the daemon process.exit(1)s so Docker restart policy lifts it. Must be >> SCAN_INTERVAL_MS + worst-case scan duration; 2 min is comfortable.'),
+  MAX_CONCURRENT_ADVANCES: z.coerce.number().int().min(1).max(32).default(4).describe('Max simultaneous advance dispatches. Each advance is one CPI tx; higher numbers reduce per-flow latency but raise SOL burn rate during bursts. Stay << RPC provider per-second cap.'),
+
+  SOLANA_PRIORITY_FEE_MICROLAMPORTS: z.coerce.number().int().min(0).default(10_000).describe('Priority fee (µ-lamports/CU) prepended to every Solana tx. Without a non-zero value mainnet leaders deprioritize the tx and the blockhash expires before inclusion. Default 10_000 clears a moderately congested mainnet; bump to 50_000+ during incidents (takes effect next scan).'),
+  SEND_LOOKUP_TABLE: z.string().min(32).default('9aF7QN6HTtfQ6Wvo2UMFeTuHyaBxidMHhbTbN16Bwuyk').describe('Address Lookup Table compressing the send leg stable NTT/Wormhole accounts — required for the outbound tx to fit the 1232-byte limit (else the v0 message inlines every account and overflows). Defaults to the live mainnet send-leg LUT so a forgotten env var cannot brick sends. Override for devnet/testnet.'),
+
+  CHECKPOINT_PATH: z.string().default('./cranker-checkpoint.json').describe('On-disk checkpoint file (per-emitter watermarks). Empty string disables persistence (in-memory watermarks still apply per process). On-chain idempotency makes a lost checkpoint a one-time backfill, never a missed dispatch.'),
+  LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info').describe('debug | info | warn | error. JSON-per-line on stderr.'),
 })
 
 export type CrankerConfig = {
@@ -145,7 +118,7 @@ export type CrankerConfig = {
 }
 
 export function loadConfig(env: Record<string, string | undefined> = process.env): CrankerConfig {
-  const parsed = schema.parse(env)
+  const parsed = configSchema.parse(env)
   return {
     solanaRpcUrl: parsed.SOLANA_RPC_URL,
     solanaWsUrl: parsed.SOLANA_WS_URL,

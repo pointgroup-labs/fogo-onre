@@ -20,8 +20,12 @@ groups:
           summary: 'Cranker heartbeat stale ({{ $value | humanizeDuration }})'
           description: "Last successful scan completed >2m ago. The watchdog inside the daemon should self-kill at the configured staleness threshold; if that already happened and we're still alerting, Docker isn't restarting the container."
 
+      # Ratio, not absolute rate. Scans run every SCAN_INTERVAL_MS (30s), so
+      # the physical ceiling on rate(...[5m]) is ~0.033/s — any absolute
+      # threshold above that is unreachable. Threshold is the fraction of
+      # scans that error (20% here), matching the annotation.
       - alert: CrankerScanErrorRate
-        expr: rate(cranker_scan_iterations_total{result="error"}[5m]) > 0.2
+        expr: sum(rate(cranker_scan_iterations_total{result="error"}[5m])) / sum(rate(cranker_scan_iterations_total[5m])) > 0.2
         for: 10m
         labels:
           severity: warn
@@ -38,11 +42,114 @@ groups:
           summary: 'Cranker keypair SOL balance low ({{ $value }} SOL)'
           description: "Cranker can't pay tx fees once balance hits zero. Top up immediately."
 
+      - alert: CrankerKeypairLowFogo
+        expr: cranker_keypair_fogo_balance < 0.05
+        for: 5m
+        labels:
+          severity: page
+        annotations:
+          summary: 'Cranker keypair FOGO balance low ({{ $value }} FOGO)'
+          description: "The cranker keypair pays bridge-redeem fees on FOGO. Once it hits zero, all Solana → FOGO ONyc redeems start failing silently while the flow counter keeps looking healthy. Top up the same keypair on FOGO."
+
+      # Same ratio correction as CrankerScanErrorRate. Txs are bursty and only
+      # sent when there are flows to advance, so the denominator collapses to
+      # 0 during quiet periods — the ratio goes NaN and the alert correctly
+      # does not fire on "no activity".
       - alert: CrankerTxErrorRate
-        expr: rate(cranker_tx_sent_total{result="error"}[10m]) > 0.1
+        expr: sum(rate(cranker_tx_sent_total{result="error"}[10m])) / sum(rate(cranker_tx_sent_total[10m])) > 0.1
         for: 15m
         labels:
           severity: warn
         annotations:
           summary: Cranker tx error rate elevated
           description: 'Sustained tx submission failures. Check RPC health, keypair balance, and on-chain Flow state for stuck items.'
+
+      # A poisoned flow is a user deposit/withdraw quarantined past the retry
+      # threshold — upstream wedge (OnRe vector deletion, NTT/manager pause).
+      # Only an upgrade-authority rescue can move the funds. Any nonzero is a
+      # page: someone's money is stuck.
+      - alert: CrankerFlowStuckPoisoned
+        expr: cranker_flow_stuck{state="poisoned"} > 0
+        for: 1m
+        labels:
+          severity: page
+        annotations:
+          summary: 'Cranker flow quarantined ({{ $value }} poisoned)'
+          description: "One or more flows are past the retry threshold and the cranker has given up advancing them. User funds are stranded until manually rescued. RUNBOOK: (1) identify the Flow PDA via the cranker logs (search 'poisoned'), (2) confirm the upstream cause in docs/architecture.md §Security Model, (3) if upstream is permanently gone, coordinate an upgrade-authority rescue tx. Do NOT raise MAX_CONCURRENT_ADVANCES — that won't help a poisoned flow."
+
+      # Many flows in retry backoff at once — an upstream wedge that the
+      # cranker is still fighting (hasn't tripped into poisoned yet). Warn, not
+      # page: it may self-heal.
+      - alert: CrankerFlowStuckCooldownSustained
+        expr: cranker_flow_stuck{state="cooldown"} > 5
+        for: 15m
+        labels:
+          severity: warn
+        annotations:
+          summary: 'Many flows in retry backoff ({{ $value }} cooling)'
+          description: 'More than 5 flows have been in self-healing backoff for 15m. If this escalates to CrankerFlowStuckPoisoned, funds strand. Check the swap venue / NTT manager / RPC health now.'
+
+      # FOGO balance poller hasn't succeeded in 10m. The FOGO balance gauge
+      # goes NaN during a poll outage, so the LowFogo alert above can't fire —
+      # this is the signal that catches "FOGO is unreachable and we don't even
+      # know if the balance is healthy". 10m tolerance for a flapping RPC.
+      - alert: CrankerFogoBalancePollStale
+        expr: cranker_balance_poll_age_seconds{chain="fogo"} > 600
+        for: 2m
+        labels:
+          severity: warn
+        annotations:
+          summary: 'Cranker FOGO balance poll stale ({{ $value | humanizeDuration }})'
+          description: 'The FOGO balance poller has not succeeded in >10m. Solana → FOGO ONyc redeems may be silently failing on fee exhaustion. Check FOGO RPC reachability from the host.'
+
+      # CrankerSolBalancePollStale mirrors the FOGO one: if the SOL balance
+      # gauge is NaN, LowSol can't fire. Catches "Solana RPC so degraded the
+      # poller stopped" separately from CrankerDown (the daemon is up).
+      - alert: CrankerSolBalancePollStale
+        expr: cranker_balance_poll_age_seconds{chain="solana"} > 600
+        for: 2m
+        labels:
+          severity: warn
+        annotations:
+          summary: 'Cranker SOL balance poll stale ({{ $value | humanizeDuration }})'
+          description: 'The SOL balance poller has not succeeded in >10m. The LowSol alert cannot fire while this is stale. Check Solana RPC health (separate from the scanner, which may still be limping along).'
+
+      # WebSocket subscription to Solana died — the scanner is blind to new
+      # VAAs and will only see them on the (slower) Wormholescan poll/backstop.
+      # Not a fund-safety issue but a latency regression.
+      - alert: CrankerWebSocketDead
+        expr: cranker_ws_subscription_alive == 0
+        for: 5m
+        labels:
+          severity: warn
+        annotations:
+          summary: Cranker Solana WebSocket subscription dead
+          description: 'The live VAA subscription has been down for 5m. New flows will only be picked up by the Wormholescan poll loop — expect higher end-to-end latency until it reconnects.'
+
+      # Absence-of-success: flows are arriving (unswept observations climbing)
+      # but nothing is advancing. This is the silent-wedge signal — upstream
+      # is accepting inbound VAAs and the scanner sees them, but every advance
+      # is failing in a way that doesn't trip the error counter (e.g. a CPI
+      # revert the cranker swallows, or a stale min_swap_out floor). Catches
+      # the exact "funds visible but stranded" case that no per-call error
+      # alert can. 15m window is long enough to ride out a single slow swap.
+      - alert: CrankerFlowAdvanceStalled
+        expr: sum(increase(cranker_flow_unswept_observed_total[15m])) > 0 unless sum(increase(cranker_flow_advance_total[15m])) > 0
+        for: 15m
+        labels:
+          severity: page
+        annotations:
+          summary: Flows observed but none advancing
+          description: "Inbound flows are accumulating (unswept observations > 0 over 15m) but zero flow advances completed in the same window. The silent-stranding case: funds are visible on-chain but the cranker isn't moving them, and no error counter explains why. Check the cranker logs for swallowed CPI reverts, then the swap venue / NTT manager state."
+
+      # Raw RPC error flood. Absolute rate is fine here (no natural "total RPC
+      # calls" denominator); >1 error/sec sustained indicates provider-grade
+      # degradation, not transient blips.
+      - alert: CrankerRpcErrorFlood
+        expr: sum(rate(cranker_rpc_errors_total[5m])) > 1
+        for: 5m
+        labels:
+          severity: warn
+        annotations:
+          summary: 'Cranker RPC error flood ({{ $value | printf "%.1f" }}/s)'
+          description: 'RPC failures above 1/sec for 5m. Provider degradation or rate-limit exhaustion. Check the endpoint tag on cranker_rpc_errors_total for which call is failing.'

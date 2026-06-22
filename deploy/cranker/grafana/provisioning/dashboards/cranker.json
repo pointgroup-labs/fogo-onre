@@ -2,9 +2,13 @@
   "title": "Cranker",
   "uid": "cranker",
   "schemaVersion": 39,
-  "version": 1,
+  "version": 2,
+  "tags": ["fogo-onre", "cranker"],
   "refresh": "30s",
   "time": { "from": "now-6h", "to": "now" },
+  "templating": {
+    "list": []
+  },
   "panels": [
     {
       "id": 1,
@@ -46,6 +50,45 @@
       }
     },
     {
+      "id": 7,
+      "type": "stat",
+      "title": "Keypair FOGO balance",
+      "gridPos": { "x": 12, "y": 0, "w": 6, "h": 4 },
+      "targets": [{ "expr": "cranker_keypair_fogo_balance", "refId": "A" }],
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 4,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 0.05 },
+              { "color": "green", "value": 0.2 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 8,
+      "type": "stat",
+      "title": "Flows stuck (poisoned)",
+      "gridPos": { "x": 18, "y": 0, "w": 6, "h": 4 },
+      "description": "User deposit/withdraw quarantined past the retry threshold. Any nonzero pages — funds are stranded and only an upgrade-authority rescue can move them. See CrankerFlowStuckPoisoned runbook.",
+      "targets": [{ "expr": "cranker_flow_stuck{state=\"poisoned\"}", "refId": "A" }],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        }
+      }
+    },
+    {
       "id": 3,
       "type": "timeseries",
       "title": "Scan iterations / sec",
@@ -76,6 +119,54 @@
       "title": "Flow advances (by leg + transition)",
       "gridPos": { "x": 12, "y": 12, "w": 12, "h": 8 },
       "targets": [{ "expr": "sum by (leg, from_status, to_status) (rate(cranker_flow_advance_total[5m]))", "refId": "A", "legendFormat": "{{leg}} {{from_status}}→{{to_status}}" }]
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Stuck flows (poisoned vs cooldown)",
+      "gridPos": { "x": 0, "y": 20, "w": 12, "h": 8 },
+      "description": "poisoned = quarantined past retry (pages). cooldown = self-healing backoff (warns if >5). A healthy cranker shows both at zero.",
+      "targets": [
+        { "expr": "cranker_flow_stuck{state=\"poisoned\"}", "refId": "A", "legendFormat": "poisoned" },
+        { "expr": "cranker_flow_stuck{state=\"cooldown\"}", "refId": "B", "legendFormat": "cooldown" }
+      ]
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Balance poll age (per chain)",
+      "gridPos": { "x": 12, "y": 20, "w": 12, "h": 8 },
+      "description": "Seconds since the last successful balance poll. Flatlining at +Inf means the poller never succeeded; climbing means the chain is degraded. The LowSol/LowFogo alerts cannot fire while this is stale.",
+      "targets": [
+        { "expr": "cranker_balance_poll_age_seconds{chain=\"solana\"}", "refId": "A", "legendFormat": "solana" },
+        { "expr": "cranker_balance_poll_age_seconds{chain=\"fogo\"}", "refId": "B", "legendFormat": "fogo" }
+      ]
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "RPC errors (by endpoint + kind)",
+      "gridPos": { "x": 0, "y": 28, "w": 12, "h": 8 },
+      "targets": [{ "expr": "sum by (endpoint, kind) (rate(cranker_rpc_errors_total[5m]))", "refId": "A", "legendFormat": "{{endpoint}}/{{kind}}" }]
+    },
+    {
+      "id": 12,
+      "type": "stat",
+      "title": "WebSocket subscription alive",
+      "gridPos": { "x": 12, "y": 28, "w": 6, "h": 4 },
+      "description": "1 = live VAA subscription healthy. 0 = scanner blind to new VAAs, falling back to the slower Wormholescan poll.",
+      "targets": [{ "expr": "cranker_ws_subscription_alive", "refId": "A" }],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          }
+        }
+      }
     }
   ]
 }
