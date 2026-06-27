@@ -17,7 +17,7 @@
     "@anchor-lang/core": "^1.1.2",
     "@fogo-yield/cranker": "workspace:*",
     "@fogo-yield/sdk": "workspace:*",
-    "@noble/hashes": "^1.8.0",
+    "@noble/hashes": "^2.2.0",
     "@solana/spl-token": "^0.4.13",
     "@solana/web3.js": "^1.98.4",
     "@wormhole-foundation/sdk-base": "^4.18.0",
