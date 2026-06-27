@@ -118,7 +118,14 @@ export async function receive(
       minSwapOut = input.minSwapOut
     } else {
       const cached = ctx.userWalletCache.get(input.fogoTx)
-      let matched = cached ?? null
+      // Keyed on the FOGO tx, but one tx can emit several VAAs with different
+      // recipients; only reuse a cached candidate if it derives THIS VAA's
+      // recipient, else re-recover — otherwise a withdraw (no recipient guard
+      // below) could submit a guaranteed-revert against the wrong wallet/floor.
+      let matched
+        = cached && deriveInboxAuthority(cached.userWallet, cached.minSwapOut).equals(resolved.recipientOnSolana)
+          ? cached
+          : null
       if (!matched) {
         const candidates = await withTimeout(
           recoverWalletAndMinOutCandidates(ctx.fogoConnection, input.fogoTx),
