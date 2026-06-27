@@ -16,8 +16,8 @@ importers:
   .:
     dependencies:
       '@anchor-lang/core':
-        specifier: ^1.0.2
-        version: 1.0.2(bufferutil@4.1.0)(typescript@6.0.3)(utf-8-validate@6.0.6)
+        specifier: ^1.1.2
+        version: 1.1.2(bufferutil@4.1.0)(typescript@6.0.3)(utf-8-validate@6.0.6)
       '@fogo-yield/sdk':
         specifier: workspace:*
         version: link:packages/sdk
@@ -196,6 +196,12 @@ packages:
     peerDependencies:
       '@solana/web3.js': ^1.69.0
 
+  '@anchor-lang/borsh@1.1.2':
+    resolution: {integrity: sha512-ilYszz4tZjBc2Kszdq/HIaiYozZuAl8ESUI/PvrHl5PvgaD5WPThVe44aDRcDDDY5Cz2Rdbqa+rlGwWW5i25cQ==}
+    engines: {node: '>=10'}
+    peerDependencies:
+      '@solana/web3.js': ^1.69.1
+
   '@anchor-lang/core@1.0.0':
     resolution: {integrity: sha512-YHJQCJNQwF1M1M5VNNOj1DuR7B9v7f/6I9NkFYty7HAbpb3+1HpuDD7nOqI+X3CafXzteWGWZE2kn+Ts7PBKNQ==}
     engines: {node: '>=17'}
@@ -204,12 +210,20 @@ packages:
     resolution: {integrity: sha512-XZy430qI7s3iJsT46GAcbqyJdxk2MmUo7m0fJUDYmDZSIngI5cbtNo/MAEQ3WC9YqXxesAw7KFKlOkiqNW3e9w==}
     engines: {node: '>=17'}
 
+  '@anchor-lang/core@1.1.2':
+    resolution: {integrity: sha512-rUG9qzxoK1avDtwYBuufiwMm2t18nVt4eU9T35NT8ZzIZ2k9wbUgW9PQ9lEjteem2t/ozyfvjapsLj4algi4pA==}
+    engines: {node: '>=20.18'}
+
   '@anchor-lang/errors@1.0.0':
     resolution: {integrity: sha512-j3ymePewd9Bi6OcXATViRS0IPdPBT8qW4LVM3/hNePH/rZdgi8qDkToiDGuR1fFccfn7t+BrNGudHvcs6JWCFQ==}
     engines: {node: '>=10'}
 
   '@anchor-lang/errors@1.0.2':
     resolution: {integrity: sha512-OZ9kpdUFdSnPzUeUnkeFYsjJbsgq26Sqv6yUljPVynuMJEADNJKL6ORL8Tb8YSVOPqHxoqggiDAelcVogGjKWg==}
+    engines: {node: '>=10'}
+
+  '@anchor-lang/errors@1.1.2':
+    resolution: {integrity: sha512-+l5fLYF79t7LAYz+YbjjLzmjj6U1za6Q0cH4GBMWx4vUijlPTkm9Oj/cyDPLJG6Hsx+VFxceh7/+qbca5nnEmg==}
     engines: {node: '>=10'}
 
   '@antfu/eslint-config@9.1.0':
@@ -278,10 +292,6 @@ packages:
 
   '@babel/helper-string-parser@7.27.1':
     resolution: {integrity: sha512-qMlSxKbpRlAridDExk92nSobyDdpPijUq2DW6oDnUqd0iOGxmQjyqhMIihI9+zv4LPyZdRje2cavWPbCbWm3eA==}
-    engines: {node: '>=6.9.0'}
-
-  '@babel/helper-validator-identifier@7.28.5':
-    resolution: {integrity: sha512-qSs4ifwzKJSV39ucNjsvc6WVHs6b7S03sOh2OcHF9UHfVPqWWALUsNUVzhSBiItjRZoLHx7nIarVjqKVusUZ1Q==}
     engines: {node: '>=6.9.0'}
 
   '@babel/helper-validator-identifier@7.29.7':
@@ -3389,7 +3399,7 @@ snapshots:
       bn.js: 5.2.3
       buffer-layout: 1.2.2
 
-  '@anchor-lang/borsh@1.0.2(@solana/web3.js@1.98.4(bufferutil@4.1.0)(typescript@6.0.3)(utf-8-validate@6.0.6))':
+  '@anchor-lang/borsh@1.1.2(@solana/web3.js@1.98.4(bufferutil@4.1.0)(typescript@6.0.3)(utf-8-validate@6.0.6))':
     dependencies:
       '@solana/web3.js': 1.98.4(bufferutil@4.1.0)(typescript@6.0.3)(utf-8-validate@6.0.6)
       bn.js: 5.2.3
@@ -3437,17 +3447,15 @@ snapshots:
       - typescript
       - utf-8-validate
 
-  '@anchor-lang/core@1.0.2(bufferutil@4.1.0)(typescript@6.0.3)(utf-8-validate@6.0.6)':
+  '@anchor-lang/core@1.1.2(bufferutil@4.1.0)(typescript@6.0.3)(utf-8-validate@6.0.6)':
     dependencies:
-      '@anchor-lang/borsh': 1.0.2(@solana/web3.js@1.98.4(bufferutil@4.1.0)(typescript@6.0.3)(utf-8-validate@6.0.6))
-      '@anchor-lang/errors': 1.0.2
+      '@anchor-lang/borsh': 1.1.2(@solana/web3.js@1.98.4(bufferutil@4.1.0)(typescript@6.0.3)(utf-8-validate@6.0.6))
+      '@anchor-lang/errors': 1.1.2
       '@noble/hashes': 1.8.0
       '@solana/web3.js': 1.98.4(bufferutil@4.1.0)(typescript@6.0.3)(utf-8-validate@6.0.6)
       bn.js: 5.2.3
       bs58: 4.0.1
       buffer-layout: 1.2.2
-      camelcase: 6.3.0
-      cross-fetch: 3.2.0
       eventemitter3: 4.0.7
       pako: 2.1.0
       superstruct: 0.15.5
@@ -3461,6 +3469,8 @@ snapshots:
   '@anchor-lang/errors@1.0.0': {}
 
   '@anchor-lang/errors@1.0.2': {}
+
+  '@anchor-lang/errors@1.1.2': {}
 
   '@antfu/eslint-config@9.1.0(@eslint-react/eslint-plugin@5.9.5(eslint@10.6.0)(typescript@6.0.3))(@typescript-eslint/rule-tester@8.57.2(eslint@10.6.0)(typescript@6.0.3))(@typescript-eslint/typescript-estree@8.62.0(typescript@6.0.3))(@typescript-eslint/utils@8.62.0(eslint@10.6.0)(typescript@6.0.3))(@vue/compiler-sfc@3.5.31)(eslint-plugin-format@2.0.1(eslint@10.6.0))(eslint-plugin-react-refresh@0.5.3(eslint@10.6.0))(eslint@10.6.0)(typescript@6.0.3)(vitest@4.1.9(@opentelemetry/api@1.9.1)(@types/node@25.6.0)(vite@8.0.3(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@25.6.0)(esbuild@0.27.4)(yaml@2.9.0)))':
     dependencies:
@@ -3524,8 +3534,6 @@ snapshots:
 
   '@babel/helper-string-parser@7.27.1': {}
 
-  '@babel/helper-validator-identifier@7.28.5': {}
-
   '@babel/helper-validator-identifier@7.29.7': {}
 
   '@babel/parser@7.29.2':
@@ -3537,7 +3545,7 @@ snapshots:
   '@babel/types@7.29.0':
     dependencies:
       '@babel/helper-string-parser': 7.27.1
-      '@babel/helper-validator-identifier': 7.28.5
+      '@babel/helper-validator-identifier': 7.29.7
 
   '@clack/core@1.4.2':
     dependencies:
@@ -4607,8 +4615,8 @@ snapshots:
 
   '@typescript-eslint/project-service@8.57.2(typescript@6.0.3)':
     dependencies:
-      '@typescript-eslint/tsconfig-utils': 8.59.3(typescript@6.0.3)
-      '@typescript-eslint/types': 8.59.3
+      '@typescript-eslint/tsconfig-utils': 8.62.0(typescript@6.0.3)
+      '@typescript-eslint/types': 8.62.0
       debug: 4.4.3
       typescript: 6.0.3
     transitivePeerDependencies:
@@ -4700,7 +4708,7 @@ snapshots:
       debug: 4.4.3
       minimatch: 10.2.4
       semver: 7.7.4
-      tinyglobby: 0.2.15
+      tinyglobby: 0.2.17
       ts-api-utils: 2.5.0(typescript@6.0.3)
       typescript: 6.0.3
     transitivePeerDependencies:
@@ -6929,7 +6937,7 @@ snapshots:
       picomatch: 4.0.4
       postcss: 8.5.8
       rolldown: 1.0.0-rc.12(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)
-      tinyglobby: 0.2.15
+      tinyglobby: 0.2.17
     optionalDependencies:
       '@types/node': 25.6.0
       esbuild: 0.27.4
