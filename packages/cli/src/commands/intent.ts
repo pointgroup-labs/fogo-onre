@@ -115,7 +115,7 @@ export function intentCommands(): Command {
       // Pre-flight 1: fork program deployed + executable.
       const programAcct = await connection.getAccountInfo(ONRE_INTENT_PROGRAM_ID)
       if (!programAcct) {
-        throw new Error(`intent_transfer program ${ONRE_INTENT_PROGRAM_ID.toBase58()} not found on ${connection.rpcEndpoint} (wrong --url? expected FOGO)`)
+        throw new Error(`intent_transfer program ${ONRE_INTENT_PROGRAM_ID.toBase58()} not found on ${connection.rpcEndpoint} — wrong cluster? intent commands need a FOGO RPC, e.g. --url https://mainnet.fogo.io`)
       }
       if (!programAcct.executable) {
         throw new Error(`account at ${ONRE_INTENT_PROGRAM_ID.toBase58()} is not executable`)

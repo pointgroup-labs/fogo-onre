@@ -68,7 +68,7 @@ export function relayerCommands(): Command {
         throw new Error(`GlobalConfig already exists at ${client.globalConfigPda.toBase58()}`)
       }
 
-      console.log(chalk.cyan('Initialize plan'))
+      console.log(chalk.cyan('Bootstrap plan'))
       console.log(chalk.dim(`  globalConfigPda: ${client.globalConfigPda.toBase58()}  (will be created)`))
       console.log(chalk.dim(`  admin:            ${admin.toBase58()}`))
 
@@ -110,8 +110,8 @@ export function relayerCommands(): Command {
       const feeVault = opts.feeVault
         ? new PublicKey(opts.feeVault)
         : getAssociatedTokenAddressSync(onycMint, keypair.publicKey)
-      const depositFeeBps = Number(opts.depositFeeBps)
-      const withdrawFeeBps = Number(opts.withdrawFeeBps)
+      const depositFeeBps = parseFeeBps('deposit-fee-bps', opts.depositFeeBps)
+      const withdrawFeeBps = parseFeeBps('withdraw-fee-bps', opts.withdrawFeeBps)
       const authority = keypair.publicKey
       const intentPrograms = parseIntentPrograms(opts.intentPrograms)
 
@@ -147,34 +147,7 @@ export function relayerCommands(): Command {
       }
 
       // Pre-flight 4: feeVault is an ONyc SPL token account, not the relayer's own ATA.
-      const feeVaultAcct = await connection.getAccountInfo(feeVault)
-      if (!feeVaultAcct) {
-        throw new Error(`feeVault ${feeVault.toBase58()} does not exist`)
-      }
-      if (!feeVaultAcct.owner.equals(TOKEN_PROGRAM_ID)) {
-        throw new Error(`feeVault ${feeVault.toBase58()} is not owned by SPL Token program`)
-      }
-      const tokenAcct = AccountLayout.decode(feeVaultAcct.data)
-      const fvMint = new PublicKey(tokenAcct.mint)
-      const fvOwner = new PublicKey(tokenAcct.owner)
-      if (!fvMint.equals(onycMint)) {
-        throw new Error(`feeVault holds mint ${fvMint.toBase58()}, expected ${onycMint.toBase58()}`)
-      }
-      if (fvOwner.equals(client.authorityPda)) {
-        throw new Error(
-          `feeVault is owned by relayer authority PDA — would alias the operating ATA. Use a separately-owned ONyc account.`,
-        )
-      }
-
-      // Pre-flight 5: fee bps within bounds.
-      for (const [name, bps] of [
-        ['deposit-fee-bps', depositFeeBps],
-        ['withdraw-fee-bps', withdrawFeeBps],
-      ] as const) {
-        if (!Number.isInteger(bps) || bps < 0 || bps > MAX_FEE_BPS) {
-          throw new Error(`${name} = ${bps} out of range [0, ${MAX_FEE_BPS}]`)
-        }
-      }
+      const fvOwner = await checkFeeVault(connection, client.authorityPda, onycMint, feeVault)
 
       console.log(chalk.cyan('Initialize plan'))
       console.log(chalk.dim(`  configPda:        ${client.configPda.toBase58()}  (will be created)`))
@@ -229,7 +202,7 @@ export function relayerCommands(): Command {
       clearPendingAuthority?: boolean
       confirm?: boolean
     }) => {
-      const { keypair, client } = useContext()
+      const { connection, keypair, client } = useContext()
 
       const config = await client.fetchConfig()
       if (!config.authority.equals(keypair.publicKey)) {
@@ -239,23 +212,18 @@ export function relayerCommands(): Command {
       }
 
       const feeVault = opts.feeVault ? new PublicKey(opts.feeVault) : undefined
-      const depositFeeBps = opts.depositFeeBps !== undefined ? Number(opts.depositFeeBps) : undefined
-      const withdrawFeeBps = opts.withdrawFeeBps !== undefined ? Number(opts.withdrawFeeBps) : undefined
+      const depositFeeBps = opts.depositFeeBps !== undefined ? parseFeeBps('deposit-fee-bps', opts.depositFeeBps) : undefined
+      const withdrawFeeBps = opts.withdrawFeeBps !== undefined ? parseFeeBps('withdraw-fee-bps', opts.withdrawFeeBps) : undefined
       const newAuthority = opts.clearPendingAuthority
         ? null
         : opts.newAuthority
           ? new PublicKey(opts.newAuthority)
           : undefined
 
-      // Validate fee bounds locally; on-chain is the source of truth.
-      for (const [name, bps] of [
-        ['deposit-fee-bps', depositFeeBps],
-        ['withdraw-fee-bps', withdrawFeeBps],
-      ] as const) {
-        if (bps !== undefined && (!Number.isInteger(bps) || bps < 0 || bps > MAX_FEE_BPS)) {
-          throw new Error(`${name} = ${bps} out of range [0, ${MAX_FEE_BPS}]`)
-        }
+      if (feeVault) {
+        await checkFeeVault(connection, client.authorityPda, config.assetMint, feeVault)
       }
+
       const noChange
         = feeVault === undefined
           && depositFeeBps === undefined
@@ -309,10 +277,10 @@ export function relayerCommands(): Command {
     .requiredOption('--new-admin <pubkey>', 'Pubkey to stage as pending admin')
     .option('--confirm', 'Actually broadcast the transaction (default: dry-run)')
     .action(async (opts: { newAdmin: string, confirm?: boolean }) => {
-      const { keypair, client } = useContext()
+      const { connection, keypair, client } = useContext()
 
       const newAdmin = new PublicKey(opts.newAdmin)
-      const config = await client.program.account.globalConfig.fetch(client.globalConfigPda)
+      const config = await fetchGlobalConfig(connection, client)
       if (!config.admin.equals(keypair.publicKey)) {
         throw new Error(
           `signer ${keypair.publicKey.toBase58()} is not the current admin (${config.admin.toBase58()})`,
@@ -343,9 +311,9 @@ export function relayerCommands(): Command {
     .description('Claim the GlobalConfig admin role (step 2, must be signed by the pending admin)')
     .option('--confirm', 'Actually broadcast the transaction (default: dry-run)')
     .action(async (opts: { confirm?: boolean }) => {
-      const { keypair, client } = useContext()
+      const { connection, keypair, client } = useContext()
 
-      const config = await client.program.account.globalConfig.fetch(client.globalConfigPda)
+      const config = await fetchGlobalConfig(connection, client)
       if (!config.pendingAdmin) {
         throw new Error('no pending admin to accept')
       }
@@ -417,4 +385,60 @@ function parseIntentPrograms(raw?: string): [PublicKey, PublicKey] {
     throw new Error(`--intent-programs expects exactly 2 comma-separated pubkeys, got ${parts.length}`)
   }
   return [new PublicKey(parts[0]), new PublicKey(parts[1])]
+}
+
+/** Strict fee-bps parse: plain non-negative integer in [0, MAX_FEE_BPS]. */
+function parseFeeBps(name: string, raw: string): number {
+  if (!/^\d+$/.test(raw)) {
+    throw new Error(`${name} = "${raw}" is not a plain non-negative integer`)
+  }
+  const bps = Number(raw)
+  if (!Number.isInteger(bps) || bps < 0 || bps > MAX_FEE_BPS) {
+    throw new Error(`${name} = ${bps} out of range [0, ${MAX_FEE_BPS}]`)
+  }
+  return bps
+}
+
+/**
+ * Pre-flight a fee vault: exists, SPL-owned, holds `assetMint`, and is not the
+ * relayer authority PDA's ATA (which would alias the operating account).
+ * Returns the resolved owner for plan display.
+ */
+async function checkFeeVault(
+  connection: ReturnType<typeof useContext>['connection'],
+  authorityPda: PublicKey,
+  assetMint: PublicKey,
+  feeVault: PublicKey,
+): Promise<PublicKey> {
+  const acct = await connection.getAccountInfo(feeVault)
+  if (!acct) {
+    throw new Error(`feeVault ${feeVault.toBase58()} does not exist`)
+  }
+  if (!acct.owner.equals(TOKEN_PROGRAM_ID)) {
+    throw new Error(`feeVault ${feeVault.toBase58()} is not owned by SPL Token program`)
+  }
+  const token = AccountLayout.decode(acct.data)
+  const fvMint = new PublicKey(token.mint)
+  const fvOwner = new PublicKey(token.owner)
+  if (!fvMint.equals(assetMint)) {
+    throw new Error(`feeVault holds mint ${fvMint.toBase58()}, expected ${assetMint.toBase58()}`)
+  }
+  if (fvOwner.equals(authorityPda)) {
+    throw new Error(
+      `feeVault is owned by relayer authority PDA — would alias the operating ATA. Use a separately-owned ONyc account.`,
+    )
+  }
+  return fvOwner
+}
+
+/** Fetch GlobalConfig with a friendly not-found message instead of a raw Anchor throw. */
+async function fetchGlobalConfig(
+  connection: ReturnType<typeof useContext>['connection'],
+  client: ReturnType<typeof useContext>['client'],
+) {
+  const acct = await connection.getAccountInfo(client.globalConfigPda)
+  if (!acct) {
+    throw new Error('GlobalConfig not found — run `relayer bootstrap` first')
+  }
+  return client.program.account.globalConfig.fetch(client.globalConfigPda)
 }
