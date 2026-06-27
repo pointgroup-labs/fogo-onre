@@ -144,6 +144,14 @@ export async function fetchJupiterRoute(p: JupiterRouteParams): Promise<JupiterR
     }
   })
 
+  // Index 1 of `shared_accounts_route` is the `programAuthority` PDA used as
+  // the bounded SPL delegate below; a short list means an unexpected route shape.
+  if (routeAccounts.length < 2) {
+    throw new Error(
+      `jupiter route returned ${routeAccounts.length} accounts; expected shared_accounts_route with programAuthority at index 1`,
+    )
+  }
+
   return {
     ixData,
     routeAccounts,
