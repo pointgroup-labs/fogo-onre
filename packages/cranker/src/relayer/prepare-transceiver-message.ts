@@ -330,7 +330,10 @@ export async function prepareTransceiverMessage(
       // Non-shim mode: iterate core.postVaa generator (verify_signatures
       // + post_vaa, possibly several txs for large VAAs), then build
       // and send a single receive_message tx.
-      for await (const unsigned of ntt.core.postVaa(senderAddress, vaa)) {
+      // The bumped Wormhole SDK types `postVaa` as `VAA<PayloadLiteral>`; our
+      // narrowed `WormholeTransferVaa` is a valid VAA at runtime, so cast to
+      // the method's own param type rather than widen the declaration.
+      for await (const unsigned of ntt.core.postVaa(senderAddress, vaa as unknown as Parameters<typeof ntt.core.postVaa>[1])) {
         const stx = unsigned.transaction
         const inner = stx.transaction
         const extraSigners = stx.signers ?? []
