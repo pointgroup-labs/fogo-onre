@@ -20,7 +20,7 @@ vi.mock('../packages/cranker/src/config', async () => {
 // (ZodEffects.refine, ZodDefault, ZodOptional, ZodCoerce). We walk inward
 // through both `innerType` (ZodDefault/ZodOptional) and `schema` (ZodEffects)
 // until we either find a `_def.defaultValue` function or hit a terminal.
-type ZodAny = { _def: unknown }
+type ZodAny = { _def?: unknown, def?: unknown, description?: string }
 type FieldShape = {
   description?: string
   hasDefault: boolean
@@ -28,17 +28,19 @@ type FieldShape = {
 }
 
 function inspectField(zodType: ZodAny): FieldShape {
-  const outerDef = zodType._def as Record<string, unknown>
-  const description = (outerDef as { description?: string }).description
-  let cursor = zodType
+  // Zod v4 exposes a `.description` getter and `.def` with `defaultValue` as a
+  // plain value; v3 stored both under `_def` and made `defaultValue` a thunk.
+  // Read both shapes so a Zod bump can't silently blank the generated example.
+  const description = zodType.description ?? (zodType._def as { description?: string } | undefined)?.description
+  let cursor: ZodAny = zodType
   for (let depth = 0; depth < 8; depth++) {
-    const d = cursor._def as Record<string, unknown>
-    if (typeof d.defaultValue === 'function') {
-      try {
-        return { description, hasDefault: true, defaultValue: (d.defaultValue as () => unknown)() }
-      } catch {
-        return { description, hasDefault: true, defaultValue: undefined }
-      }
+    const d = (cursor.def ?? cursor._def) as Record<string, unknown> | undefined
+    if (!d) {
+      break
+    }
+    if ('defaultValue' in d) {
+      const raw = d.defaultValue
+      return { description, hasDefault: true, defaultValue: typeof raw === 'function' ? (raw as () => unknown)() : raw }
     }
     // ZodEffects wraps via `schema`; ZodDefault/ZodOptional/ZodCatch via `innerType`.
     const inner = (d.innerType ?? d.schema) as ZodAny | undefined
