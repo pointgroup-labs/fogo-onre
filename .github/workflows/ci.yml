@@ -124,7 +124,14 @@ jobs:
       # Call vitest directly, NOT `pnpm test`: its `pretest` hook reruns
       # `anchor build`, which would defeat the cache above. Local `pnpm
       # test` keeps its rebuild-then-test behavior unchanged.
-      - name: Tests
+      # Typecheck the cli + cranker: both build via tsup (esbuild, no type
+      # check) and vitest transpiles, so tsc here is the only gate that
+      # catches type breaks — e.g. a dependency bump changing an SDK type.
+      - name: Typecheck cli + cranker
         run: |
           pnpm sdk build
-          pnpm exec vitest run
+          pnpm -F @fogo-yield/cli exec tsc --noEmit
+          pnpm -F @fogo-yield/cranker exec tsc --noEmit
+
+      - name: Tests
+        run: pnpm exec vitest run
