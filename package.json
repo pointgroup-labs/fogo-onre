@@ -18,18 +18,18 @@
     "@solana/web3.js": "^1.98.4"
   },
   "devDependencies": {
-    "@antfu/eslint-config": "^9.0.0",
-    "@eslint-react/eslint-plugin": "^5.7.6",
+    "@antfu/eslint-config": "^9.1.0",
+    "@eslint-react/eslint-plugin": "^5.9.5",
     "@noble/hashes": "^2.2.0",
     "@solana/spl-token": "^0.4.14",
     "@types/bn.js": "^5.2.0",
     "anchor-litesvm": "^0.2.1",
     "bs58": "^6.0.0",
-    "eslint": "^10.4.1",
+    "eslint": "^10.6.0",
     "eslint-plugin-format": "^2.0.1",
-    "eslint-plugin-react-refresh": "^0.5.2",
+    "eslint-plugin-react-refresh": "^0.5.3",
     "litesvm": "^0.6.0",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.6"
+    "vitest": "^4.1.9"
   }
 }
