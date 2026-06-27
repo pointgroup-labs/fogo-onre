@@ -1,0 +1,79 @@
+version: 2
+
+# Dependabot keeps the supply-chain surface fresh. PRs target the default
+# branch (main). Grouped to land as few PRs as possible.
+#
+# Anchor / Solana packages (anchor-lang, anchor-spl, solana-*, @anchor-lang/core)
+# are version-locked to the Anchor CLI, Anchor.toml, and the prebuilt CLI in
+# ci.yml — a lone bump breaks `anchor build` — so they are ignored here and
+# bumped by hand in lockstep with the toolchain. The Rust channel lives in
+# rust-toolchain.toml, which no ecosystem below manages.
+updates:
+  - package-ecosystem: github-actions
+    open-pull-requests-limit: 5
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '08:00'
+      timezone: Etc/UTC
+    commit-message:
+      prefix: ci
+      include: scope
+    labels:
+      - dependencies
+      - github-actions
+    groups:
+      actions-minor-patch:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: npm
+    open-pull-requests-limit: 5
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '08:00'
+      timezone: Etc/UTC
+    commit-message:
+      prefix: chore
+      prefix-development: chore
+      include: scope
+    labels:
+      - dependencies
+      - npm
+    ignore:
+      - dependency-name: '@anchor-lang/core'
+    groups:
+      npm-minor-patch:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: cargo
+    open-pull-requests-limit: 7
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '08:00'
+      timezone: Etc/UTC
+    commit-message:
+      prefix: chore
+      prefix-development: chore
+      include: scope
+    labels:
+      - dependencies
+      - rust
+    ignore:
+      - dependency-name: anchor-lang
+      - dependency-name: anchor-spl
+      - dependency-name: solana-*
+    # Patch bumps are usually safe and noisy — group them. Minors land
+    # individually so we can read the changelog before merging.
+    groups:
+      cargo-patch:
+        update-types:
+          - patch
