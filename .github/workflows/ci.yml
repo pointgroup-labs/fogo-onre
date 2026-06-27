@@ -17,7 +17,7 @@ jobs:
     name: rust (fmt + clippy + unit tests)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       # Toolchain version AND components are pinned by `rust-toolchain.toml`.
       # The action installs `stable` first; rustup honours the toml override
@@ -45,7 +45,7 @@ jobs:
     name: intent-fork (audit-carryover source-diff gate)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       # Asserts the vendored fork `src/` differs from the pinned upstream
       # commit by ONLY `declare_id!`. The reproducible-build hash half of
@@ -61,7 +61,7 @@ jobs:
     name: typescript (lint + tests)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       # Version derives from `packageManager` in package.json (single source
       # of truth) — do not also set `version:` here or action-setup errors.

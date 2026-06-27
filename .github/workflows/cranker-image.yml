@@ -30,7 +30,7 @@ jobs:
     # runner-hour budget.
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       # QEMU lets a single amd64 runner emit arm64 layers via emulation.
       # Cranker is Node-only — no native compile in the critical path —
