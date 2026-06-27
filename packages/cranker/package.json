@@ -27,7 +27,7 @@
     "@wormhole-foundation/sdk-definitions-ntt": "^7.2.0",
     "@wormhole-foundation/sdk-solana-ntt": "^7.2.0",
     "prom-client": "^15.1.3",
-    "zod": "^3.23.8"
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/node": "^25.6.0",
