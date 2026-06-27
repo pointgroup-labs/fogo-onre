@@ -371,6 +371,39 @@ export function relayerCommands(): Command {
       console.log(chalk.dim(`  tx: ${sig}`))
     })
 
+  relayer
+    .command('accept-authority')
+    .description('Claim the PairConfig authority role (step 2, must be signed by the pending authority)')
+    .option('--confirm', 'Actually broadcast the transaction (default: dry-run)')
+    .action(async (opts: { confirm?: boolean }) => {
+      const { keypair, client } = useContext()
+
+      const config = await client.fetchConfig()
+      if (!config.pendingAuthority) {
+        throw new Error('no pending authority to accept')
+      }
+      if (!config.pendingAuthority.equals(keypair.publicKey)) {
+        throw new Error(
+          `signer ${keypair.publicKey.toBase58()} is not the pending authority (${config.pendingAuthority.toBase58()})`,
+        )
+      }
+
+      console.log(chalk.cyan('Accept-authority plan'))
+      console.log(chalk.dim(`  current authority:          ${config.authority.toBase58()}`))
+      console.log(chalk.dim(`  signer (pending authority): ${keypair.publicKey.toBase58()}  (becomes authority)`))
+
+      if (!opts.confirm) {
+        console.log()
+        console.log(chalk.yellow('dry-run only. Re-run with --confirm to broadcast.'))
+        return
+      }
+
+      console.log()
+      const sig = await runTx(() => client.acceptAuthority().rpc())
+      console.log(chalk.green('Authority role accepted'))
+      console.log(chalk.dim(`  tx: ${sig}`))
+    })
+
   return relayer
 }
 
