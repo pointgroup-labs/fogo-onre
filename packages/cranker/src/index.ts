@@ -81,30 +81,61 @@ export function startBalancePoller(args: {
 }
 
 /**
- * Best-effort WebSocket-alive flag: set to 1 once a slot subscription lands,
- * 0 on error. Signals the operator when the WS is dead and the daemon is
- * falling back to polling.
+ * Best-effort WebSocket-alive flag: set to 1 while a slot subscription is
+ * delivering, 0 when dead. Re-arms the subscription on a fixed interval so a
+ * dropped socket recovers instead of latching the gauge at 0 forever.
+ * Signals the operator when the WS is dead and the daemon is falling back to
+ * polling.
  */
 export function startWsKeepalive(args: {
   connection: Connection
   metrics: Metrics
   log: Logger
   signal: AbortSignal
+  resubscribeIntervalMs?: number
 }): void {
+  const resubscribeIntervalMs = args.resubscribeIntervalMs ?? 30_000
   let subId: number | undefined
-  try {
-    subId = args.connection.onSlotChange(() => {
-      args.metrics.wsAlive.set(1)
-    })
-  } catch (err) {
-    args.log.warn('ws subscribe failed', errorFields(err))
-    args.metrics.wsAlive.set(0)
-    return
-  }
-  args.signal.addEventListener('abort', () => {
+  let lastTickAt = 0
+
+  const removeListener = (): void => {
     if (subId !== undefined) {
-      args.connection.removeSlotChangeListener(subId).catch(() => undefined)
+      const id = subId
+      subId = undefined
+      args.connection.removeSlotChangeListener(id).catch(() => undefined)
     }
+  }
+  const subscribe = (): void => {
+    try {
+      subId = args.connection.onSlotChange(() => {
+        lastTickAt = Date.now()
+        args.metrics.wsAlive.set(1)
+      })
+    } catch (err) {
+      args.log.warn('ws subscribe failed', errorFields(err))
+      args.metrics.wsAlive.set(0)
+    }
+  }
+  subscribe()
+
+  // No slot ticks within the interval ⇒ socket is dead: drop the gauge and
+  // re-subscribe (the prior listener never recovers on its own).
+  const handle = setInterval(() => {
+    if (args.signal.aborted) {
+      clearInterval(handle)
+      return
+    }
+    if (subId === undefined || (lastTickAt !== 0 && Date.now() - lastTickAt > resubscribeIntervalMs)) {
+      args.metrics.wsAlive.set(0)
+      removeListener()
+      subscribe()
+    }
+  }, resubscribeIntervalMs)
+  handle.unref()
+
+  args.signal.addEventListener('abort', () => {
+    clearInterval(handle)
+    removeListener()
   }, { once: true })
 }
 

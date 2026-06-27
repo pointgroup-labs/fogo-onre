@@ -127,11 +127,22 @@ export async function receive(
           ? cached
           : null
       if (!matched) {
-        const candidates = await withTimeout(
-          recoverWalletAndMinOutCandidates(ctx.fogoConnection, input.fogoTx),
-          ctx.rpcTimeoutMs,
-          'recoverWalletAndMinOutCandidates',
-        ).catch(() => [])
+        // Distinguish a thrown RPC/timeout (retry + count it) from a
+        // successful-but-empty recovery (genuinely not an OnRe tx → noop).
+        let candidates
+        try {
+          candidates = await withTimeout(
+            recoverWalletAndMinOutCandidates(ctx.fogoConnection, input.fogoTx),
+            ctx.rpcTimeoutMs,
+            'recoverWalletAndMinOutCandidates',
+          )
+        } catch (err) {
+          return {
+            kind: 'error',
+            error: err instanceof Error ? err : new Error(String(err)),
+            partialSignatures: [],
+          }
+        }
         // Pick the candidate whose inbox PDA derives the VAA recipient —
         // robust to extra/decoy memos or bridge ixs in the source tx.
         matched = candidates.find(c =>
